@@ -323,6 +323,33 @@ class ClientRepo(Base):
         }
 
 
+class ClientEnvVar(Base):
+    """客户端环境变量配置表"""
+    __tablename__ = 'ai_task_client_env_vars'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    key = Column(String(128), nullable=False, comment='环境变量名')
+    value = Column(Text, nullable=True, comment='环境变量值')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_env_vars_client_id', 'client_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'key': self.key,
+            'value': self.value or '',
+            'created_at': str(self.created_at) if self.created_at else None,
+            'updated_at': str(self.updated_at) if self.updated_at else None
+        }
+
+
 class UserSecret(Base):
     """用户秘钥表"""
     __tablename__ = 'ai_task_user_secrets'

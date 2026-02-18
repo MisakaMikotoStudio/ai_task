@@ -12,7 +12,8 @@ from dao.client_dao import (
     delete_client, update_client,
     get_client_repos, update_client_repos, get_client_with_permission,
     update_repo_default_branch, get_repo_by_id, get_client_by_id_no_user_check,
-    get_clients_paginated, get_usable_clients_for_task
+    get_clients_paginated, get_usable_clients_for_task,
+    get_client_env_vars, create_client_env_var, update_client_env_var, delete_client_env_var
 )
 from dao.heartbeat_dao import update_heartbeat, get_heartbeats_by_user
 from routes.auth_plugin import login_required
@@ -20,7 +21,7 @@ from routes.auth_plugin import login_required
 client_bp = Blueprint('client', __name__)
 
 # Agent可选项列表（后端写死）
-AVAILABLE_AGENTS = ['Claude Code']
+AVAILABLE_AGENTS = ['Claude Code', 'cloud']
 
 
 @client_bp.route('/agents', methods=['GET'])
@@ -82,7 +83,7 @@ def create_client_api():
     name = data.get('name', '').strip()
     types = data.get('types', [])
     is_public = data.get('is_public', False)
-    agent = data.get('agent', 'Claude Code')
+    agent = data.get('agent', 'cloud')
 
     if not name:
         return jsonify({'code': 400, 'message': '客户端名称不能为空'}), 400
@@ -535,6 +536,8 @@ def get_client_config_api(client_id):
 
     # 获取仓库配置
     repos = get_client_repos(client_id)
+    # 获取环境变量（仅 cloud agent 有效）
+    env_vars = get_client_env_vars(client_id)
 
     return jsonify({
         'code': 200,
@@ -542,9 +545,81 @@ def get_client_config_api(client_id):
             'id': client.id,
             'name': client.name,
             'agent': client.agent or 'Claude Code',
-            'repos': [repo.to_dict() for repo in repos]
+            'repos': [repo.to_dict() for repo in repos],
+            'env_vars': [ev.to_dict() for ev in env_vars]
         }
     })
+
+
+@client_bp.route('/<int:client_id>/env-vars', methods=['GET'])
+@login_required
+def get_client_env_vars_api(client_id):
+    """获取客户端环境变量列表"""
+    if not get_client_with_permission(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    env_vars = get_client_env_vars(client_id)
+    return jsonify({
+        'code': 200,
+        'data': [ev.to_dict() for ev in env_vars]
+    })
+
+
+@client_bp.route('/<int:client_id>/env-vars', methods=['POST'])
+@login_required
+def create_client_env_var_api(client_id):
+    """新增客户端环境变量"""
+    if not get_client_by_id(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    key = data.get('key', '').strip()
+    value = data.get('value', '')
+
+    if not key:
+        return jsonify({'code': 400, 'message': '环境变量名不能为空'}), 400
+
+    env_var_id = create_client_env_var(client_id, key, value)
+    return jsonify({'code': 201, 'message': '环境变量创建成功', 'data': {'id': env_var_id}}), 201
+
+
+@client_bp.route('/<int:client_id>/env-vars/<int:env_var_id>', methods=['PUT'])
+@login_required
+def update_client_env_var_api(client_id, env_var_id):
+    """更新客户端环境变量"""
+    if not get_client_by_id(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    key = data.get('key', '').strip()
+    value = data.get('value', '')
+
+    if not key:
+        return jsonify({'code': 400, 'message': '环境变量名不能为空'}), 400
+
+    if not update_client_env_var(env_var_id, client_id, key, value):
+        return jsonify({'code': 404, 'message': '环境变量不存在'}), 404
+
+    return jsonify({'code': 200, 'message': '环境变量更新成功'})
+
+
+@client_bp.route('/<int:client_id>/env-vars/<int:env_var_id>', methods=['DELETE'])
+@login_required
+def delete_client_env_var_api(client_id, env_var_id):
+    """软删除客户端环境变量"""
+    if not get_client_by_id(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    if not delete_client_env_var(env_var_id, client_id):
+        return jsonify({'code': 404, 'message': '环境变量不存在'}), 404
+
+    return jsonify({'code': 200, 'message': '环境变量删除成功'})
 
 
 @client_bp.route('/<int:client_id>/repos/<int:repo_id>/default-branch', methods=['PATCH'])

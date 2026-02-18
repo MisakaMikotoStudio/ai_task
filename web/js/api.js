@@ -181,6 +181,34 @@ const clientAPI = {
     // 获取心跳记录
     async getHeartbeats() {
         return request('/client/heartbeats');
+    },
+
+    // 获取环境变量列表
+    async getEnvVars(id) {
+        return request(`/client/${id}/env-vars`);
+    },
+
+    // 新增环境变量
+    async createEnvVar(id, key, value) {
+        return request(`/client/${id}/env-vars`, {
+            method: 'POST',
+            body: JSON.stringify({ key, value })
+        });
+    },
+
+    // 更新环境变量
+    async updateEnvVar(id, envVarId, key, value) {
+        return request(`/client/${id}/env-vars/${envVarId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ key, value })
+        });
+    },
+
+    // 删除环境变量
+    async deleteEnvVar(id, envVarId) {
+        return request(`/client/${id}/env-vars/${envVarId}`, {
+            method: 'DELETE'
+        });
     }
 };
 

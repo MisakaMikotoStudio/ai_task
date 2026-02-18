@@ -6,9 +6,18 @@
 
 from dao.user_dao import (
     create_user, get_user_by_name, get_user_by_id,
-    update_last_access, check_user_exists
+    update_last_access, check_user_exists,
+    count_user_secrets, create_user_secret
 )
 from dao.session_dao import create_session, get_session_by_token
+
+CLOUD_SECRET_NAME = '云客户端专用(请勿删除)'
+
+
+def _ensure_cloud_secret(user_id: int):
+    """如果用户当前没有任何秘钥，自动创建云客户端专用秘钥"""
+    if count_user_secrets(user_id) == 0:
+        create_user_secret(user_id, CLOUD_SECRET_NAME)
 
 class UserInfo:
     def __init__(self, id: int, name: str, token: str):
@@ -55,6 +64,7 @@ def register_user(name: str, password_hash: str) -> dict:
     
     user_id = create_user(name, password_hash)
     token = create_session(user_id).token
+    _ensure_cloud_secret(user_id)
     
     return UserInfo(user_id, name, token)
 
@@ -93,6 +103,7 @@ def login_user(name: str, password_hash: str) -> UserInfo:
     
     update_last_access(user.id)
     token = create_session(user.id).token
+    _ensure_cloud_secret(user.id)
     
     return UserInfo(user.id, user.name, token)
 

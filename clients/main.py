@@ -99,16 +99,25 @@ def main():
                         help='Client ID for authentication')
     args = parser.parse_args()
 
-    # 设置 cache 目录（在当前项目同级目录下）
-    cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ai_task_cache")
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir, exist_ok=True)
-    cache_dir = os.path.join(cache_dir, str(args.client_id))
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir, exist_ok=True)
     # 从云端加载客户端配置
-    config = ClientConfig(apiserver_url=args.apiserver, client_id=args.client_id, secret=args.secret, cache_dir=cache_dir)
+    config = ClientConfig(apiserver_url=args.apiserver, client_id=args.client_id, secret=args.secret)
+    if os.environ.get('CLOUD_AGENT') == '1':
+        cache_dir = "/workspace"
+    else:
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ai_task_cache")
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, exist_ok=True)
+        cache_dir = os.path.join(cache_dir, str(args.client_id))
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, exist_ok=True)
+    config.set_cache_dir(cache_dir)
     config.sync_config()
+    # env_vars 在 sync_config() 后才从服务端拉取，cloud agent 在此注入环境变量
+    if os.environ.get('CLOUD_AGENT') == '1' and config.env_vars:
+        logger.info(f"检测到 cloud agent，注入 {len(config.env_vars)} 个环境变量")
+        for key, value in config.env_vars.items():
+            os.environ[key] = value
+            logger.info(f"  设置环境变量: {key}")
     config.check_config()
     # 启动前先做一次心跳上报，失败则退出
     try:

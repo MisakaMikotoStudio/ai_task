@@ -337,7 +337,7 @@ function initForms() {
     
     // 添加客户端按钮
     document.getElementById('add-client-btn').addEventListener('click', () => {
-        showAddClientModal();
+        openClientConfig(null, 'add');
     });
     
     // 添加任务按钮
@@ -643,11 +643,10 @@ function appendClients(clients) {
 function renderClientRow(client) {
     let actionsHtml = '';
     if (client.editable) {
-        actionsHtml = `<button class="btn-action btn-edit" onclick="editClient(${client.id})">编辑</button>
+        actionsHtml = `<button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>`;
     } else if (client.is_public) {
-        // 公开客户端但非创建者，显示查看按钮
-        actionsHtml = `<button class="btn-action btn-info" onclick="viewClient(${client.id})">查看</button>`;
+        actionsHtml = `<button class="btn-action btn-info" onclick="openClientConfig(${client.id}, 'view')">查看</button>`;
     } else {
         actionsHtml = '<span class="text-muted">只读</span>';
     }
@@ -670,175 +669,6 @@ function getHeartbeatClass(lastSync) {
     return diff < 300000 ? 'online' : 'offline'; // 5分钟内为在线
 }
 
-async function showAddClientModal() {
-    // 获取可用的Agent列表
-    let agentOptions = ['Claude Code'];
-    try {
-        const result = await clientAPI.getAgents();
-        if (result.data && result.data.length > 0) {
-            agentOptions = result.data;
-        }
-    } catch (error) {
-        console.warn('获取Agent列表失败，使用默认值:', error);
-    }
-
-    const agentOptionsHtml = agentOptions.map(agent => 
-        `<option value="${escapeHtml(agent)}">${escapeHtml(agent)}</option>`
-    ).join('');
-
-    const content = `
-        <form id="add-client-form">
-            <div class="form-row">
-                <div class="form-group form-group-half">
-                    <label>客户端名称</label>
-                    <input type="text" id="client-name" placeholder="请输入名称（最多16个字符）" maxlength="16" required>
-                </div>
-                <div class="form-group form-group-quarter">
-                    <label>是否公开</label>
-                    <select id="client-is-public" class="status-select">
-                        <option value="false">否</option>
-                        <option value="true">是</option>
-                    </select>
-                </div>
-                <div class="form-group form-group-quarter">
-                    <label>Agent</label>
-                    <select id="client-agent" class="status-select">
-                        ${agentOptionsHtml}
-                    </select>
-                </div>
-            </div>
-            <div class="form-group">
-                <div class="label-with-action">
-                    <label>仓库配置 <span class="text-muted">(必须指定一个文档仓库)</span></label>
-                    <button type="button" id="add-repo-btn" class="btn-small btn-add">+ 添加仓库</button>
-                </div>
-                <div class="repos-waterfall" id="repos-waterfall">
-                    <!-- 动态填充 -->
-                </div>
-            </div>
-            <button type="submit" class="btn-primary">创建</button>
-        </form>
-    `;
-
-    openModal('添加客户端', content, 'modal-lg');
-
-    // 仓库配置列表
-    let reposList = [];
-
-    // 渲染仓库配置列表（瀑布流卡片式）
-    function renderReposList() {
-        const container = document.getElementById('repos-waterfall');
-        if (reposList.length === 0) {
-            container.innerHTML = '<div class="repos-empty-tip">暂无仓库配置，点击上方按钮添加</div>';
-            return;
-        }
-
-        container.innerHTML = reposList.map((repo, index) => `
-            <div class="repo-card ${repo.docs_repo ? 'repo-card-docs' : ''}" data-index="${index}">
-                <div class="repo-card-header">
-                    <span class="repo-card-index">#${index + 1}</span>
-                    <label class="repo-docs-toggle">
-                        <input type="radio" name="docs-repo" class="repo-is-docs" data-index="${index}" ${repo.docs_repo ? 'checked' : ''}>
-                        <span class="repo-docs-label">文档仓库</span>
-                    </label>
-                    <button type="button" class="btn-small btn-delete" onclick="removeRepoItem(${index})">删除</button>
-                </div>
-                <div class="repo-card-body">
-                    <div class="repo-field-row repo-field-row-3">
-                        <div class="repo-field repo-field-url">
-                            <label>URL</label>
-                            <input type="text" class="repo-url" data-index="${index}" value="${escapeHtml(repo.url || '')}" placeholder="仓库克隆地址">
-                        </div>
-                        <div class="repo-field repo-field-short">
-                            <label>默认主分支</label>
-                            <input type="text" class="repo-branch" data-index="${index}" value="${escapeHtml(repo.default_branch || '')}" placeholder="可不填，自动获取">
-                        </div>
-                        <div class="repo-field repo-field-short">
-                            <label>分支前缀</label>
-                            <input type="text" class="repo-branch-prefix" data-index="${index}" value="${escapeHtml(repo.branch_prefix || 'ai_')}" placeholder="ai_">
-                        </div>
-                    </div>
-                    <div class="repo-field">
-                        <label>Token</label>
-                        <input type="text" class="repo-token" data-index="${index}" value="${escapeHtml(repo.token || '')}" placeholder="访问令牌，http地址必填">
-                    </div>
-                    <div class="repo-field">
-                        <label>简介</label>
-                        <textarea class="repo-desc" data-index="${index}" placeholder="仓库简介说明（必填）" rows="2">${escapeHtml(repo.desc || '')}</textarea>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-        // 绑定文档仓库选择事件
-        bindDocsRepoEvents();
-    }
-
-    // 绑定文档仓库选择事件
-    function bindDocsRepoEvents() {
-        document.querySelectorAll('.repo-is-docs').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const selectedIndex = parseInt(e.target.dataset.index);
-                // 更新数据：只有选中的才是文档仓库
-                reposList.forEach((repo, index) => {
-                    repo.docs_repo = (index === selectedIndex);
-                });
-                // 重新渲染以更新卡片样式
-                renderReposList();
-            });
-        });
-    }
-
-    window.removeRepoItem = function(index) { reposList.splice(index, 1); renderReposList(); };
-
-    document.getElementById('add-repo-btn').addEventListener('click', () => {
-        // 如果是第一个仓库，默认设为文档仓库
-        const isFirst = reposList.length === 0;
-        reposList.push({ desc: '', url: '', token: '', default_branch: '', branch_prefix: 'ai_', docs_repo: isFirst });
-        renderReposList();
-    });
-
-    // 监听仓库输入变化
-    document.getElementById('repos-waterfall').addEventListener('input', (e) => {
-        const index = parseInt(e.target.dataset.index);
-        if (isNaN(index)) return;
-        if (e.target.classList.contains('repo-desc')) reposList[index].desc = e.target.value;
-        if (e.target.classList.contains('repo-url')) reposList[index].url = e.target.value;
-        if (e.target.classList.contains('repo-token')) reposList[index].token = e.target.value;
-        if (e.target.classList.contains('repo-branch')) reposList[index].default_branch = e.target.value;
-        if (e.target.classList.contains('repo-branch-prefix')) reposList[index].branch_prefix = e.target.value;
-    });
-
-    renderReposList();
-
-    // 表单提交
-    document.getElementById('add-client-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const name = document.getElementById('client-name').value.trim();
-        const isPublic = document.getElementById('client-is-public').value === 'true';
-        const agent = document.getElementById('client-agent').value;
-
-        try {
-            // 创建客户端
-            const result = await clientAPI.create(name, [], {
-                is_public: isPublic,
-                agent: agent
-            });
-            const clientId = result.data.id;
-            // 保存仓库配置
-            if (reposList.length > 0) {
-                await clientAPI.updateRepos(clientId, reposList);
-            }
-            showToast('客户端创建成功', 'success');
-            closeModal();
-            loadClients();
-        } catch (error) {
-            showToast(error.message, 'error');
-        }
-    });
-}
-
 async function deleteClient(id) {
     if (!confirm('确定要删除这个客户端吗？')) {
         return;
@@ -853,266 +683,409 @@ async function deleteClient(id) {
     }
 }
 
-// 查看公开客户端配置（只读模式）
-async function viewClient(id) {
-    let clientData;
-    let reposData = [];
-    try {
-        const [clientResult, reposResult] = await Promise.all([
-            clientAPI.get(id),
-            clientAPI.getRepos(id)
-        ]);
-        clientData = clientResult.data;
-        reposData = reposResult.data || [];
-    } catch (error) {
-        showToast(error.message, 'error');
-        return;
-    }
+// ===== 客户端配置页面 =====
 
-    // 渲染只读仓库列表
-    const reposHtml = reposData.length === 0 
-        ? '<div class="repos-empty-tip">暂无仓库配置</div>'
-        : reposData.map((repo, index) => `
-            <div class="repo-card ${repo.docs_repo ? 'repo-card-docs' : ''}">
-                <div class="repo-card-header">
-                    <span class="repo-card-index">#${index + 1}</span>
-                    ${repo.docs_repo ? '<span class="repo-docs-label">文档仓库</span>' : ''}
-                </div>
-                <div class="repo-card-body">
-                    <div class="repo-field-row repo-field-row-3">
-                        <div class="repo-field repo-field-url">
-                            <label>URL</label>
-                            <div class="readonly-field">${escapeHtml(repo.url || '-')}</div>
-                        </div>
-                        <div class="repo-field repo-field-short">
-                            <label>默认主分支</label>
-                            <div class="readonly-field">${escapeHtml(repo.default_branch || '-')}</div>
-                        </div>
-                        <div class="repo-field repo-field-short">
-                            <label>分支前缀</label>
-                            <div class="readonly-field">${escapeHtml(repo.branch_prefix || 'ai_')}</div>
-                        </div>
-                    </div>
-                    <div class="repo-field">
-                        <label>Token</label>
-                        <div class="readonly-field">${repo.token ? '********' : '-'}</div>
-                    </div>
-                    <div class="repo-field">
-                        <label>简介</label>
-                        <div class="readonly-field">${escapeHtml(repo.desc || '-')}</div>
-                    </div>
-                </div>
-            </div>
-        `).join('');
+// 当前客户端配置页面状态
+let cfgClientId = null;      // null = 新建模式
+let cfgClientMode = 'add';   // 'add' | 'edit' | 'view'
+let cfgReposList = [];
+let cfgEnvVarsData = [];     // 已加载的环境变量列表（含 _editing/_new 标记）
 
-    const content = `
-        <div class="client-view-content">
-            <div class="form-row">
-                <div class="form-group form-group-half">
-                    <label>客户端名称</label>
-                    <div class="readonly-field">${escapeHtml(clientData.name)}</div>
-                </div>
-                <div class="form-group form-group-quarter">
-                    <label>是否公开</label>
-                    <div class="readonly-field">${clientData.is_public ? '是' : '否'}</div>
-                </div>
-                <div class="form-group form-group-quarter">
-                    <label>Agent</label>
-                    <div class="readonly-field">${escapeHtml(clientData.agent || 'Claude Code')}</div>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>仓库配置</label>
-                <div class="repos-waterfall">
-                    ${reposHtml}
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-secondary" onclick="closeModal()">关闭</button>
-            </div>
-        </div>
-    `;
-
-    openModal('查看客户端配置', content, 'modal-lg');
+function backToClients() {
+    switchToView('clients');
+    window.location.hash = '/clients';
+    loadClients();
 }
 
-async function editClient(id) {
-    // 获取客户端信息、仓库配置和Agent列表
-    let clientData;
-    let reposData = [];
-    let agentOptions = ['Claude Code'];
+// 打开客户端配置页（替代弹窗）
+async function openClientConfig(id, mode) {
+    cfgClientId = id;
+    cfgClientMode = mode;
+    cfgReposList = [];
+    cfgEnvVarsData = [];
+
+    // 切换到 client-config-view
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('client-config-view').classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+    // 设置标题
+    const titleMap = { add: '新建客户端', edit: '编辑客户端', view: '查看客户端' };
+    document.getElementById('client-config-title').textContent = titleMap[mode] || '客户端配置';
+
+    // Tab 切换逻辑
+    const tabBtns = document.querySelectorAll('.config-tab-btn');
+    const tabPanels = document.querySelectorAll('.config-tab-panel');
+
+    tabBtns.forEach(btn => {
+        btn.onclick = () => {
+            const tab = btn.dataset.configTab;
+            tabBtns.forEach(b => b.classList.remove('active'));
+            tabPanels.forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(`client-tab-${tab}`).classList.add('active');
+        };
+    });
+
+    // 默认显示基本信息 tab
+    tabBtns.forEach(b => b.classList.remove('active'));
+    tabPanels.forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-config-tab="basic"]').classList.add('active');
+    document.getElementById('client-tab-basic').classList.add('active');
+
+    // 返回按钮
+    document.getElementById('client-config-back-btn').onclick = backToClients;
+
+    // 新建模式下，环境变量和仓库 tab 不可用（需先保存基本信息）
+    const envTab = document.getElementById('tab-btn-env-vars');
+    const reposTab = document.getElementById('tab-btn-repos');
+    if (mode === 'add') {
+        envTab.disabled = true;
+        reposTab.disabled = true;
+        envTab.title = '请先保存基本信息';
+        reposTab.title = '请先保存基本信息';
+    } else {
+        envTab.disabled = false;
+        reposTab.disabled = false;
+        envTab.title = '';
+        reposTab.title = '';
+    }
+
+    // 加载 Agent 列表
+    let agentOptions = ['cloud', 'Claude Code'];
     try {
-        const [clientResult, reposResult, agentsResult] = await Promise.all([
-            clientAPI.get(id),
-            clientAPI.getRepos(id),
-            clientAPI.getAgents()
-        ]);
-        clientData = clientResult.data;
-        reposData = reposResult.data || [];
-        if (agentsResult.data && agentsResult.data.length > 0) {
-            agentOptions = agentsResult.data;
+        const r = await clientAPI.getAgents();
+        if (r.data && r.data.length > 0) agentOptions = r.data;
+    } catch (e) { console.warn('获取Agent列表失败', e); }
+
+    const agentSelect = document.getElementById('cfg-client-agent');
+    agentSelect.innerHTML = agentOptions.map(a =>
+        `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`
+    ).join('');
+
+    // 如果是编辑/查看模式，加载现有数据
+    if (id !== null) {
+        try {
+            const [clientResult, reposResult, envVarsResult] = await Promise.all([
+                clientAPI.get(id),
+                clientAPI.getRepos(id),
+                clientAPI.getEnvVars(id)
+            ]);
+            const clientData = clientResult.data;
+            cfgReposList = (reposResult.data || []).map(r => ({...r}));
+            cfgEnvVarsData = (envVarsResult.data || []).map(ev => ({...ev, _editing: false}));
+
+            // 填充基本信息
+            document.getElementById('cfg-client-name').value = clientData.name;
+            document.getElementById('cfg-client-is-public').value = clientData.is_public ? 'true' : 'false';
+            agentSelect.value = clientData.agent || 'cloud';
+        } catch (error) {
+            showToast(error.message, 'error');
+            return;
         }
-    } catch (error) {
-        showToast(error.message, 'error');
+    } else {
+        document.getElementById('cfg-client-name').value = '';
+        document.getElementById('cfg-client-is-public').value = 'false';
+        agentSelect.value = agentOptions[0] || 'cloud';
+    }
+
+    // 只读模式下禁用基本信息表单字段
+    const basicInputs = document.querySelectorAll('#client-tab-basic input, #client-tab-basic select');
+    basicInputs.forEach(el => { el.disabled = (mode === 'view'); });
+
+    // 渲染/绑定基本信息表单
+    cfgInitBasicForm();
+
+    // 渲染环境变量 tab（提示 + 列表）
+    cfgRenderEnvVarsTab();
+
+    // 渲染仓库配置 tab
+    cfgRenderReposTab();
+}
+
+// ---- 基本信息表单 ----
+
+function cfgInitBasicForm() {
+    const form = document.getElementById('client-basic-form');
+    const submitBtn = document.getElementById('cfg-basic-submit-btn');
+
+    if (cfgClientMode === 'view') {
+        submitBtn.style.display = 'none';
+        form.onsubmit = null;
         return;
     }
 
-    const agentOptionsHtml = agentOptions.map(agent => 
-        `<option value="${escapeHtml(agent)}" ${agent === clientData.agent ? 'selected' : ''}>${escapeHtml(agent)}</option>`
-    ).join('');
+    submitBtn.style.display = '';
+    submitBtn.textContent = cfgClientId === null ? '创建' : '保存';
 
-    const content = `
-        <form id="edit-client-form">
-            <div class="form-row">
-                <div class="form-group form-group-half">
-                    <label>客户端名称</label>
-                    <input type="text" id="client-name" placeholder="请输入名称（最多16个字符）" maxlength="16" required>
-                </div>
-                <div class="form-group form-group-quarter">
-                    <label>是否公开</label>
-                    <select id="client-is-public" class="status-select">
-                        <option value="false">否</option>
-                        <option value="true">是</option>
-                    </select>
-                </div>
-                <div class="form-group form-group-quarter">
-                    <label>Agent</label>
-                    <select id="client-agent" class="status-select">
-                        ${agentOptionsHtml}
-                    </select>
-                </div>
-            </div>
-            <div class="form-group">
-                <div class="label-with-action">
-                    <label>仓库配置 <span class="text-muted">(必须指定一个文档仓库)</span></label>
-                    <button type="button" id="add-repo-btn" class="btn-small btn-add">+ 添加仓库</button>
-                </div>
-                <div class="repos-waterfall" id="repos-waterfall">
-                    <!-- 动态填充 -->
-                </div>
-            </div>
-            <button type="submit" class="btn-primary">保存</button>
-        </form>
-    `;
-
-    openModal('编辑客户端', content, 'modal-lg');
-
-    // 填充现有数据
-    document.getElementById('client-name').value = clientData.name;
-    document.getElementById('client-is-public').value = clientData.is_public ? 'true' : 'false';
-
-    // 仓库配置列表
-    let reposList = reposData.map(r => ({...r}));
-
-    // 渲染仓库配置列表（瀑布流卡片式）
-    function renderReposList() {
-        const container = document.getElementById('repos-waterfall');
-        if (reposList.length === 0) {
-            container.innerHTML = '<div class="repos-empty-tip">暂无仓库配置，点击下方按钮添加</div>';
-            return;
-        }
-
-        container.innerHTML = reposList.map((repo, index) => `
-            <div class="repo-card ${repo.docs_repo ? 'repo-card-docs' : ''}" data-index="${index}">
-                <div class="repo-card-header">
-                    <span class="repo-card-index">#${index + 1}</span>
-                    <label class="repo-docs-toggle">
-                        <input type="radio" name="docs-repo" class="repo-is-docs" data-index="${index}" ${repo.docs_repo ? 'checked' : ''}>
-                        <span class="repo-docs-label">文档仓库</span>
-                    </label>
-                    <button type="button" class="btn-small btn-delete" onclick="removeRepoItem(${index})">删除</button>
-                </div>
-                <div class="repo-card-body">
-                    <div class="repo-field-row repo-field-row-3">
-                        <div class="repo-field repo-field-url">
-                            <label>URL</label>
-                            <input type="text" class="repo-url" data-index="${index}" value="${escapeHtml(repo.url || '')}" placeholder="仓库克隆地址">
-                        </div>
-                        <div class="repo-field repo-field-short">
-                            <label>默认主分支</label>
-                            <input type="text" class="repo-branch" data-index="${index}" value="${escapeHtml(repo.default_branch || '')}" placeholder="可不填，自动获取">
-                        </div>
-                        <div class="repo-field repo-field-short">
-                            <label>分支前缀</label>
-                            <input type="text" class="repo-branch-prefix" data-index="${index}" value="${escapeHtml(repo.branch_prefix || 'ai_')}" placeholder="ai_">
-                        </div>
-                    </div>
-                    <div class="repo-field">
-                        <label>Token</label>
-                        <input type="text" class="repo-token" data-index="${index}" value="${escapeHtml(repo.token || '')}" placeholder="访问令牌，http地址必填">
-                    </div>
-                    <div class="repo-field">
-                        <label>简介</label>
-                        <textarea class="repo-desc" data-index="${index}" placeholder="仓库简介说明（必填）" rows="2">${escapeHtml(repo.desc || '')}</textarea>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-        // 绑定文档仓库选择事件
-        bindDocsRepoEvents();
-    }
-
-    // 绑定文档仓库选择事件
-    function bindDocsRepoEvents() {
-        document.querySelectorAll('.repo-is-docs').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const selectedIndex = parseInt(e.target.dataset.index);
-                // 更新数据：只有选中的才是文档仓库
-                reposList.forEach((repo, index) => {
-                    repo.docs_repo = (index === selectedIndex);
-                });
-                // 重新渲染以更新卡片样式
-                renderReposList();
-            });
-        });
-    }
-
-    window.removeRepoItem = function(index) { reposList.splice(index, 1); renderReposList(); };
-
-    document.getElementById('add-repo-btn').addEventListener('click', () => {
-        // 如果是第一个仓库，默认设为文档仓库
-        const isFirst = reposList.length === 0;
-        reposList.push({ desc: '', url: '', token: '', default_branch: '', branch_prefix: 'ai_', docs_repo: isFirst });
-        renderReposList();
-    });
-
-    // 监听仓库输入变化
-    document.getElementById('repos-waterfall').addEventListener('input', (e) => {
-        const index = parseInt(e.target.dataset.index);
-        if (isNaN(index)) return;
-        if (e.target.classList.contains('repo-desc')) reposList[index].desc = e.target.value;
-        if (e.target.classList.contains('repo-url')) reposList[index].url = e.target.value;
-        if (e.target.classList.contains('repo-token')) reposList[index].token = e.target.value;
-        if (e.target.classList.contains('repo-branch')) reposList[index].default_branch = e.target.value;
-        if (e.target.classList.contains('repo-branch-prefix')) reposList[index].branch_prefix = e.target.value;
-    });
-
-    renderReposList();
-
-    // 表单提交
-    document.getElementById('edit-client-form').addEventListener('submit', async (e) => {
+    form.onsubmit = async (e) => {
         e.preventDefault();
+        const name = document.getElementById('cfg-client-name').value.trim();
+        const isPublic = document.getElementById('cfg-client-is-public').value === 'true';
+        const agent = document.getElementById('cfg-client-agent').value;
 
-        const name = document.getElementById('client-name').value.trim();
-        const isPublic = document.getElementById('client-is-public').value === 'true';
-        const agent = document.getElementById('client-agent').value;
+        if (!name) { showToast('客户端名称不能为空', 'error'); return; }
 
         try {
-            // 先保存仓库配置（后端会校验文档仓库）
-            await clientAPI.updateRepos(id, reposList);
-            // 再保存客户端配置
-            await clientAPI.update(id, name, [], {
-                is_public: isPublic,
-                agent: agent
-            });
-            showToast('客户端更新成功', 'success');
-            closeModal();
-            loadClients();
+            if (cfgClientId === null) {
+                // 新建
+                const result = await clientAPI.create(name, [], { is_public: isPublic, agent });
+                cfgClientId = result.data.id;
+                cfgClientMode = 'edit';
+                showToast('客户端创建成功，请继续配置环境变量和仓库', 'success');
+                // 解锁其他 tab
+                document.getElementById('tab-btn-env-vars').disabled = false;
+                document.getElementById('tab-btn-repos').disabled = false;
+                document.getElementById('tab-btn-env-vars').title = '';
+                document.getElementById('tab-btn-repos').title = '';
+                document.getElementById('cfg-basic-submit-btn').textContent = '保存';
+                loadClients();
+            } else {
+                // 更新
+                await clientAPI.update(cfgClientId, name, [], { is_public: isPublic, agent });
+                showToast('基本信息保存成功', 'success');
+                loadClients();
+            }
+            // 更新环境变量提示（agent 类型可能变了）
+            cfgRenderEnvVarsTab();
         } catch (error) {
             showToast(error.message, 'error');
         }
+    };
+}
+
+// ---- 环境变量管理 ----
+
+function cfgRenderEnvVarsTab() {
+    const agent = document.getElementById('cfg-client-agent')?.value || '';
+    const tipEl = document.getElementById('env-vars-tip');
+    const addBtn = document.getElementById('add-env-var-btn');
+    const isCloud = (agent.toLowerCase() === 'cloud');
+
+    if (tipEl) {
+        tipEl.textContent = isCloud
+            ? '以下环境变量将在 cloud agent 启动时自动注入'
+            : '注意：仅在 Agent 类型为 cloud 时，环境变量才有效';
+        tipEl.className = 'config-section-tip ' + (isCloud ? 'tip-info' : 'tip-warn');
+    }
+
+    // 只读或无 id 时隐藏添加按钮
+    if (addBtn) {
+        addBtn.style.display = (cfgClientMode === 'view' || cfgClientId === null) ? 'none' : '';
+        addBtn.onclick = cfgAddEnvVar;
+    }
+
+    cfgRenderEnvVarsList();
+}
+
+function cfgRenderEnvVarsList() {
+    const list = document.getElementById('env-vars-list');
+    const empty = document.getElementById('env-vars-empty');
+    if (!list) return;
+
+    const activeVars = cfgEnvVarsData.filter(ev => !ev._deleted);
+
+    if (activeVars.length === 0) {
+        list.innerHTML = '';
+        empty.style.display = '';
+        return;
+    }
+    empty.style.display = 'none';
+
+    list.innerHTML = activeVars.map((ev, idx) => {
+        if (ev._editing || ev._isNew) {
+            return `
+            <div class="env-var-row env-var-row-editing" data-idx="${idx}">
+                <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}">
+                <span class="env-var-eq">=</span>
+                <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}">
+                <button class="btn-action btn-save-sm" onclick="cfgSaveEnvVar(${idx})">保存</button>
+                <button class="btn-action btn-cancel-sm" onclick="cfgCancelEnvVar(${idx})">取消</button>
+            </div>`;
+        }
+        const actions = cfgClientMode !== 'view' ? `
+            <button class="btn-action btn-edit" onclick="cfgEditEnvVar(${idx})">编辑</button>
+            <button class="btn-action btn-delete" onclick="cfgDeleteEnvVar(${idx})">删除</button>` : '';
+        return `
+        <div class="env-var-row" data-idx="${idx}">
+            <span class="env-var-key">${escapeHtml(ev.key)}</span>
+            <span class="env-var-eq">=</span>
+            <span class="env-var-val">${escapeHtml(ev.value || '')}</span>
+            <div class="env-var-actions">${actions}</div>
+        </div>`;
+    }).join('');
+}
+
+function cfgAddEnvVar() {
+    cfgEnvVarsData.push({ id: null, key: '', value: '', _editing: false, _isNew: true });
+    cfgRenderEnvVarsList();
+}
+
+function cfgEditEnvVar(idx) {
+    cfgEnvVarsData[idx]._editing = true;
+    cfgRenderEnvVarsList();
+}
+
+function cfgCancelEnvVar(idx) {
+    if (cfgEnvVarsData[idx]._isNew) {
+        cfgEnvVarsData.splice(idx, 1);
+    } else {
+        cfgEnvVarsData[idx]._editing = false;
+    }
+    cfgRenderEnvVarsList();
+}
+
+async function cfgSaveEnvVar(idx) {
+    const row = document.querySelector(`.env-var-row[data-idx="${idx}"]`);
+    const key = row.querySelector('.env-var-key-input').value.trim();
+    const value = row.querySelector('.env-var-val-input').value;
+    if (!key) { showToast('变量名不能为空', 'error'); return; }
+
+    try {
+        const ev = cfgEnvVarsData[idx];
+        if (ev._isNew) {
+            const result = await clientAPI.createEnvVar(cfgClientId, key, value);
+            ev.id = result.data.id;
+            ev._isNew = false;
+        } else {
+            await clientAPI.updateEnvVar(cfgClientId, ev.id, key, value);
+        }
+        ev.key = key;
+        ev.value = value;
+        ev._editing = false;
+        cfgRenderEnvVarsList();
+        showToast('环境变量保存成功', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function cfgDeleteEnvVar(idx) {
+    if (!confirm('确定删除该环境变量？')) return;
+    try {
+        const ev = cfgEnvVarsData[idx];
+        if (ev.id) {
+            await clientAPI.deleteEnvVar(cfgClientId, ev.id);
+        }
+        cfgEnvVarsData.splice(idx, 1);
+        cfgRenderEnvVarsList();
+        showToast('环境变量已删除', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+// ---- 代码仓库管理 ----
+
+function cfgRenderReposTab() {
+    const addBtn = document.getElementById('cfg-add-repo-btn');
+    const saveBtn = document.getElementById('cfg-repos-save-btn');
+    const isView = (cfgClientMode === 'view');
+
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            const isFirst = cfgReposList.length === 0;
+            cfgReposList.push({ desc: '', url: '', token: '', default_branch: '', branch_prefix: 'ai_', docs_repo: isFirst });
+            cfgRenderReposWaterfall();
+        };
+    }
+    if (saveBtn) {
+        saveBtn.style.display = (isView || cfgClientId === null) ? 'none' : '';
+        saveBtn.onclick = cfgSaveRepos;
+    }
+
+    cfgRenderReposWaterfall();
+}
+
+function cfgRenderReposWaterfall() {
+    const container = document.getElementById('cfg-repos-waterfall');
+    if (!container) return;
+    const isView = (cfgClientMode === 'view');
+
+    if (cfgReposList.length === 0) {
+        container.innerHTML = `<div class="repos-empty-tip">${isView ? '暂无仓库配置' : '点击上方按钮添加仓库'}</div>`;
+        return;
+    }
+
+    container.innerHTML = cfgReposList.map((repo, index) => {
+        const docsRadio = isView
+            ? (repo.docs_repo ? '<span class="repo-docs-label">文档仓库</span>' : '')
+            : `<label class="repo-docs-toggle">
+                <input type="radio" name="cfg-docs-repo" class="cfg-repo-is-docs" data-index="${index}" ${repo.docs_repo ? 'checked' : ''}>
+                <span class="repo-docs-label">文档仓库</span>
+               </label>`;
+        const deleteBtn = isView ? '' : `<button type="button" class="btn-small btn-delete" onclick="cfgRemoveRepo(${index})">删除</button>`;
+
+        const urlField = isView
+            ? `<div class="readonly-field">${escapeHtml(repo.url || '-')}</div>`
+            : `<input type="text" class="cfg-repo-url" data-index="${index}" value="${escapeHtml(repo.url || '')}" placeholder="仓库克隆地址">`;
+        const branchField = isView
+            ? `<div class="readonly-field">${escapeHtml(repo.default_branch || '-')}</div>`
+            : `<input type="text" class="cfg-repo-branch" data-index="${index}" value="${escapeHtml(repo.default_branch || '')}" placeholder="可不填，自动获取">`;
+        const prefixField = isView
+            ? `<div class="readonly-field">${escapeHtml(repo.branch_prefix || 'ai_')}</div>`
+            : `<input type="text" class="cfg-repo-branch-prefix" data-index="${index}" value="${escapeHtml(repo.branch_prefix || 'ai_')}" placeholder="ai_">`;
+        const tokenField = isView
+            ? `<div class="readonly-field">${repo.token ? '********' : '-'}</div>`
+            : `<input type="text" class="cfg-repo-token" data-index="${index}" value="${escapeHtml(repo.token || '')}" placeholder="访问令牌，http地址必填">`;
+        const descField = isView
+            ? `<div class="readonly-field">${escapeHtml(repo.desc || '-')}</div>`
+            : `<textarea class="cfg-repo-desc" data-index="${index}" placeholder="仓库简介说明（必填）" rows="2">${escapeHtml(repo.desc || '')}</textarea>`;
+
+        return `
+        <div class="repo-card ${repo.docs_repo ? 'repo-card-docs' : ''}" data-index="${index}">
+            <div class="repo-card-header">
+                <span class="repo-card-index">#${index + 1}</span>
+                ${docsRadio}
+                ${deleteBtn}
+            </div>
+            <div class="repo-card-body">
+                <div class="repo-field-row repo-field-row-3">
+                    <div class="repo-field repo-field-url"><label>URL</label>${urlField}</div>
+                    <div class="repo-field repo-field-short"><label>默认主分支</label>${branchField}</div>
+                    <div class="repo-field repo-field-short"><label>分支前缀</label>${prefixField}</div>
+                </div>
+                <div class="repo-field"><label>Token</label>${tokenField}</div>
+                <div class="repo-field"><label>简介</label>${descField}</div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // 绑定文档仓库单选事件
+    container.querySelectorAll('.cfg-repo-is-docs').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            const sel = parseInt(e.target.dataset.index);
+            cfgReposList.forEach((r, i) => { r.docs_repo = (i === sel); });
+            cfgRenderReposWaterfall();
+        });
     });
+
+    // 绑定输入变化
+    container.addEventListener('input', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        if (isNaN(index)) return;
+        if (e.target.classList.contains('cfg-repo-desc')) cfgReposList[index].desc = e.target.value;
+        if (e.target.classList.contains('cfg-repo-url')) cfgReposList[index].url = e.target.value;
+        if (e.target.classList.contains('cfg-repo-token')) cfgReposList[index].token = e.target.value;
+        if (e.target.classList.contains('cfg-repo-branch')) cfgReposList[index].default_branch = e.target.value;
+        if (e.target.classList.contains('cfg-repo-branch-prefix')) cfgReposList[index].branch_prefix = e.target.value;
+    });
+}
+
+function cfgRemoveRepo(index) {
+    cfgReposList.splice(index, 1);
+    cfgRenderReposWaterfall();
+}
+
+async function cfgSaveRepos() {
+    if (!cfgClientId) { showToast('请先保存基本信息', 'error'); return; }
+    try {
+        await clientAPI.updateRepos(cfgClientId, cfgReposList);
+        showToast('仓库配置保存成功', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
 }
 
 // ===== 任务管理 =====

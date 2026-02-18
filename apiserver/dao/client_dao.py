@@ -10,10 +10,10 @@ from typing import Optional, List
 from sqlalchemy import or_
 
 from .connection import get_db_session
-from .models import Client, ClientRepo, User
+from .models import Client, ClientRepo, ClientEnvVar, User
 
 
-def create_client(user_id: int, name: str, types: List[str], is_public: bool = False, agent: str = 'Claude Code') -> int:
+def create_client(user_id: int, name: str, types: List[str], is_public: bool = False, agent: str = 'cloud') -> int:
     """
     创建客户端
 
@@ -494,6 +494,66 @@ def get_usable_clients_for_task(user_id: int) -> List[dict]:
             data['editable'] = (client.user_id == user_id)
             result.append(data)
         return result
+
+
+def get_cloud_clients_with_secret() -> List[dict]:
+    """
+    获取所有 agent 类型为 cloud 的客户端，同时 JOIN 其所属用户的云客户端专用秘钥。
+    若用户没有该专用秘钥则不返回该客户端。
+    返回: [{'client_id': int, 'secret': str}, ...]
+    """
+    from .models import UserSecret
+    CLOUD_SECRET_NAME = '云客户端专用(请勿删除)'
+    with get_db_session() as session:
+        rows = session.query(Client.id, UserSecret.secret).join(
+            UserSecret,
+            (UserSecret.user_id == Client.user_id) &
+            (UserSecret.name == CLOUD_SECRET_NAME)
+        ).filter(
+            Client.agent == 'cloud',
+            Client.deleted_at.is_(None)
+        ).all()
+        return [{'client_id': client_id, 'secret': secret} for client_id, secret in rows]
+
+
+def get_client_env_vars(client_id: int) -> List[ClientEnvVar]:
+    """获取客户端有效的环境变量列表（deleted_at 为空的记录）"""
+    with get_db_session() as session:
+        return session.query(ClientEnvVar).filter(
+            ClientEnvVar.client_id == client_id,
+            ClientEnvVar.deleted_at.is_(None)
+        ).order_by(ClientEnvVar.id.asc()).all()
+
+
+def create_client_env_var(client_id: int, key: str, value: str) -> int:
+    """新增环境变量，返回新记录ID"""
+    with get_db_session() as session:
+        env_var = ClientEnvVar(client_id=client_id, key=key, value=value)
+        session.add(env_var)
+        session.flush()
+        return env_var.id
+
+
+def update_client_env_var(env_var_id: int, client_id: int, key: str, value: str) -> bool:
+    """更新环境变量"""
+    with get_db_session() as session:
+        affected = session.query(ClientEnvVar).filter(
+            ClientEnvVar.id == env_var_id,
+            ClientEnvVar.client_id == client_id,
+            ClientEnvVar.deleted_at.is_(None)
+        ).update({ClientEnvVar.key: key, ClientEnvVar.value: value})
+        return affected > 0
+
+
+def delete_client_env_var(env_var_id: int, client_id: int) -> bool:
+    """软删除环境变量（设置 deleted_at）"""
+    with get_db_session() as session:
+        affected = session.query(ClientEnvVar).filter(
+            ClientEnvVar.id == env_var_id,
+            ClientEnvVar.client_id == client_id,
+            ClientEnvVar.deleted_at.is_(None)
+        ).update({ClientEnvVar.deleted_at: datetime.now()})
+        return affected > 0
 
 
 def check_client_usable_for_task(client_id: int, user_id: int) -> bool:

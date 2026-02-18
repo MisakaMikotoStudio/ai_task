@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=13">
+    <link rel="stylesheet" href="css/style.css?v=14">
 </head>
 <body>
     <div class="app-container">
@@ -233,6 +233,78 @@
                     </div>
                 </div>
 
+                <!-- 客户端配置页面 -->
+                <div id="client-config-view" class="view">
+                    <div class="view-header">
+                        <div class="view-header-left">
+                            <button class="btn-back" id="client-config-back-btn">← 返回</button>
+                            <h2 id="client-config-title">客户端配置</h2>
+                        </div>
+                    </div>
+                    <div class="config-tabs-nav">
+                        <button class="config-tab-btn active" data-config-tab="basic">基本信息</button>
+                        <button class="config-tab-btn" data-config-tab="env-vars" id="tab-btn-env-vars">环境变量</button>
+                        <button class="config-tab-btn" data-config-tab="repos" id="tab-btn-repos">代码仓库</button>
+                    </div>
+                    <div class="config-tab-panels">
+                        <!-- 基本信息 -->
+                        <div id="client-tab-basic" class="config-tab-panel active">
+                            <div class="config-section">
+                                <form id="client-basic-form">
+                                    <div class="form-row">
+                                        <div class="form-group form-group-half">
+                                            <label>客户端名称</label>
+                                            <input type="text" id="cfg-client-name" placeholder="请输入名称（最多16个字符）" maxlength="16">
+                                        </div>
+                                        <div class="form-group form-group-quarter">
+                                            <label>是否公开</label>
+                                            <select id="cfg-client-is-public" class="status-select">
+                                                <option value="false">否</option>
+                                                <option value="true">是</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group form-group-quarter">
+                                            <label>Agent 类型</label>
+                                            <select id="cfg-client-agent" class="status-select"></select>
+                                        </div>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button type="submit" class="btn-primary" id="cfg-basic-submit-btn">保存</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                        <!-- 环境变量 -->
+                        <div id="client-tab-env-vars" class="config-tab-panel">
+                            <div class="config-section">
+                                <div class="config-section-header">
+                                    <span class="config-section-tip" id="env-vars-tip"></span>
+                                    <button class="btn-primary btn-small" id="add-env-var-btn">+ 添加环境变量</button>
+                                </div>
+                                <div id="env-vars-list" class="env-vars-list">
+                                    <!-- 动态填充 -->
+                                </div>
+                                <div id="env-vars-empty" class="empty-state" style="display:none;">
+                                    <p>暂无环境变量配置</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 代码仓库 -->
+                        <div id="client-tab-repos" class="config-tab-panel">
+                            <div class="config-section">
+                                <div class="config-section-header">
+                                    <label class="text-muted">必须指定一个文档仓库</label>
+                                    <button class="btn-primary btn-small" id="cfg-add-repo-btn">+ 添加仓库</button>
+                                </div>
+                                <div class="repos-waterfall" id="cfg-repos-waterfall"></div>
+                                <div class="form-actions" style="margin-top:16px;">
+                                    <button class="btn-primary" id="cfg-repos-save-btn">保存仓库配置</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 秘钥管理视图 -->
                 <div id="secrets-view" class="view">
                     <div class="view-header">
@@ -317,10 +389,10 @@
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=7"></script>
+    <script src="js/api.js?v=8"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=16"></script>
+    <script src="js/app.js?v=17"></script>
 </body>
 </html>
 

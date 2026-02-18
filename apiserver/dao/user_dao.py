@@ -124,6 +124,23 @@ def delete_user_secret(secret_id: int, user_id: int) -> bool:
         return affected > 0
 
 
+def count_user_secrets(user_id: int) -> int:
+    """统计用户当前的秘钥数量"""
+    with get_db_session() as session:
+        return session.query(UserSecret).filter(
+            UserSecret.user_id == user_id
+        ).count()
+
+
+def get_cloud_secret_for_user(user_id: int) -> Optional[UserSecret]:
+    """获取用户名为'云客户端专用(请勿删除)'的秘钥"""
+    with get_db_session() as session:
+        return session.query(UserSecret).filter(
+            UserSecret.user_id == user_id,
+            UserSecret.name == '云客户端专用(请勿删除)'
+        ).first()
+
+
 def get_user_by_secret(secret: str) -> Optional[User]:
     """通过秘钥获取用户"""
     with get_db_session() as session:

@@ -142,14 +142,25 @@ class ClientConfig:
     docs_git: Optional[GitRepoConfig] = None # 文档仓库配置
     code_git: List[GitRepoConfig] = field(default_factory=list) # 代码仓库配置
     agent : BaseAgent = None # 客户端 Agent
+    agent_name: str = '' # agent 类型名称（原始字符串）
+    env_vars: Dict[str, str] = field(default_factory=dict) # 环境变量（key -> value）
 
-    def __init__(self, apiserver_url: str, client_id: int, secret: str, cache_dir: str) -> None:
+    def __init__(self, apiserver_url: str, client_id: int, secret: str) -> None:
         self.apiserver_url = apiserver_url
         self.client_id = client_id
         self.secret = secret
-        self.cache_dir = cache_dir
+        self.instance_uuid = str(uuid.uuid4())
+        self.docs_git = None
+        self.code_git = []
+        self.agent = None
+        self.agent_name = ''
+        self.env_vars = {}
         self.apiserver_rpc = ApiServerRpc(base_url=apiserver_url, secret=secret, client_id=client_id, instance_uuid=self.instance_uuid)
-    
+
+    def set_cache_dir(self, cache_dir: str):
+        """设置缓存目录"""
+        self.cache_dir = cache_dir
+
     def sync_config(self):
         """同步客户端配置"""
         self.apiserver_rpc = ApiServerRpc(base_url=self.apiserver_url, secret=self.secret, client_id=self.client_id, instance_uuid=self.instance_uuid)
@@ -177,8 +188,13 @@ class ClientConfig:
                 self.docs_git = git_config
         self.code_git = code_git_list
 
+        # 解析环境变量（仅 cloud agent 时有效）
+        env_vars_list = remote_config.get('env_vars', [])
+        self.env_vars = {ev['key']: ev.get('value', '') for ev in env_vars_list if ev.get('key')}
+
         # 根据配置的 agent 类型获取对应的 Agent 实例
         agent_name = remote_config.get('agent', 'Claude Code')
+        self.agent_name = agent_name
         self.agent = get_agent_by_name(agent_name)
         logger.debug(f"使用 Agent: {agent_name}")
 
