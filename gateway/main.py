@@ -26,6 +26,26 @@ logger = logging.getLogger(__name__)
 
 IMAGE_NAME = "ai-task-gateway:latest"
 CONTAINER_NAME = "ai-task-gateway"
+DOCKER_NETWORK = "ai-task-net"
+
+
+def ensure_network():
+    """确保共享 Docker 网络存在，不存在则创建。"""
+    result = subprocess.run(
+        ["docker", "network", "inspect", DOCKER_NETWORK],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        logger.info(f"Docker 网络 {DOCKER_NETWORK} 已存在")
+        return
+    create = subprocess.run(
+        ["docker", "network", "create", DOCKER_NETWORK],
+        capture_output=True, text=True,
+    )
+    if create.returncode != 0:
+        logger.error(f"创建 Docker 网络失败: {create.stderr.strip()}")
+        sys.exit(1)
+    logger.info(f"Docker 网络 {DOCKER_NETWORK} 创建完成")
 
 
 def ensure_image():
@@ -83,7 +103,8 @@ def start_container(cfg: GatewayConfig):
         "docker", "run", "-d",
         "--name", CONTAINER_NAME,
         "--restart", "unless-stopped",
-        "-p", f"{cfg.server.port}:{cfg.server.port}",
+        "--network", DOCKER_NETWORK,          # 加入共享网络，容器名即可互访
+        "-p", f"{cfg.server.port}:{cfg.server.port}",  # 同时暴露宿主机端口供外部使用
         "-e", f"GATEWAY_PORT={cfg.server.port}",
         "-e", f"DB_HOST={cfg.database.host}",
         "-e", f"DB_PORT={cfg.database.port}",
@@ -118,6 +139,7 @@ def main():
     cfg = GatewayConfig.from_toml(config_path)
     logger.info(f"已加载配置: port={cfg.server.port}, db={cfg.database.host}:{cfg.database.port}/{cfg.database.name}")
 
+    ensure_network()
     ensure_image()
     start_container(cfg)
 

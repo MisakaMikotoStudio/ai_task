@@ -24,6 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 IMAGE_NAME = "ai_task.yuban.site.cloud:v20260220_1821"
+DOCKER_NETWORK = "ai-task-net"
 
 
 def ensure_image():
@@ -53,7 +54,19 @@ def ensure_image():
     logger.info(f"镜像 {IMAGE_NAME} 构建完成")
 
 
-def start_container(client_id: int, secret: str, apiserver: str, workspace: str):
+def ensure_network():
+    """确保共享 Docker 网络存在（与网关共用，使容器间可通过容器名互访）。"""
+    result = subprocess.run(
+        ["docker", "network", "inspect", DOCKER_NETWORK],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        subprocess.run(["docker", "network", "create", DOCKER_NETWORK], capture_output=True)
+        logger.info(f"Docker 网络 {DOCKER_NETWORK} 创建完成")
+
+
+def start_container(client_id: int, secret: str, apiserver: str, workspace: str,
+                    gateway_url: str = ""):
     """
     为指定云客户端启动 Docker 容器，若容器已存在（运行中或已退出）则跳过。
 
@@ -108,10 +121,15 @@ def start_container(client_id: int, secret: str, apiserver: str, workspace: str)
 
     app_dir = pathlib.Path(__file__).parent.parent
 
+    # 网关 URL：优先用传入参数，其次用容器名访问（同网络内直接解析）
+    effective_gateway = gateway_url or f"http://ai-task-gateway:8080"
+
     cmd = [
         "docker", "run", "-d",
         "--name", container_name,
+        "--network", DOCKER_NETWORK,           # 与网关同网络，可用容器名互访
         "-e", "CLOUD_AGENT=1",
+        "-e", f"ANTHROPIC_BASE_URL={effective_gateway}",  # Claude Agent SDK 走网关
         "-v", f"{os.path.abspath(workspace)}:/workspace:rw",
         "-v", f"{os.path.abspath(app_dir)}:/app:ro",
         IMAGE_NAME,
@@ -170,6 +188,8 @@ def main():
                         help='admin 用户的云客户端专用秘钥（X-Client-Secret）')
     parser.add_argument('--workspace', '-w', type=str, required=True,
                         help='Workspace directory path')
+    parser.add_argument('--gateway', '-g', type=str, default='',
+                        help='网关地址，例如 http://ai-task-gateway:8080（默认使用容器名）')
     args = parser.parse_args()
 
     os.makedirs(args.workspace, exist_ok=True)
@@ -181,6 +201,8 @@ def main():
     # 获取所有云客户端配置
     logger.info(f"正在连接 API Server: {args.apiserver}")
     logger.info("获取云客户端启动配置...")
+
+    ensure_network()
 
     while True:
         try:
@@ -194,6 +216,7 @@ def main():
                     secret=config['secret'],
                     apiserver=args.apiserver,
                     workspace=args.workspace + '/' + str(config['client_id']),
+                    gateway_url=args.gateway,
                 )
         except Exception as e:
             logger.error(f"获取云客户端配置失败: {e}")
