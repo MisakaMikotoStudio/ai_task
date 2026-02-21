@@ -20,15 +20,16 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(64), unique=True, nullable=False, comment='用户名')
     password_hash = Column(String(256), nullable=False, comment='密码哈希')
+    is_admin = Column(Boolean, nullable=False, default=False, comment='是否是管理员')
     created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment='更新时间')
     last_access_at = Column(DateTime, nullable=True, comment='最后访问时间')
-
 
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
+            'is_admin': bool(self.is_admin),
             'created_at': str(self.created_at) if self.created_at else None,
             'last_access_at': str(self.last_access_at) if self.last_access_at else None
         }
@@ -372,3 +373,88 @@ class UserSecret(Base):
             'secret': self.secret,
             'created_at': str(self.created_at) if self.created_at else None
         }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gateway 相关模型
+# ──────────────────────────────────────────────────────────────────────────────
+
+class GatewayVirtualKey(Base):
+    """网关虚拟秘钥表"""
+    __tablename__ = 'ai_task_gateway_virtual_keys'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(64), nullable=False, comment='供应商（如 Anthropic / OpenAI）')
+    real_key = Column(String(512), nullable=False, comment='真实 API Key')
+    virtual_key = Column(String(128), nullable=False, unique=True, comment='虚拟 API Key')
+    target_url = Column(String(512), nullable=False, comment='目标 API 基础地址')
+    daily_limit = Column(DECIMAL(10, 4), nullable=False, default=-1, comment='单日限额（RMB），-1 表示无限制')
+    created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='软删除时间')
+
+    __table_args__ = (
+        Index('idx_gw_virtual_key', 'virtual_key'),
+    )
+
+    def to_dict(self):
+        real_key = self.real_key or ''
+        masked = real_key[:8] + '****' if len(real_key) > 8 else '****'
+        return {
+            'id': self.id,
+            'provider': self.provider,
+            'real_key_masked': masked,
+            'virtual_key': self.virtual_key,
+            'target_url': self.target_url,
+            'daily_limit': float(self.daily_limit) if self.daily_limit is not None else -1,
+            'created_at': str(self.created_at) if self.created_at else None,
+        }
+
+
+class GatewayModelPrice(Base):
+    """模型价格配置表"""
+    __tablename__ = 'ai_task_gateway_model_prices'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(64), nullable=False, comment='供应商')
+    model_name = Column(String(128), nullable=False, comment='模型名称')
+    input_price_per_million = Column(DECIMAL(10, 4), nullable=False, default=0,
+                                     comment='输入 Token 单价（RMB/百万 Token）')
+    output_price_per_million = Column(DECIMAL(10, 4), nullable=False, default=0,
+                                      comment='输出 Token 单价（RMB/百万 Token）')
+    created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_gw_model_name', 'model_name'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'provider': self.provider,
+            'model_name': self.model_name,
+            'input_price_per_million': float(self.input_price_per_million) if self.input_price_per_million is not None else 0,
+            'output_price_per_million': float(self.output_price_per_million) if self.output_price_per_million is not None else 0,
+            'created_at': str(self.created_at) if self.created_at else None,
+        }
+
+
+class GatewayUsageLog(Base):
+    """网关使用量日志表"""
+    __tablename__ = 'ai_task_gateway_usage_logs'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    virtual_key_id = Column(Integer, nullable=False, comment='关联虚拟秘钥 ID')
+    model = Column(String(128), nullable=False, default='', comment='模型名称')
+    input_tokens = Column(Integer, nullable=False, default=0, comment='输入 Token 数')
+    output_tokens = Column(Integer, nullable=False, default=0, comment='输出 Token 数')
+    input_cost = Column(DECIMAL(14, 6), nullable=False, default=0, comment='输入费用（RMB）')
+    output_cost = Column(DECIMAL(14, 6), nullable=False, default=0, comment='输出费用（RMB）')
+    stat_date = Column(Date, nullable=False, comment='统计日期')
+    created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
+
+    __table_args__ = (
+        Index('idx_gw_usage_key_date', 'virtual_key_id', 'stat_date'),
+        Index('idx_gw_usage_stat_date', 'stat_date'),
+    )

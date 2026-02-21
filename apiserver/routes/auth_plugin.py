@@ -131,6 +131,22 @@ def login_required(f):
     
     return decorated_function
 
+def admin_required(f):
+    """
+    管理员权限装饰器。
+    先执行完整的 login_required 认证，再校验 is_admin 标志。
+    使用方式与 @login_required 相同，直接替换即可。
+    """
+    @wraps(f)
+    def admin_check(*args, **kwargs):
+        if not getattr(request.user_info, 'is_admin', False):
+            logger.warning(f"非管理员访问被拒绝: user_id={request.user_info.id}")
+            return jsonify({"code": 403, "message": "需要管理员权限"}), 403
+        return f(*args, **kwargs)
+    # login_required 负责认证并设置 request.user_info，admin_check 再做权限检查
+    return login_required(admin_check)
+
+
 def get_trace_id():
     # 检查trace_id是否已存在于请求上下文中
     if hasattr(request, 'trace_id') and request.trace_id:
