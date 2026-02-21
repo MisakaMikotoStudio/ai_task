@@ -418,54 +418,6 @@ const okrAPI = {
     }
 };
 
-// 模型管理 API（仅 Admin）
-const modelAPI = {
-    // 获取供应商列表
-    async getProviders() {
-        return request('/model/providers');
-    },
-
-    // ── 虚拟秘钥 ──
-    async listVirtualKeys() {
-        return request('/model/virtual-keys');
-    },
-    async createVirtualKey(provider, realKey, dailyLimit, targetUrl) {
-        const body = { provider, real_key: realKey, daily_limit: dailyLimit };
-        if (targetUrl) body.target_url = targetUrl;
-        return request('/model/virtual-keys', {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
-    },
-    async deleteVirtualKey(id) {
-        return request(`/model/virtual-keys/${id}`, { method: 'DELETE' });
-    },
-
-    // ── 模型价格 ──
-    async listPrices() {
-        return request('/model/prices');
-    },
-    async createPrice(provider, modelName, inputPrice, outputPrice) {
-        return request('/model/prices', {
-            method: 'POST',
-            body: JSON.stringify({
-                provider,
-                model_name: modelName,
-                input_price_per_million: inputPrice,
-                output_price_per_million: outputPrice
-            })
-        });
-    },
-    async deletePrice(id) {
-        return request(`/model/prices/${id}`, { method: 'DELETE' });
-    },
-
-    // ── 监控 ──
-    async getMonitor(days = 30) {
-        return request(`/model/monitor?days=${days}`);
-    }
-};
-
 // 待办API
 const todoAPI = {
     // 获取列表

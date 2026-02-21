@@ -27,7 +27,6 @@ from routes.task import task_bp
 from routes.okr import okr_bp
 from routes.todo import todo_bp
 from routes.cloud import cloud_bp
-from routes.model import model_bp
 
 
 def create_app(config: AppConfig) -> Flask:
@@ -51,7 +50,6 @@ def create_app(config: AppConfig) -> Flask:
     app.register_blueprint(okr_bp, url_prefix=f'{prefix}/api/okr')
     app.register_blueprint(todo_bp, url_prefix=f'{prefix}/api/todo')
     app.register_blueprint(cloud_bp, url_prefix=f'{prefix}/api/cloud')
-    app.register_blueprint(model_bp, url_prefix=f'{prefix}/api/model')
     
     # 请求结束时清理session
     @app.teardown_appcontext

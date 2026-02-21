@@ -69,29 +69,25 @@
                     <span class="logo-text">AI Task</span>
                 </div>
                 <nav class="sidebar-nav">
-                    <a href="#" class="nav-item non-admin-only" data-view="okr">
+                    <a href="#" class="nav-item" data-view="okr">
                         <span class="nav-icon">🎯</span>
                         <span>OKR管理</span>
                     </a>
-                    <a href="#" class="nav-item non-admin-only active" data-view="todos">
+                    <a href="#" class="nav-item active" data-view="todos">
                         <span class="nav-icon">✅</span>
                         <span>待办事项</span>
                     </a>
-                    <a href="#" class="nav-item non-admin-only" data-view="tasks">
+                    <a href="#" class="nav-item" data-view="tasks">
                         <span class="nav-icon">📋</span>
                         <span>任务列表</span>
                     </a>
-                    <a href="#" class="nav-item non-admin-only" data-view="clients">
+                    <a href="#" class="nav-item" data-view="clients">
                         <span class="nav-icon">🖥️</span>
                         <span>客户端管理</span>
                     </a>
                     <a href="#" class="nav-item" data-view="secrets">
                         <span class="nav-icon">🔑</span>
                         <span>秘钥管理</span>
-                    </a>
-                    <a href="#" class="nav-item admin-only" data-view="model">
-                        <span class="nav-icon">🤖</span>
-                        <span>模型</span>
                     </a>
                 </nav>
                 <div class="sidebar-footer">
@@ -338,100 +334,6 @@
                     </div>
                 </div>
 
-                <!-- 模型管理视图（仅 Admin） -->
-                <div id="model-view" class="view">
-                    <div class="view-header">
-                        <h2>模型</h2>
-                    </div>
-                    <div class="model-tabs-nav">
-                        <button class="model-tab-btn active" data-model-tab="monitor">监控</button>
-                        <button class="model-tab-btn" data-model-tab="virtual-keys">虚拟秘钥</button>
-                        <button class="model-tab-btn" data-model-tab="prices">价格</button>
-                    </div>
-
-                    <!-- 监控 Tab -->
-                    <div id="model-tab-monitor" class="model-tab-panel active">
-                        <div class="model-section-header">
-                            <span class="text-muted">展示最近 30 天各虚拟秘钥的 Token 使用量与费用</span>
-                            <button class="btn-secondary btn-small" id="monitor-refresh-btn">刷新</button>
-                        </div>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>日期</th>
-                                        <th>供应商</th>
-                                        <th>虚拟秘钥</th>
-                                        <th>真实秘钥</th>
-                                        <th>输入 Token</th>
-                                        <th>输出 Token</th>
-                                        <th>输入费用(¥)</th>
-                                        <th>输出费用(¥)</th>
-                                        <th>总费用(¥)</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="monitor-table-body"></tbody>
-                            </table>
-                            <div id="monitor-empty" class="empty-state" style="display:none;">
-                                <span class="empty-icon">📊</span>
-                                <p>暂无使用记录</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 虚拟秘钥 Tab -->
-                    <div id="model-tab-virtual-keys" class="model-tab-panel">
-                        <div class="model-section-header">
-                            <span></span>
-                            <button class="btn-primary btn-small" id="add-vk-btn">+ 新增虚拟秘钥</button>
-                        </div>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>供应商</th>
-                                        <th>真实秘钥</th>
-                                        <th>虚拟秘钥</th>
-                                        <th>单日限费(¥)</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="vk-table-body"></tbody>
-                            </table>
-                            <div id="vk-empty" class="empty-state" style="display:none;">
-                                <span class="empty-icon">🔑</span>
-                                <p>暂无虚拟秘钥</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 价格 Tab -->
-                    <div id="model-tab-prices" class="model-tab-panel">
-                        <div class="model-section-header">
-                            <span></span>
-                            <button class="btn-primary btn-small" id="add-price-btn">+ 新增价格</button>
-                        </div>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>供应商</th>
-                                        <th>模型名称</th>
-                                        <th>输入价格(¥/百万Token)</th>
-                                        <th>输出价格(¥/百万Token)</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="prices-table-body"></tbody>
-                            </table>
-                            <div id="prices-empty" class="empty-state" style="display:none;">
-                                <span class="empty-icon">💰</span>
-                                <p>暂无价格配置</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- OKR管理视图 -->
                 <div id="okr-view" class="view">
                     <div class="view-header">
@@ -487,10 +389,10 @@
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=9"></script>
+    <script src="js/api.js?v=8"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=18"></script>
+    <script src="js/app.js?v=17"></script>
 </body>
 </html>
 
