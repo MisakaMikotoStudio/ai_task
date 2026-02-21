@@ -66,7 +66,7 @@ def ensure_network():
 
 
 def start_container(client_id: int, secret: str, apiserver: str, workspace: str,
-                    gateway_url: str = ""):
+                    gateway_url: str = "", instance_prefix: str = ""):
     """
     为指定云客户端启动 Docker 容器，若容器已存在（运行中或已退出）则跳过。
 
@@ -122,7 +122,10 @@ def start_container(client_id: int, secret: str, apiserver: str, workspace: str,
     app_dir = pathlib.Path(__file__).parent.parent
 
     # 网关 URL：优先用传入参数，其次用容器名访问（同网络内直接解析）
-    effective_gateway = gateway_url or f"http://ai-task-gateway:8080"
+    effective_gateway = gateway_url or f"http://ai-task-gateway:10000"
+
+    # 构造 instanceid（有 prefix 则用 prefix+clientid，否则由 main.py 自动生成 UUID）
+    instance_id = f"{instance_prefix}{client_id}" if instance_prefix else None
 
     cmd = [
         "docker", "run", "-d",
@@ -137,6 +140,7 @@ def start_container(client_id: int, secret: str, apiserver: str, workspace: str,
         "--apiserver", apiserver,
         "--secret", secret,
         "--client-id", str(client_id),
+        *( ["--instanceid", instance_id] if instance_id else [] ),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -190,6 +194,8 @@ def main():
                         help='Workspace directory path')
     parser.add_argument('--gateway', '-g', type=str, default='',
                         help='网关地址，例如 http://ai-task-gateway:8080（默认使用容器名）')
+    parser.add_argument('--instance-prefix', type=str, default='',
+                        help='实例 ID 前缀，最终 instanceid = prefix + client_id（不传则各容器自动生成 UUID）')
     args = parser.parse_args()
 
     os.makedirs(args.workspace, exist_ok=True)
@@ -217,6 +223,7 @@ def main():
                     apiserver=args.apiserver,
                     workspace=args.workspace + '/' + str(config['client_id']),
                     gateway_url=args.gateway,
+                    instance_prefix=args.instance_prefix,
                 )
         except Exception as e:
             logger.error(f"获取云客户端配置失败: {e}")

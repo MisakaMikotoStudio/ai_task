@@ -24,9 +24,9 @@ WORKDIR /app
 
 COPY --from=builder /app/gateway .
 
-EXPOSE 8080
+EXPOSE 10000
 
-ENV GATEWAY_PORT=8080 \
+ENV GATEWAY_PORT=10000 \
     DB_HOST=localhost \
     DB_PORT=3306 \
     DB_USER=root \

@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 @dataclass
 class GatewayServerConfig:
     """网关服务配置"""
-    port: int = 8080
+    port: int = 10000
 
 
 @dataclass

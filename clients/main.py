@@ -97,10 +97,13 @@ def main():
                         help='User secret for authentication')
     parser.add_argument('--client-id', '-i', type=int, required=True, default=None,
                         help='Client ID for authentication')
+    parser.add_argument('--instanceid', type=str, default=None,
+                        help='（可选）指定客户端实例 ID，不传则自动生成 UUID')
     args = parser.parse_args()
 
     # 从云端加载客户端配置
-    config = ClientConfig(apiserver_url=args.apiserver, client_id=args.client_id, secret=args.secret)
+    config = ClientConfig(apiserver_url=args.apiserver, client_id=args.client_id,
+                          secret=args.secret, instance_uuid=args.instanceid)
     if os.environ.get('CLOUD_AGENT') == '1':
         cache_dir = "/workspace"
     else:

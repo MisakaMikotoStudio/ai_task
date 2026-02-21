@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-IMAGE_NAME = "ai-task-gateway:latest"
+IMAGE_NAME = "ai-task-gateway:v20260221_2300"
 CONTAINER_NAME = "ai-task-gateway"
 DOCKER_NETWORK = "ai-task-net"
 
