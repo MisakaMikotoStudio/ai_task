@@ -8,7 +8,7 @@ from sqlalchemy import inspect
 
 from config_model import DatabaseConfig
 from .connection import init_connection, get_engine
-from .models import Base, User, Client, Task
+from .models import Base, User, Client, Task, GatewayVirtualKey, GatewayModelPrice, GatewayUsageLog
 
 
 def init_database(config: DatabaseConfig):
@@ -26,7 +26,10 @@ def init_database(config: DatabaseConfig):
     existing_tables = inspector.get_table_names()
     
     # 需要创建的表
-    required_tables = ['ai_task_users', 'ai_task_clients', 'ai_task_tasks', 'ai_task_user_sessions']
+    required_tables = [
+        'ai_task_users', 'ai_task_clients', 'ai_task_tasks', 'ai_task_user_sessions',
+        'ai_task_gateway_virtual_keys', 'ai_task_gateway_model_prices', 'ai_task_gateway_usage_logs',
+    ]
     
     print("Checking database tables...")
     
