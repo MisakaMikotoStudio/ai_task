@@ -23,13 +23,18 @@ class UserInfo:
     def __init__(self, id: int, name: str, token: str):
         self.id = id
         self.name = name
-        self.token = token  
-    
+        self.token = token
+
+    @property
+    def is_admin(self) -> bool:
+        return self.name == 'admin'
+
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
             'token': self.token,
+            'is_admin': self.is_admin,
         }
 
 
