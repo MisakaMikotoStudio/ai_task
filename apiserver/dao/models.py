@@ -20,16 +20,19 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(64), unique=True, nullable=False, comment='用户名')
     password_hash = Column(String(256), nullable=False, comment='密码哈希')
-    is_admin = Column(Boolean, nullable=False, default=False, comment='是否是管理员')
     created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment='更新时间')
     last_access_at = Column(DateTime, nullable=True, comment='最后访问时间')
+
+    @property
+    def is_admin(self) -> bool:
+        return self.name == 'admin'
 
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
-            'is_admin': bool(self.is_admin),
+            'is_admin': self.is_admin,
             'created_at': str(self.created_at) if self.created_at else None,
             'last_access_at': str(self.last_access_at) if self.last_access_at else None
         }

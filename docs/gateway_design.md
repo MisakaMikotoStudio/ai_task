@@ -41,21 +41,7 @@ MySQL 数据库（共享同一个 DB）
 
 ## 3. 数据库变更（需手动执行的 SQL）
 
-### 3.1 为用户表增加管理员标记
-
-```sql
-ALTER TABLE ai_task_users
-    ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否是管理员（1=是）';
-```
-
-### 3.2 将指定用户设置为管理员
-
-```sql
--- 将用户名替换为实际的 admin 用户名
-UPDATE ai_task_users SET is_admin = 1 WHERE name = 'admin';
-```
-
-### 3.3 虚拟秘钥表
+### 3.1 虚拟秘钥表
 
 ```sql
 CREATE TABLE ai_task_gateway_virtual_keys (
@@ -252,9 +238,8 @@ GET /api/model/monitor?days=30
 
 ## 7. 部署注意事项
 
-1. 先执行第 3 节的所有 SQL 语句
-2. 通过 SQL 手动将目标用户设置为 Admin（`UPDATE ai_task_users SET is_admin=1 WHERE name='xxx'`）
-3. 重启 API Server 使新路由生效
+1. 先执行第 3 节的所有 SQL 语句（无需修改用户表，用户名为 `admin` 即自动具有管理员权限）
+2. 重启 API Server 使新路由生效
 4. 在网关目录 `docker build` 构建镜像
 5. 运行网关容器，配置正确的 DB 连接信息
 6. 在前端「模型 → 虚拟秘钥」创建虚拟秘钥，将虚拟秘钥配置到 Claude Agent SDK 环境变量

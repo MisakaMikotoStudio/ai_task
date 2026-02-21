@@ -139,8 +139,8 @@ def admin_required(f):
     """
     @wraps(f)
     def admin_check(*args, **kwargs):
-        if not getattr(request.user_info, 'is_admin', False):
-            logger.warning(f"非管理员访问被拒绝: user_id={request.user_info.id}")
+        if request.user_info.name != 'admin':
+            logger.warning(f"非管理员访问被拒绝: user_id={request.user_info.id}, name={request.user_info.name}")
             return jsonify({"code": 403, "message": "需要管理员权限"}), 403
         return f(*args, **kwargs)
     # login_required 负责认证并设置 request.user_info，admin_check 再做权限检查
