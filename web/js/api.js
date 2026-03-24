@@ -13,12 +13,9 @@ async function initAPIConfig() {
         if (response.ok) {
             const config = await response.json();
             if (config.apiserver) {
-                const { url, host, path_prefix } = config.apiserver;
-                if (url) {
-                    // 优先使用完整 url
-                    API_BASE = url.replace(/\/$/, '');
-                } else if (host) {
-                    // 否则用 host + path_prefix
+                const { host, path_prefix } = config.apiserver;
+                if (host) {
+                    // 使用 host + path_prefix
                     const hostPart = host.replace(/\/$/, '');
                     const pathPart = path_prefix || '/api';
                     API_BASE = hostPart + pathPart;

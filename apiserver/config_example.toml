@@ -1,0 +1,23 @@
+# AI任务管理系统配置文件
+
+[server]
+# 监听地址: "0.0.0.0" 允许外部访问, "127.0.0.1" 仅本机
+host = "0.0.0.0"
+# 服务端口
+port = 8080
+# 调试模式（生产环境请设为 false）
+debug = false
+
+[database]
+# 数据库类型（目前仅支持 mysql）
+type = "mysql"
+# 数据库地址
+url = "xxxx"
+# 数据库端口
+port = 3306
+# 用户名
+username = "xxx"
+# 密码
+password = "xxxx"
+# 数据库名
+database = "xxx"

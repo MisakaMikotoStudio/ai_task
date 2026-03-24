@@ -1,0 +1,13 @@
+# Web 前端服务配置文件
+
+[server]
+# 监听地址: "0.0.0.0" 允许外部访问, "127.0.0.1" 仅本机
+host = "0.0.0.0"
+# 前端服务端口
+port = 8080
+
+[apiserver]
+# 后端 API 主机地址（不含路径前缀）
+host = "http://ai_task.yuban.site"
+# 后端 API 路径前缀
+path_prefix = "/api"
