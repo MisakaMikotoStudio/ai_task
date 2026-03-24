@@ -31,7 +31,6 @@ def create_app(config: WebConfig) -> Flask:
     url_prefix = config.server.url_prefix.rstrip('/') if config.server.url_prefix else ''
     
     # 保存配置到 app.config
-    app.config['APISERVER_URL'] = config.apiserver.url
     app.config['URL_PREFIX'] = url_prefix
     
     # 创建蓝图
@@ -42,7 +41,6 @@ def create_app(config: WebConfig) -> Flask:
     def get_config():
         return jsonify({
             'apiserver': {
-                'url': config.apiserver.url,
                 'host': config.apiserver.host,
                 'path_prefix': config.apiserver.path_prefix
             }
@@ -82,7 +80,7 @@ def main():
     # 启动服务器
     url_prefix = config.server.url_prefix.rstrip('/') if config.server.url_prefix else ''
     print(f"Starting Web Server on http://{config.server.host}:{config.server.port}{url_prefix}")
-    print(f"API Server configured at: {config.apiserver.url}")
+    print(f"API Server configured at: {config.apiserver.host}{config.apiserver.path_prefix}")
     app.run(
         host=config.server.host,
         port=config.server.port,
