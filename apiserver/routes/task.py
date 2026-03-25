@@ -9,8 +9,9 @@ from flask import Blueprint, request, jsonify
 from routes.auth_plugin import login_required
 from service.task_service import (
     create_task, get_tasks, get_task, update_status, update_flow, update_desc, delete_task,
-    review_task, update_client, TaskNotFoundException, TaskValidationException
+    review_task, update_client, sync_execute, TaskNotFoundException, TaskValidationException
 )
+from dao.task_dao import get_task_by_id
 
 task_bp = Blueprint('task', __name__)
 
@@ -234,5 +235,45 @@ def review_task_api(task_id):
     return jsonify({
         'code': 200,
         'message': result.get('message', '操作成功'),
+        'data': result
+    })
+
+
+@task_bp.route('/sync_execute', methods=['POST'])
+@login_required
+def sync_execute_api():
+    """
+    同步执行信息到 ai_task_tasks.extra
+    """
+    data = request.get_json() or {}
+    task_id = data.get('task_id')
+    develop_doc = data.get('develop_doc', '')
+    merge_request = data.get('merge_request', [])
+
+    if not task_id:
+        return jsonify({'code': 400, 'message': 'task_id不能为空'}), 400
+    if merge_request is None or not isinstance(merge_request, list):
+        return jsonify({'code': 400, 'message': 'merge_request必须是数组'}), 400
+
+    if not get_task_by_id(task_id=task_id, user_id=request.user_info.id):
+        return jsonify({'code': 400, 'message': '任务不存在'}), 400
+
+    try:
+        result = sync_execute(
+            task_id=int(task_id),
+            user_id=request.user_info.id,
+            develop_doc=develop_doc,
+            merge_request=merge_request
+        )
+    except TaskNotFoundException as e:
+        return jsonify({'code': 400, 'message': str(e)}), 400
+    except TaskValidationException as e:
+        return jsonify({'code': 400, 'message': str(e)}), 400
+    except Exception as e:
+        return jsonify({'code': 500, 'message': str(e)}), 500
+
+    return jsonify({
+        'code': 200,
+        'message': '同步成功',
         'data': result
     })

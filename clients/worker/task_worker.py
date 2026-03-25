@@ -9,8 +9,7 @@ import threading
 import time
 
 from config.config_model import ClientConfig
-from rpc import Task
-from worker import CodeDevelopNode
+from worker import CodeDevelopWorker
 
 logger = logging.getLogger(__name__)
 
@@ -18,39 +17,22 @@ logger = logging.getLogger(__name__)
 class TaskWorker(threading.Thread):
     """任务处理线程"""
     
-    def __init__(self, task: Task, config: ClientConfig):
-        super().__init__(name=task.key, daemon=True)
+    def __init__(self, task: dict, client_config: ClientConfig):
+        super().__init__(name=task['key'], daemon=True)
         self.task = task
-        self.config = config
-        self.stopped = False
+        self.client_config = client_config
 
     def run(self):
         """执行任务处理逻辑"""
-        task_key = self.task.key
-        logger.info(f"[{task_key}] 开始处理任务: {self.task.title}")
-        
-        while not self.stopped:                
-            try:
-                # 初始化
-                self.task = self.config.apiserver_rpc.get_task(self.task.id)
-                if 'error' in self.task.flow_status:
-                    continue
-                self.config.sync_config()
-                CodeDevelopNode(task=self.task, client_config=self.config).execute(trace_id=task_key)
-            except Exception as e:
-                logger.error(f"[{task_key}] 任务处理异常: {e}", exc_info=True)
-                self.task.flow_status = "client_error"
-                self.task.flow['error'] = str(e)
-                self.config.apiserver_rpc.update_task_flow(task_id=self.task.id, flow_status="client_error", flow=self.task.flow)
-            finally:
-                # 使用可中断的等待方式
-                for _ in range(5):
-                    if self.stopped:
-                        break
-                    time.sleep(1)
-        
-        logger.info(f"[{task_key}] 任务线程已停止")
+        chat_message_preview = self.task['chat_messages'][-1]['input'][:10]
+        logger.info(
+            f"[{self.task['key']}] 开始处理任务，"
+            f"task_title:{self.task.get('task_title','')}, "
+            f"chat_title:{self.task.get('chat_title','')}, "
+            f"chat_message:{chat_message_preview}..."
+        )
+        CodeDevelopWorker(task=self.task, client_config=self.client_config).run()
 
     def stop(self):
-        """停止任务处理"""
-        self.stopped = True
+        """请求停止任务处理。"""
+        pass

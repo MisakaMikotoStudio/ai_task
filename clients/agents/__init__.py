@@ -5,14 +5,18 @@ Agents 模块 - 各类 AI Agent 的抽象封装
 """
 
 from .base_agent import BaseAgent
-from .claude_code_agent import ClaudeCodeAgent
-from .cloud_agent import CloudAgent
+from .claude_agent_sdk_agent import ClaudeAgentSdkAgent
+from .claude_code_cli_agent import ClaudeCodeCliAgent
 from .open_code_agent import OpenCodeAgent
+
+# 向后兼容历史导出名
+ClaudeCodeAgent = ClaudeCodeCliAgent
 
 __all__ = [
     'BaseAgent',
     'ClaudeCodeAgent',
-    'CloudAgent',
+    'ClaudeCodeCliAgent',
+    'ClaudeAgentSdkAgent',
     'OpenCodeAgent',
     'get_agent_by_name',
     'AGENT_REGISTRY',
@@ -20,8 +24,8 @@ __all__ = [
 
 # Agent 注册表：名称 -> Agent 类
 AGENT_REGISTRY = {
-    'Claude Code': ClaudeCodeAgent,
-    'Cloud': CloudAgent,
+    'claude sdk': ClaudeAgentSdkAgent,
+    'claude cli': ClaudeCodeCliAgent,
     'Open Code': OpenCodeAgent,
 }
 

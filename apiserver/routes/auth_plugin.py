@@ -11,49 +11,12 @@ from functools import wraps
 from flask import request, jsonify
 
 from dao import session_dao, user_dao
-from dao.user_dao import update_last_access, get_user_by_secret
-from dao.heartbeat_dao import check_instance_uuid_valid
+from dao.secret_dao import update_secret_last_used_at
+from dao.user_dao import update_last_access
+from service.user_service import get_user_by_secret
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def secret_required(f):
-    """
-    Secret 秘钥认证装饰器
-    通过请求头 X-Client-Secret 进行认证
-    """
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        trace_id = get_trace_id()
-        request.trace_id = trace_id
-        
-        secret = request.headers.get('X-Client-Secret')
-        if not secret:
-            logger.error("请求缺少认证秘钥", extra={'trace_id': trace_id})
-            return jsonify({"code": 401, "message": "缺少认证秘钥"}), 401
-        
-        try:
-            user_info = get_user_by_secret(secret)
-            if not user_info:
-                logger.error("无效的秘钥", extra={'trace_id': trace_id})
-                return jsonify({"code": 401, "message": "无效的秘钥"}), 401
-        except Exception as e:
-            logger.error(f"秘钥验证失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-            return jsonify({"code": 401, "message": "秘钥验证失败"}), 401
-        
-        request.user_info = user_info
-        
-        # 更新用户最近访问时间
-        try:
-            update_last_access(user_info.id)
-        except Exception as e:
-            logger.error(f"更新用户最近访问时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-        
-        return f(*args, **kwargs)
-    
-    return decorated_function
-
 
 def login_required(f):
     """需要认证的装饰器（支持 Token 和 Secret 两种方式）"""
@@ -68,33 +31,21 @@ def login_required(f):
             try:
                 user_info = get_user_by_secret(secret)
                 if user_info:
-                    # 检查实例UUID是否一致（如果提供了的话）
-                    instance_uuid = request.headers.get('X-Instance-UUID')
-                    client_id_str = request.headers.get('X-Client-ID')
-                    if instance_uuid and client_id_str:
-                        try:
-                            client_id = int(client_id_str)
-                            if not check_instance_uuid_valid(user_info.id, client_id, instance_uuid):
-                                logger.error(f"重复客户端实例: client_id={client_id}, instance_uuid={instance_uuid}", extra={'trace_id': trace_id})
-                                return jsonify({"code": 409, "message": "重复客户端，请确认只有一个客户端实例在运行，或者等待一分钟后重试"}), 409
-                        except ValueError:
-                            pass  # client_id格式错误，忽略检查
-
                     request.user_info = user_info
-                    # 更新用户最近访问时间
+                    # 更新秘钥最近使用时间
                     try:
-                        update_last_access(user_info.id)
+                        update_secret_last_used_at(secret)
                     except Exception as e:
-                        logger.error(f"更新用户最近访问时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
+                        logger.error(f"更新秘钥最近使用时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
                     return f(*args, **kwargs)
                 else:
                     logger.error("无效的秘钥", extra={'trace_id': trace_id})
                     return jsonify({"code": 401, "message": "无效的秘钥"}), 401
             except Exception as e:
-                logger.error(f"秘钥验证失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-                return jsonify({"code": 401, "message": "秘钥验证失败"}), 401
+                logger.error(f"秘钥验证异常: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
+                return jsonify({"code": 500, "message": "秘钥验证异常"}), 500
         
-        # 回退到 Token 认证
+        # 回退到前后端通用 Token 认证
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             logger.error("请求缺少认证token", extra={'trace_id': trace_id})
@@ -116,8 +67,8 @@ def login_required(f):
                 logger.error(f"无效的Token: {token}", extra={'trace_id': trace_id})
                 return jsonify({"code": 401, "message": "无效的认证信息"}), 401
         except Exception as e:
-            logger.error(f"Token验证失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-            return jsonify({"code": 401, "message": "Token验证失败"}), 401
+            logger.error(f"Token验证异常: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
+            return jsonify({"code": 500, "message": "Token验证异常"}), 500
         
         request.user_info = user_info
         

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=14">
+    <link rel="stylesheet" href="css/style.css?v=15">
 </head>
 <body>
     <div class="app-container">
@@ -83,11 +83,11 @@
                     </a>
                     <a href="#" class="nav-item" data-view="clients">
                         <span class="nav-icon">🖥️</span>
-                        <span>客户端管理</span>
+                        <span>客户端</span>
                     </a>
                     <a href="#" class="nav-item" data-view="secrets">
                         <span class="nav-icon">🔑</span>
-                        <span>秘钥管理</span>
+                        <span>秘钥</span>
                     </a>
                 </nav>
                 <div class="sidebar-footer">
@@ -167,14 +167,11 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>ID</th>
-                                    <th>任务Key</th>
+                                    <th>任务id</th>
                                     <th>标题</th>
                                     <th>状态</th>
                                     <th>客户端</th>
-                                    <th>执行状态</th>
                                     <th>创建时间</th>
-                                    <th>更新时间</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -189,10 +186,10 @@
                     </div>
                 </div>
 
-                <!-- 客户端管理视图 -->
+                <!-- 客户端视图 -->
                 <div id="clients-view" class="view">
                     <div class="view-header">
-                        <h2>客户端管理</h2>
+                        <h2>客户端</h2>
                         <div class="view-header-right">
                             <div class="filter-group">
                                 <label class="filter-btn">
@@ -215,6 +212,7 @@
                                 <tr>
                                     <th>ID</th>
                                     <th>名称</th>
+                                    <th>版本号</th>
                                     <th>创始人</th>
                                     <th>公开</th>
                                     <th>最后心跳</th>
@@ -268,6 +266,15 @@
                                             <select id="cfg-client-agent" class="status-select"></select>
                                         </div>
                                     </div>
+                                    <div class="form-row">
+                                        <div class="form-group form-group-quarter">
+                                            <label>官方云部署</label>
+                                            <select id="cfg-client-official-cloud-deploy" class="status-select">
+                                                <option value="0">否</option>
+                                                <option value="1">是</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                     <div class="form-actions">
                                         <button type="submit" class="btn-primary" id="cfg-basic-submit-btn">保存</button>
                                     </div>
@@ -305,10 +312,10 @@
                     </div>
                 </div>
 
-                <!-- 秘钥管理视图 -->
+                <!-- 秘钥视图 -->
                 <div id="secrets-view" class="view">
                     <div class="view-header">
-                        <h2>秘钥管理</h2>
+                        <h2>秘钥</h2>
                         <button id="add-secret-btn" class="btn-primary">
                             <span>+</span> 新增秘钥
                         </button>
@@ -319,6 +326,7 @@
                                 <tr>
                                     <th>名称</th>
                                     <th>秘钥</th>
+                                    <th>最近使用</th>
                                     <th>创建时间</th>
                                     <th>操作</th>
                                 </tr>
@@ -389,10 +397,10 @@
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=8"></script>
+    <script src="js/api.js?v=9"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=17"></script>
+    <script src="js/app.js?v=18"></script>
 </body>
 </html>
 

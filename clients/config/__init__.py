@@ -7,14 +7,12 @@
 from .base_checker import BaseChecker
 from .api_server_checker import ApiServerChecker
 from .git_repo_checker import GitRepoChecker
-from .agent_checker import AgentChecker
 from .config_model import ClientConfig, GitRepoConfig
 
 __all__ = [
     'BaseChecker',
     'ApiServerChecker',
     'GitRepoChecker',
-    'AgentChecker',
     'ClientConfig',
     'GitRepoConfig',
 ]
