@@ -145,11 +145,12 @@ class ClientConfig:
     agent_name: str = '' # agent 类型名称（原始字符串）
     env_vars: Dict[str, str] = field(default_factory=dict) # 环境变量（key -> value）
 
-    def __init__(self, apiserver_url: str, client_id: int, secret: str) -> None:
+    def __init__(self, apiserver_url: str, client_id: int, secret: str,
+                 instance_uuid: Optional[str] = None) -> None:
         self.apiserver_url = apiserver_url
         self.client_id = client_id
         self.secret = secret
-        self.instance_uuid = str(uuid.uuid4())
+        self.instance_uuid = instance_uuid if instance_uuid else str(uuid.uuid4())
         self.docs_git = None
         self.code_git = []
         self.agent = None

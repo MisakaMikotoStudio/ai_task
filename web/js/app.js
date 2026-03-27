@@ -158,6 +158,9 @@ function showMainPage() {
     // 初始化客户端搜索
     initClientSearch();
 
+    // 初始化模型管理（admin）
+    initModelManagement();
+
     // 加载数据
     loadClients();
     loadTasks();
@@ -169,14 +172,35 @@ function showMainPage() {
 }
 
 async function loadUserInfo() {
-    const user = getCurrentUser();
+    let user = getCurrentUser();
+
+    // If is_admin is missing from stored info (e.g. old session), fetch from API
+    if (user && user.is_admin === undefined) {
+        try {
+            const result = await userAPI.me();
+            user = { ...user, is_admin: result.data.is_admin || false };
+            setCurrentUser(user);
+        } catch (_) { /* ignore */ }
+    }
+
     if (user) {
         currentUsername.textContent = user.name;
+        // Apply admin-mode class to body
+        if (user.is_admin) {
+            document.body.classList.add('admin-mode');
+            // Admin default view
+            if (!window.location.hash || window.location.hash === '#/todos') {
+                window.location.hash = '#/model';
+            }
+        } else {
+            document.body.classList.remove('admin-mode');
+        }
     }
 }
 
 function logout() {
     clearAuth();
+    document.body.classList.remove('admin-mode');
     showLoginPage();
     showToast('已退出登录', 'success');
 }
@@ -263,6 +287,11 @@ function switchToView(view) {
         initOKREvents();
     } else if (view === 'secrets') {
         loadSecrets();
+    } else if (view === 'model') {
+        // 激活当前 model tab 对应的数据加载
+        const activeTab = document.querySelector('.model-tab-btn.active');
+        const tabName = activeTab ? activeTab.dataset.modelTab : 'monitor';
+        loadModelTabData(tabName);
     }
 }
 
@@ -288,7 +317,7 @@ function initForms() {
             // 后端返回格式: {code, message, data: {id, name, token}}
             const userData = result.data;
             setToken(userData.token);
-            setCurrentUser({id: userData.id, name: userData.name});
+            setCurrentUser({id: userData.id, name: userData.name, is_admin: userData.is_admin || false});
 
             showToast('登录成功', 'success');
             showMainPage();
@@ -2313,6 +2342,267 @@ function initSecrets() {
     if (addBtn) {
         addBtn.addEventListener('click', showAddSecretModal);
     }
+}
+
+// ===== 模型管理（Admin Only） =====
+
+function initModelManagement() {
+    // Model tab switching
+    document.querySelectorAll('.model-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.model-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.model-tab-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            const tabName = btn.dataset.modelTab;
+            document.getElementById(`model-tab-${tabName}`)?.classList.add('active');
+            loadModelTabData(tabName);
+        });
+    });
+
+    // Refresh monitor button
+    const refreshBtn = document.getElementById('monitor-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => loadMonitorData());
+
+    // Add virtual key button
+    const addVkBtn = document.getElementById('add-vk-btn');
+    if (addVkBtn) addVkBtn.addEventListener('click', showAddVirtualKeyModal);
+
+    // Add price button
+    const addPriceBtn = document.getElementById('add-price-btn');
+    if (addPriceBtn) addPriceBtn.addEventListener('click', showAddPriceModal);
+}
+
+function loadModelTabData(tabName) {
+    if (tabName === 'monitor') {
+        loadMonitorData();
+    } else if (tabName === 'virtual-keys') {
+        loadVirtualKeys();
+    } else if (tabName === 'prices') {
+        loadModelPrices();
+    }
+}
+
+// ── 监控 ──
+
+async function loadMonitorData() {
+    try {
+        const result = await modelAPI.getMonitor(30);
+        const rows = result.data || [];
+        const tbody = document.getElementById('monitor-table-body');
+        const empty = document.getElementById('monitor-empty');
+
+        if (!rows.length) {
+            tbody.innerHTML = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = rows.map(r => `
+            <tr>
+                <td>${escapeHtml(r.stat_date)}</td>
+                <td>${escapeHtml(r.provider)}</td>
+                <td><span class="vk-code">${escapeHtml(r.virtual_key)}</span></td>
+                <td><span class="vk-code">${escapeHtml(r.real_key_masked)}</span></td>
+                <td>${r.input_tokens.toLocaleString()}</td>
+                <td>${r.output_tokens.toLocaleString()}</td>
+                <td class="cost-value">${r.input_cost.toFixed(4)}</td>
+                <td class="cost-value">${r.output_cost.toFixed(4)}</td>
+                <td class="cost-value">${r.total_cost.toFixed(4)}</td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        showToast('加载监控数据失败: ' + error.message, 'error');
+    }
+}
+
+// ── 虚拟秘钥 ──
+
+async function loadVirtualKeys() {
+    try {
+        const result = await modelAPI.listVirtualKeys();
+        const keys = result.data || [];
+        const tbody = document.getElementById('vk-table-body');
+        const empty = document.getElementById('vk-empty');
+
+        if (!keys.length) {
+            tbody.innerHTML = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = keys.map(k => `
+            <tr>
+                <td>${escapeHtml(k.provider)}</td>
+                <td><span class="vk-code">${escapeHtml(k.real_key_masked)}</span></td>
+                <td><span class="vk-code">${escapeHtml(k.virtual_key)}</span></td>
+                <td>${k.daily_limit < 0
+                    ? '<span class="limit-unlimited">无限制</span>'
+                    : '¥ ' + k.daily_limit.toFixed(2)}</td>
+                <td>
+                    <button class="btn-danger btn-small" onclick="deleteVirtualKey(${k.id})">删除</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        showToast('加载虚拟秘钥失败: ' + error.message, 'error');
+    }
+}
+
+async function deleteVirtualKey(id) {
+    if (!confirm('确认删除该虚拟秘钥？删除后使用该秘钥的客户端将无法访问。')) return;
+    try {
+        await modelAPI.deleteVirtualKey(id);
+        showToast('删除成功', 'success');
+        loadVirtualKeys();
+    } catch (error) {
+        showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+async function showAddVirtualKeyModal() {
+    // Load providers for dropdown
+    let providers = ['Anthropic', 'OpenAI', 'DeepSeek', 'Gemini', 'Qwen'];
+    try {
+        const result = await modelAPI.getProviders();
+        providers = (result.data || []).map(p => p.name);
+    } catch (_) { /* use defaults */ }
+
+    const options = providers.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+
+    const content = `
+        <form id="add-vk-form">
+            <div class="form-group">
+                <label>供应商</label>
+                <select id="vk-provider" class="status-select">
+                    ${options}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>真实 API Key</label>
+                <input type="text" id="vk-real-key" placeholder="sk-ant-xxxx 或 sk-xxxx" required>
+            </div>
+            <div class="form-group">
+                <label>单日限费（¥RMB，-1 表示无限制）</label>
+                <input type="number" id="vk-daily-limit" value="-1" step="0.01" min="-1">
+            </div>
+            <button type="submit" class="btn-primary">创建虚拟秘钥</button>
+        </form>
+    `;
+    openModal('新增虚拟秘钥', content);
+
+    document.getElementById('add-vk-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const provider = document.getElementById('vk-provider').value;
+        const realKey = document.getElementById('vk-real-key').value.trim();
+        const dailyLimit = parseFloat(document.getElementById('vk-daily-limit').value);
+
+        if (!realKey) { showToast('请输入真实 API Key', 'error'); return; }
+
+        try {
+            await modelAPI.createVirtualKey(provider, realKey, dailyLimit);
+            showToast('虚拟秘钥创建成功', 'success');
+            closeModal();
+            loadVirtualKeys();
+        } catch (error) {
+            showToast('创建失败: ' + error.message, 'error');
+        }
+    });
+}
+
+// ── 模型价格 ──
+
+async function loadModelPrices() {
+    try {
+        const result = await modelAPI.listPrices();
+        const prices = result.data || [];
+        const tbody = document.getElementById('prices-table-body');
+        const empty = document.getElementById('prices-empty');
+
+        if (!prices.length) {
+            tbody.innerHTML = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = prices.map(p => `
+            <tr>
+                <td>${escapeHtml(p.provider)}</td>
+                <td>${escapeHtml(p.model_name)}</td>
+                <td>${p.input_price_per_million.toFixed(4)}</td>
+                <td>${p.output_price_per_million.toFixed(4)}</td>
+                <td>
+                    <button class="btn-danger btn-small" onclick="deleteModelPrice(${p.id})">删除</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        showToast('加载价格配置失败: ' + error.message, 'error');
+    }
+}
+
+async function deleteModelPrice(id) {
+    if (!confirm('确认删除该价格配置？')) return;
+    try {
+        await modelAPI.deletePrice(id);
+        showToast('删除成功', 'success');
+        loadModelPrices();
+    } catch (error) {
+        showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+async function showAddPriceModal() {
+    let providers = ['Anthropic', 'OpenAI', 'DeepSeek', 'Gemini', 'Qwen'];
+    try {
+        const result = await modelAPI.getProviders();
+        providers = (result.data || []).map(p => p.name);
+    } catch (_) { /* use defaults */ }
+
+    const options = providers.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+
+    const content = `
+        <form id="add-price-form">
+            <div class="form-group">
+                <label>供应商</label>
+                <select id="price-provider" class="status-select">
+                    ${options}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>模型名称（支持前缀匹配，如 claude-sonnet-4-5）</label>
+                <input type="text" id="price-model-name" placeholder="claude-sonnet-4-5" required>
+            </div>
+            <div class="form-group">
+                <label>输入 Token 价格（¥/百万 Token）</label>
+                <input type="number" id="price-input" value="0" step="0.0001" min="0" required>
+            </div>
+            <div class="form-group">
+                <label>输出 Token 价格（¥/百万 Token）</label>
+                <input type="number" id="price-output" value="0" step="0.0001" min="0" required>
+            </div>
+            <button type="submit" class="btn-primary">保存价格</button>
+        </form>
+    `;
+    openModal('新增模型价格', content);
+
+    document.getElementById('add-price-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const provider = document.getElementById('price-provider').value;
+        const modelName = document.getElementById('price-model-name').value.trim();
+        const inputPrice = parseFloat(document.getElementById('price-input').value);
+        const outputPrice = parseFloat(document.getElementById('price-output').value);
+
+        if (!modelName) { showToast('请输入模型名称', 'error'); return; }
+
+        try {
+            await modelAPI.createPrice(provider, modelName, inputPrice, outputPrice);
+            showToast('价格配置创建成功', 'success');
+            closeModal();
+            loadModelPrices();
+        } catch (error) {
+            showToast('创建失败: ' + error.message, 'error');
+        }
+    });
 }
 
 // ===== 工具函数 =====
