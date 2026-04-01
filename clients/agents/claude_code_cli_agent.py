@@ -18,14 +18,6 @@ from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
-MAX_LOG_LEN = 500
-
-
-def _truncate(text: str, max_len: int = MAX_LOG_LEN) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + f"... ({len(text)} chars total)"
-
 
 def _format_usage(usage: dict | None) -> str:
     if not usage:
@@ -78,12 +70,15 @@ class ClaudeCodeCliAgent(BaseAgent):
         )
 
         # prompt 通过 stdin 传入，避免命令行长度限制
+        logger.info(f"[{trace_id}] [{self.name}] 发送 prompt: {prompt}")
         try:
             process.stdin.write(prompt)
             process.stdin.close()
-        finally:
+        except Exception as e:
+            logger.error(f"[{trace_id}] [{self.name}] 发送 prompt 失败: {e}")
             process.kill()
             process.wait()
+            raise e
 
         # 后台线程读取 stderr，防止管道缓冲区满导致死锁
         stderr_lines: list[str] = []
@@ -116,7 +111,7 @@ class ClaudeCodeCliAgent(BaseAgent):
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
-                    logger.debug(f"[{trace_id}] [{self.name}] 非JSON: {_truncate(line)}")
+                    logger.debug(f"[{trace_id}] [{self.name}] 非JSON: {line}")
                     continue
 
                 event_type = event.get("type")
@@ -138,14 +133,16 @@ class ClaudeCodeCliAgent(BaseAgent):
                     self._log_system(trace_id, event)
 
                 else:
-                    logger.debug(f"[{trace_id}] [{self.name}] 未知事件类型: {event_type} | 原始事件: {_truncate(json.dumps(event, ensure_ascii=False))}")
+                    logger.debug(f"[{trace_id}] [{self.name}] 未知事件类型: {event_type} | 原始事件: {json.dumps(event, ensure_ascii=False)}")
 
             process.wait()
             stderr_thread.join(timeout=5)
         finally:
-            process.kill()
-            process.wait()
             timer.cancel()
+            # 仅当子进程仍在运行时才 kill：正常结束时进程已退出，此处无需杀；超时/异常/读循环中断时需要收尾
+            if process.poll() is None:
+                process.kill()
+            process.wait()
 
         if timed_out.is_set():
             error_msg = f"[{trace_id}] [{self.name}] Agent 执行超时 (timeout={timeout}s)"
@@ -156,7 +153,7 @@ class ClaudeCodeCliAgent(BaseAgent):
             stderr_output = "".join(stderr_lines).strip()
             error_msg = f"[{trace_id}] [{self.name}] CLI 进程异常退出 (code={process.returncode})"
             if stderr_output:
-                error_msg += f"\nstderr: {_truncate(stderr_output, 1000)}"
+                error_msg += f"\nstderr: {stderr_output}"
             logger.error(error_msg)
             return error_msg, None
 
@@ -180,9 +177,9 @@ class ClaudeCodeCliAgent(BaseAgent):
         for block in message.get("content", []):
             btype = block.get("type")
             if btype == "thinking":
-                logger.info(f"[{trace_id}]   [思考] {_truncate(block.get('thinking', ''))}")
+                logger.info(f"[{trace_id}]   [思考] {block.get('thinking', '')}")
             elif btype == "text":
-                logger.info(f"[{trace_id}]   [文本] {_truncate(block.get('text', ''))}")
+                logger.info(f"[{trace_id}]   [文本] {block.get('text', '')}")
             elif btype == "tool_use":
                 try:
                     input_str = json.dumps(block.get("input", {}), ensure_ascii=False)
@@ -193,10 +190,10 @@ class ClaudeCodeCliAgent(BaseAgent):
                 tool_meta = f"{resolved_tool}(id={tool_id})" if tool_id else resolved_tool
                 logger.info(
                     f"[{trace_id}]   [工具调用] {tool_meta} "
-                    f"| 参数: {_truncate(input_str)}"
+                    f"| 参数: {input_str}"
                 )
             else:
-                logger.info(f"[{trace_id}]   [{btype}] {_truncate(json.dumps(block, ensure_ascii=False))}")
+                logger.info(f"[{trace_id}]   [{btype}] {json.dumps(block, ensure_ascii=False)}")
 
     def _log_user(self, trace_id: str, event: dict) -> None:
         message = event.get("message", {})
@@ -214,10 +211,10 @@ class ClaudeCodeCliAgent(BaseAgent):
                     content = "(empty)"
                 logger.info(
                     f"[{trace_id}]   [工具结果]{is_err} id={block.get('tool_use_id')} "
-                    f"| {_truncate(str(content))}"
+                    f"| {content}"
                 )
             else:
-                logger.info(f"[{trace_id}]   [{btype}] {_truncate(json.dumps(block, ensure_ascii=False))}")
+                logger.info(f"[{trace_id}]   [{btype}] {json.dumps(block, ensure_ascii=False)}")
 
     def _log_system(self, trace_id: str, event: dict) -> None:
         subtype = event.get("subtype", "")
