@@ -460,15 +460,6 @@ const chatAPI = {
         });
     },
 
-    async updateMessageStatus(taskId, chatId, messageId, status, output = null) {
-        const body = { status };
-        if (output !== null) body.output = output;
-        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}/status`, {
-            method: 'PATCH',
-            body: JSON.stringify(body)
-        });
-    },
-
     // 软删除消息（用户终止），返回 { input } 用于回填输入框
     async deleteMessage(taskId, chatId, messageId) {
         return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, {

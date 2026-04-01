@@ -160,8 +160,9 @@ class CodeDevelopWorker(BaseWorker):
                 "user_input": chat_message.get("input"),
                 "assistant_output": chat_message.get("output"),
             })
-        with open(self.chat_history_file_path, "w", encoding="utf-8") as f:
-            json.dump(chat_history, f, ensure_ascii=False, indent=4)
+        if chat_history:
+            with open(self.chat_history_file_path, "w", encoding="utf-8") as f:
+                json.dump(chat_history, f, ensure_ascii=False, indent=4)
 
     def after_execute(self):
         """执行完成后，保存任务执行信息"""
@@ -362,26 +363,34 @@ class CodeDevelopWorker(BaseWorker):
             f"{self._build_repo_info_table_for_prompt()}"
         )
 
-        # ===== 3. 前置阅读（仅列出存在的文件）=====
+        # ===== 3. 对话历史（存在时强制最先阅读，避免模型直接扫仓库/文档目录）=====
+        if has_chat_history:
+            sections.append(
+                "## 对话历史（必须最先完成）\n\n"
+                f"除当前这条「用户需求」外，先前轮次的对话已写入 `{self.chat_history_file_path}`（JSON 数组，"
+                f"每项含 `user_input`、`assistant_output`，按时间顺序）。\n\n"
+                "**在你用工具读取任何其它文件、列举目录、搜索或浏览任一仓库代码之前**，必须先读取该文件全文，"
+                "理清历史语境（例如用户说「重试」「改一下」时具体所指），再结合本轮用户需求理解任务；"
+                "完成后再读下方「前置阅读」中的其余材料并执行后续步骤。"
+            )
+
+        # ===== 4. 前置阅读（对话历史条目与上一节呼应，便于扫清单时不遗漏）=====
         read_items = []
         if knowledge_file_exists:
             read_items.append(
                 f"- **知识库** `{self.knowledge_file_path}` — 项目背景、架构设计、已有约定"
-            )
-        if has_chat_history:
-            read_items.append(
-                f"- **对话历史** `{self.chat_history_file_path}` — JSON 数组，每个元素包含 `user_input`（用户输入）和 `assistant_output`（助手回复），按时间顺序排列"
             )
         if develop_file_exists:
             read_items.append(
                 f"- **开发文档** `{self.develop_file_path}` — 已有的需求描述和技术方案"
             )
         if read_items:
-            sections.append(
-                "## 前置阅读（编码前必须完成）\n\n" + "\n".join(read_items)
+            preface = (
+                "## 前置阅读（编码前须完成）\n\n"
             )
+            sections.append(preface + "\n".join(read_items))
 
-        # ===== 4. 强制约束 =====
+        # ===== 5. 强制约束 =====
         sections.append(
             "## 强制约束\n\n"
             "1. **禁止切换或新建 git 分支** — 所有仓库已在正确的开发分支，直接在当前分支开发\n"
@@ -390,31 +399,46 @@ class CodeDevelopWorker(BaseWorker):
             f"4. **强制产出开发文档** — 无论用户需求是否涉及实际代码改动（例如咨询、介绍、分析类问题），都必须创建或更新 `{self.develop_file_path}`，并将本次需求、分析过程、执行结论完整记录到文档中"
         )
 
-        # ===== 5. 执行步骤（根据开发文档是否已存在走不同分支）=====
+        # ===== 6. 执行步骤（先拼步骤列表再统一编号，避免 develop_file × chat_history 四分支重复）=====
         commit_step = (
             "**提交并推送变更** — 开发完成后，对每个有改动的仓库执行 `git add -A && git commit && git push`，"
             "commit message 用英文简要概括本次改动内容（不要使用固定模板，根据实际修改编写），"
             "格式示例：`feat: add email verification for user registration`"
         )
+        sync_doc_step = (
+            f"**同步文档** — 开发或分析过程中如有调整，同步更新 `{self.develop_file_path}`；"
+            f"对照模板 `{self.develop_plan_example_file_path}` 检查章节与结构，缺失则补齐、明显偏离则酌情调整，"
+            f"确保最终文档完整反映本次执行过程与结果"
+        )
+        exec_step = (
+            f"**执行开发或分析** — 按 `{self.develop_file_path}` 中的技术方案进行编码；"
+            f"若无需编码，则完成必要的项目分析并形成结论"
+        )
+
+        step_bodies: List[str] = []
+        if has_chat_history:
+            step_bodies.append(
+                f"**读取对话历史** — 打开并阅读 `{self.chat_history_file_path}` 全文，结合上文「用户需求」理解任务；"
+                f"未完成前不得浏览各仓库或读取知识库/开发文档。"
+            )
         if develop_file_exists:
-            steps = (
-                "## 执行步骤\n\n"
-                f"1. **更新需求文档** — 在 `{self.develop_file_path}` 的「需求内容」章节追加本次用户需求（即使是咨询/介绍类需求也必须记录）\n"
-                f"2. **执行开发或分析** — 按文档中的技术方案进行编码；若无需编码，则完成必要的项目分析并形成结论\n"
-                f"3. **同步文档** — 开发或分析过程中如有调整，同步更新 `{self.develop_file_path}`，确保最终文档完整反映本次执行过程与结果\n"
-                f"4. {commit_step}"
+            step_bodies.append(
+                f"**更新需求文档** — 在 `{self.develop_file_path}` 的「需求内容」章节追加本次用户需求（即使是咨询/介绍类需求也必须记录）"
             )
         else:
-            steps = (
-                "## 执行步骤\n\n"
-                f"1. **了解项目** — 浏览各仓库代码结构，理解现有架构和代码组织\n"
-                f"2. **创建开发文档** — 参照模板 `{self.develop_plan_example_file_path}`，"
-                f"创建 `{self.develop_file_path}`，完整记录用户需求和技术方案\n"
-                f"3. **执行开发或分析** — 按制定的技术方案进行编码；若无需编码，则完成必要的项目分析并形成结论\n"
-                f"4. **同步文档** — 开发或分析过程中如有调整，同步更新 `{self.develop_file_path}`，确保最终文档完整反映本次执行过程与结果\n"
-                f"5. {commit_step}"
+            step_bodies.append(
+                "**了解项目** — 浏览各仓库代码结构，理解现有架构和代码组织"
             )
-        sections.append(steps)
+            step_bodies.append(
+                f"**创建开发文档** — 参照模板 `{self.develop_plan_example_file_path}`，"
+                f"创建 `{self.develop_file_path}`，完整记录用户需求和技术方案"
+            )
+        step_bodies.append(exec_step)
+        step_bodies.append(sync_doc_step)
+        step_bodies.append(commit_step)
+
+        numbered = "\n".join(f"{i + 1}. {body}" for i, body in enumerate(step_bodies))
+        sections.append(f"## 执行步骤\n\n{numbered}")
 
         return "\n\n---\n\n".join(sections) + "\n"
 
