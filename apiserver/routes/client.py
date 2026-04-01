@@ -4,7 +4,7 @@
 客户端相关路由
 """
 
-from flask import Blueprint, request, jsonify, g, current_app
+from flask import Blueprint, request, jsonify, g
 
 from dao.client_dao import (
     create_client, get_clients_by_user, get_client_by_id,
@@ -12,15 +12,18 @@ from dao.client_dao import (
     delete_client, update_client,
     get_client_repos, update_client_repos, get_client_with_permission,
     update_repo_default_branch, get_repo_by_id, get_client_by_id_no_user_check,
-    get_clients_paginated, get_usable_clients_for_task
+    get_clients_paginated, get_usable_clients_for_task,
+    get_client_env_vars, create_client_env_var, update_client_env_var, delete_client_env_var,
+    increment_client_version,
 )
 from dao.heartbeat_dao import update_heartbeat, get_heartbeats_by_user
+from dao.chat_dao import get_running_chats_by_client, get_running_chat_messages_by_client
 from routes.auth_plugin import login_required
 
 client_bp = Blueprint('client', __name__)
 
 # Agent可选项列表（后端写死）
-AVAILABLE_AGENTS = ['Claude Code']
+AVAILABLE_AGENTS = ['claude sdk', 'claude cli']
 
 
 @client_bp.route('/agents', methods=['GET'])
@@ -33,7 +36,7 @@ def get_available_agents():
         成功 (200):
             {
                 "code": 200,
-                "data": ["Claude Code"]
+                "data": ["claude sdk", "claude cli"]
             }
     """
     return jsonify({
@@ -81,8 +84,11 @@ def create_client_api():
 
     name = data.get('name', '').strip()
     types = data.get('types', [])
-    is_public = data.get('is_public', False)
-    agent = data.get('agent', 'Claude Code')
+    agent = data.get('agent', 'claude sdk')
+    try:
+        official_cloud_deploy = int(data.get('official_cloud_deploy', 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': 'official_cloud_deploy 仅支持 0 或 1'}), 400
 
     if not name:
         return jsonify({'code': 400, 'message': '客户端名称不能为空'}), 400
@@ -96,13 +102,21 @@ def create_client_api():
     # 校验 agent 是否在可选列表中
     if agent not in AVAILABLE_AGENTS:
         return jsonify({'code': 400, 'message': f'无效的Agent类型，可选值: {", ".join(AVAILABLE_AGENTS)}'}), 400
+    if official_cloud_deploy not in (0, 1):
+        return jsonify({'code': 400, 'message': 'official_cloud_deploy 仅支持 0 或 1'}), 400
 
     # 检查是否已存在同名客户端
     if check_client_name_exists(request.user_info.id, name):
         return jsonify({'code': 400, 'message': '客户端名称已存在'}), 400
     
     # 创建客户端
-    client_id = create_client(request.user_info.id, name, types, is_public=is_public, agent=agent)
+    client_id = create_client(
+        request.user_info.id,
+        name,
+        types,
+        agent=agent,
+        official_cloud_deploy=official_cloud_deploy
+    )
     
     return jsonify({
         'code': 201,
@@ -119,7 +133,7 @@ def create_client_api():
 @login_required
 def list_clients():
     """
-    获取当前用户可见的客户端列表（自己创建的 + 公开的），支持游标分页
+    获取当前用户创建的客户端列表（仅创始人可见），支持游标分页
 
     Headers:
         Authorization: Bearer <token>  # 认证令牌
@@ -128,7 +142,7 @@ def list_clients():
     Query Parameters:
         cursor: int          # 游标（上一页最后一条记录的client_id），不传表示第一页
         limit: int           # 每页数量，默认20，最大100
-        only_mine: bool      # 是否只看我创建的，默认false
+        only_mine: bool      # 是否只看我创建的，默认false（当前仅返回自己创建的）
 
     Response:
         成功 (200):
@@ -143,7 +157,6 @@ def list_clients():
                             "types": [str],         # 支持的任务类型列表
                             "last_sync_at": str,    # 最后心跳时间（ISO格式，可为null）
                             "created_at": str,      # 创建时间（ISO格式）
-                            "is_public": bool,      # 是否公开
                             "creator_name": str,    # 创始人名称
                             "editable": bool        # 是否可编辑
                         },
@@ -184,11 +197,7 @@ def list_clients():
 @login_required
 def list_usable_clients():
     """
-    获取当前用户可用于创建任务的客户端列表
-
-    包括：
-    1. 用户自己创建的客户端
-    2. 用户启动并上报过心跳的客户端（需要该客户端是用户自己创建或当前依然是公开状态）
+    获取当前用户可用于创建任务的客户端列表（仅用户自己创建的客户端）
 
     Headers:
         Authorization: Bearer <token>  # 认证令牌
@@ -204,7 +213,6 @@ def list_usable_clients():
                         "id": int,              # 客户端ID
                         "name": str,            # 客户端名称
                         "types": [str],         # 支持的任务类型列表
-                        "is_public": bool,      # 是否公开
                         "creator_name": str,    # 创始人名称
                         "editable": bool        # 是否可编辑
                     },
@@ -282,7 +290,6 @@ def update_client_api(client_id):
         {
             "name": str,              # 客户端名称（必填，最多16个字符）
             "types": [str],           # 支持的任务类型列表（可选，默认为空数组）
-            "is_public": bool,        # 是否公开（可选）
             "agent": str              # Agent类型（可选）
         }
 
@@ -307,8 +314,13 @@ def update_client_api(client_id):
 
     name = data.get('name', '').strip()
     types = data.get('types', [])
-    is_public = data.get('is_public')
     agent = data.get('agent')
+    official_cloud_deploy = data.get('official_cloud_deploy')
+    if official_cloud_deploy is not None:
+        try:
+            official_cloud_deploy = int(official_cloud_deploy)
+        except (TypeError, ValueError):
+            return jsonify({'code': 400, 'message': 'official_cloud_deploy 仅支持 0 或 1'}), 400
 
     if not name:
         return jsonify({'code': 400, 'message': '客户端名称不能为空'}), 400
@@ -322,9 +334,12 @@ def update_client_api(client_id):
     # 校验 agent 是否在可选列表中
     if agent is not None and agent not in AVAILABLE_AGENTS:
         return jsonify({'code': 400, 'message': f'无效的Agent类型，可选值: {", ".join(AVAILABLE_AGENTS)}'}), 400
+    if official_cloud_deploy is not None and official_cloud_deploy not in (0, 1):
+        return jsonify({'code': 400, 'message': 'official_cloud_deploy 仅支持 0 或 1'}), 400
 
-    # 检查客户端是否存在
-    if not get_client_by_id(client_id, request.user_info.id):
+    # 检查客户端是否存在（顺便获取旧 agent 用于判断是否真的变更）
+    old_client = get_client_by_id(client_id, request.user_info.id)
+    if not old_client:
         return jsonify({'code': 404, 'message': '客户端不存在'}), 404
 
     # 检查名称是否与其他客户端重复
@@ -334,9 +349,17 @@ def update_client_api(client_id):
     # 更新客户端
     update_client(
         client_id, request.user_info.id, name, types,
-        is_public=is_public,
-        agent=agent
+        agent=agent,
+        official_cloud_deploy=official_cloud_deploy
     )
+
+    # 仅当前端更新会影响客户端执行配置时，才增加 version
+    # 目前：agent 类型变更会影响云客户端启动执行的逻辑
+    old_official_cloud_deploy = old_client.official_cloud_deploy if old_client.official_cloud_deploy is not None else 0
+    if (agent is not None and agent != (old_client.agent or 'claude sdk')) or (
+        official_cloud_deploy is not None and official_cloud_deploy != old_official_cloud_deploy
+    ):
+        increment_client_version(client_id, request.user_info.id)
 
     return jsonify({
         'code': 200,
@@ -392,45 +415,36 @@ def heartbeat(client_id):
     Request Body:
         {
             "instance_uuid": str  # 客户端实例的唯一标识UUID（必填）
-        }
+        }s
 
     Response:
         成功 (200):
             {"code": 200, "message": "心跳更新成功"}
-        实例变更冷却中 (409):
-            {"code": 409, "message": "客户端实例变更，请等待N秒后再重试客户端"}
         未找到 (404):
-            {"code": 404, "message": "客户端不存在"}
+            {"code": 404, "message": "客户端不存在或无权限"}
         参数错误 (400):
             {"code": 400, "message": "instance_uuid不能为空"}
         未认证 (401):
             {"code": 401, "message": "缺少认证token"}
     """
+    # 检查客户端是否存在
+    client = get_client_with_permission(client_id, request.user_info.id)
+    if not client:
+        return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
+
     data = request.get_json() or {}
     instance_uuid = data.get('instance_uuid', '').strip()
-
     if not instance_uuid:
         return jsonify({'code': 400, 'message': 'instance_uuid不能为空'}), 400
-
-    # 检查客户端是否存在
-    client = get_client_by_id_no_user_check(client_id)
-    if not client:
-        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
-
-    # 实例变更冷却时间（秒）
-    cooldown_seconds = current_app.config.get('INSTANCE_CHANGE_COOLDOWN_SECONDS', 60)
 
     # 更新心跳记录（使用新的心跳表）
     success, error_msg = update_heartbeat(
         user_id=request.user_info.id,
         client_id=client_id,
-        instance_uuid=instance_uuid,
-        instance_change_cooldown_seconds=cooldown_seconds
+        instance_uuid=instance_uuid
     )
-
     if not success:
         return jsonify({'code': 409, 'message': error_msg}), 409
-
     return jsonify({'code': 200, 'message': '心跳更新成功'})
 
 
@@ -446,6 +460,49 @@ def get_user_heartbeats():
     """
     heartbeats = get_heartbeats_by_user(request.user_info.id)
     return jsonify({'code': 200, 'data': heartbeats})
+
+
+@client_bp.route('/running_chat', methods=['GET'])
+@login_required
+def get_running_chat_api():
+    """获取指定客户端下仍在运行中的Chat消息列表（供客户端轮询）"""
+    client_id_raw = request.args.get('clientId') or request.headers.get('X-Client-ID')
+    if not client_id_raw:
+        return jsonify({'code': 400, 'message': 'clientId不能为空'}), 400
+
+    try:
+        client_id = int(client_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': 'clientId必须是整数'}), 400
+
+    if client_id <= 0:
+        return jsonify({'code': 400, 'message': 'clientId必须大于0'}), 400
+
+    # 权限校验：仅可查询自己创建的或公开客户端
+    if not get_client_with_permission(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
+
+    data = get_running_chats_by_client(request.user_info.id, client_id)
+    return jsonify({
+        'code': 200,
+        'message': '获取运行中Chat成功',
+        'data': data
+    })
+
+
+@client_bp.route('/<int:client_id>/running_chat_message', methods=['GET'])
+@login_required
+def get_running_chat_message_api(client_id):
+    """获取指定客户端下需要处理的对话任务消息（供客户端轮询）"""
+    # 权限校验：仅可查询自己创建的或公开客户端
+    if not get_client_with_permission(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
+    data = get_running_chat_messages_by_client(request.user_info.id, client_id)
+    return jsonify({
+        'code': 200,
+        'message': '获取运行中Chat消息成功',
+        'data': data
+    })
 
 
 @client_bp.route('/<int:client_id>/repos', methods=['GET'])
@@ -501,10 +558,13 @@ def update_client_repos_api(client_id):
         return jsonify({'code': 400, 'message': '只能指定一个文档仓库'}), 400
 
     update_client_repos(client_id, repos)
+    # 仓库配置变更会影响客户端执行
+    increment_client_version(client_id, request.user_info.id)
     return jsonify({'code': 200, 'message': '仓库配置更新成功'})
 
 
 @client_bp.route('/<int:client_id>/config', methods=['GET'])
+@login_required
 def get_client_config_api(client_id):
     """
     获取客户端完整配置（供客户端远程启动使用）
@@ -517,37 +577,109 @@ def get_client_config_api(client_id):
         未认证 (401): 秘钥无效
         未找到 (404): 客户端不存在或无权限
     """
-    from dao.user_dao import get_user_by_secret
-
-    secret = request.headers.get('X-Client-Secret')
-    if not secret:
-        return jsonify({'code': 401, 'message': '缺少认证秘钥'}), 401
-
-    # 通过secret查找user
-    user = get_user_by_secret(secret)
-    if not user:
-        return jsonify({'code': 401, 'message': '无效的秘钥'}), 401
-
     # 获取client配置（需校验权限：创建者或公开）
-    client = get_client_with_permission(client_id, user.id)
+    client = get_client_with_permission(client_id, request.user_info.id)
     if not client:
         return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
 
     # 获取仓库配置
     repos = get_client_repos(client_id)
+    # 获取环境变量（官方云部署/容器启动场景有效）
+    env_vars = get_client_env_vars(client_id)
 
     return jsonify({
         'code': 200,
         'data': {
             'id': client.id,
             'name': client.name,
-            'agent': client.agent or 'Claude Code',
-            'repos': [repo.to_dict() for repo in repos]
+            'login_user_name': request.user_info.name,
+            'agent': client.agent,
+            'repos': [repo.to_dict() for repo in repos],
+            'env_vars': [ev.to_dict() for ev in env_vars]
         }
     })
 
 
+@client_bp.route('/<int:client_id>/env-vars', methods=['GET'])
+@login_required
+def get_client_env_vars_api(client_id):
+    """获取客户端环境变量列表"""
+    if not get_client_with_permission(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    env_vars = get_client_env_vars(client_id)
+    return jsonify({
+        'code': 200,
+        'data': [ev.to_dict() for ev in env_vars]
+    })
+
+
+@client_bp.route('/<int:client_id>/env-vars', methods=['POST'])
+@login_required
+def create_client_env_var_api(client_id):
+    """新增客户端环境变量"""
+    if not get_client_by_id(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    key = data.get('key', '').strip()
+    value = data.get('value', '')
+
+    if not key:
+        return jsonify({'code': 400, 'message': '环境变量名不能为空'}), 400
+
+    env_var_id = create_client_env_var(client_id, key, value)
+    # 环境变量变更会影响客户端执行
+    increment_client_version(client_id, request.user_info.id)
+    return jsonify({'code': 201, 'message': '环境变量创建成功', 'data': {'id': env_var_id}}), 201
+
+
+@client_bp.route('/<int:client_id>/env-vars/<int:env_var_id>', methods=['PUT'])
+@login_required
+def update_client_env_var_api(client_id, env_var_id):
+    """更新客户端环境变量"""
+    if not get_client_by_id(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    key = data.get('key', '').strip()
+    value = data.get('value', '')
+
+    if not key:
+        return jsonify({'code': 400, 'message': '环境变量名不能为空'}), 400
+
+    if not update_client_env_var(env_var_id, client_id, key, value):
+        return jsonify({'code': 404, 'message': '环境变量不存在'}), 404
+
+    # 环境变量变更会影响客户端执行
+    increment_client_version(client_id, request.user_info.id)
+
+    return jsonify({'code': 200, 'message': '环境变量更新成功'})
+
+
+@client_bp.route('/<int:client_id>/env-vars/<int:env_var_id>', methods=['DELETE'])
+@login_required
+def delete_client_env_var_api(client_id, env_var_id):
+    """软删除客户端环境变量"""
+    if not get_client_by_id(client_id, request.user_info.id):
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    if not delete_client_env_var(env_var_id, client_id):
+        return jsonify({'code': 404, 'message': '环境变量不存在'}), 404
+
+    # 环境变量变更会影响客户端执行
+    increment_client_version(client_id, request.user_info.id)
+    return jsonify({'code': 200, 'message': '环境变量删除成功'})
+
+
 @client_bp.route('/<int:client_id>/repos/<int:repo_id>/default-branch', methods=['PATCH'])
+@login_required
 def update_repo_default_branch_api(client_id, repo_id):
     """
     更新仓库的默认主分支（供客户端启动时自动更新）
@@ -574,25 +706,14 @@ def update_repo_default_branch_api(client_id, repo_id):
         未找到 (404):
             {"code": 404, "message": "仓库配置不存在或无权限"}
     """
-    from dao.user_dao import get_user_by_secret
-
-    secret = request.headers.get('X-Client-Secret')
-    if not secret:
-        return jsonify({'code': 401, 'message': '缺少认证秘钥'}), 401
-
-    # 通过secret查找user
-    user = get_user_by_secret(secret)
-    if not user:
-        return jsonify({'code': 401, 'message': '无效的秘钥'}), 401
-
     # 获取client配置（需校验权限：创建者或公开）
-    client = get_client_with_permission(client_id, user.id)
+    client = get_client_with_permission(client_id, request.user_info.id)
     if not client:
         return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
 
     # 获取仓库配置
-    repo = get_repo_by_id(repo_id)
-    if not repo or repo.client_id != client_id:
+    repo = get_repo_by_id(repo_id, client_id)
+    if not repo:
         return jsonify({'code': 404, 'message': '仓库配置不存在'}), 404
 
     # 获取请求数据
@@ -609,3 +730,82 @@ def update_repo_default_branch_api(client_id, repo_id):
         return jsonify({'code': 200, 'message': '默认分支更新成功'})
     else:
         return jsonify({'code': 500, 'message': '更新失败'}), 500
+
+
+@client_bp.route('/startup-config', methods=['POST'])
+@login_required
+def get_client_startup_config():
+    """
+    客户端启动配置接口
+
+    验证方式：
+        1. 请求头 X-Client-Secret 必须是有效秘钥
+        2. 秘钥对应的用户名决定可查询范围（admin 可查询全部；非 admin 仅查询自身）
+
+    注意逻辑：
+    为什么要返回 invalid_ids？
+    因为客户端机器中可能会有多个用户的客户端容器，传过来的查询客户端id并不一定是当前用户的且有效，需要服务端做区分
+
+    request body:
+        {
+            "clientIds": [int, ...] # 客户端ID列表
+        }
+
+    Response:
+        成功 (200):
+            {
+                "code": 200,
+                "configs": [
+                    {
+                        "client_id": int,   # 客户端ID
+                        "secret": str,      # 客户端专用秘钥
+                        "version": int,     # 客户端配置版本号（用于启动器容器名）
+                        "env_vars": [       # 客户端配置的环境变量（用于 docker run -e 注入）
+                            {"key": str, "value": str},
+                            ...
+                        ]
+                    },
+                    ...
+                ]，
+                "invalid_ids": [int, ...] # 无效的客户端ID列表
+            }
+        未认证 (401):
+            {"code": 401, "message": "错误信息"}
+        参数错误 (400):
+            {"code": 400, "message": "错误信息"}
+    """
+    from dao.client_dao import get_clients_for_startup
+    from dao.client_dao import get_client_env_vars_by_client_ids
+
+    user = request.user_info
+
+    body = request.get_json(silent=True) or {}
+    client_ids = body.get('clientIds', [])
+    if not isinstance(client_ids, list):
+        return jsonify({'code': 400, 'message': 'clientIds 必须是数组'}), 400
+    client_ids = [int(x) for x in client_ids if x is not None]
+
+    # admin：查询所有官方云部署客户端
+    # 非 admin：查询当前用户下官方云部署客户端
+    if user.name == 'admin':
+        result = get_clients_for_startup()
+    else:
+        result = get_clients_for_startup(user_id=user.id)
+        # 非admin用户，直接使用请求头的秘钥
+        for item in result:
+            item['secret'] = request.headers.get('X-Client-Secret')
+
+    permitted_config_client_ids = [item["client_id"] for item in result]
+    invalid_ids = [cid for cid in client_ids if cid not in permitted_config_client_ids]
+
+    env_vars_map = get_client_env_vars_by_client_ids(permitted_config_client_ids)
+    for item in result:
+        env_vars = env_vars_map.get(item["client_id"], [])
+        item["env_vars"] = [{"key": ev.key, "value": ev.value or ""} for ev in env_vars]
+
+    # result 每项包含 client_id/secret/version/env_vars
+    return jsonify({
+        'code': 200,
+        'configs': result,
+        'invalid_ids': invalid_ids,
+    })

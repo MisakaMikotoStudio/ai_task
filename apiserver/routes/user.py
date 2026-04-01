@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify
 
 from routes.auth_plugin import login_required
 from service.user_service import register_user, login_user
-from dao.user_dao import get_user_secrets, create_user_secret, delete_user_secret
+from dao.secret_dao import get_user_secrets, create_user_secret, delete_user_secret
 
 user_bp = Blueprint('user', __name__)
 

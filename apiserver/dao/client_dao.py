@@ -5,15 +5,21 @@
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from sqlalchemy import or_
 
 from .connection import get_db_session
-from .models import Client, ClientRepo, User
+from .models import Client, ClientRepo, ClientEnvVar, User
 
 
-def create_client(user_id: int, name: str, types: List[str], is_public: bool = False, agent: str = 'Claude Code') -> int:
+def create_client(
+    user_id: int,
+    name: str,
+    types: List[str],
+    agent: str = 'claude sdk',
+    official_cloud_deploy: int = 0
+) -> int:
     """
     创建客户端
 
@@ -21,14 +27,22 @@ def create_client(user_id: int, name: str, types: List[str], is_public: bool = F
         user_id: 用户ID
         name: 客户端名称
         types: 支持的任务类型列表
-        is_public: 是否公开
         agent: Agent类型
+        official_cloud_deploy: 官方云部署（0否 1是）
 
     Returns:
         新创建的客户端ID
     """
     with get_db_session() as session:
-        client = Client(user_id=user_id, name=name, types=types, creator_id=user_id, is_public=is_public, agent=agent)
+        client = Client(
+            user_id=user_id,
+            name=name,
+            types=types,
+            creator_id=user_id,
+            agent=agent,
+            official_cloud_deploy=official_cloud_deploy,
+            version=1,  # 初始化版本，确保启动器能按版本命名容器
+        )
         session.add(client)
         session.flush()
         return client.id
@@ -36,7 +50,7 @@ def create_client(user_id: int, name: str, types: List[str], is_public: bool = F
 
 def get_clients_by_user(user_id: int) -> List[dict]:
     """
-    获取用户可见的所有客户端（自己创建的 + 公开的）
+    获取用户创建的所有客户端
 
     Args:
         user_id: 用户ID
@@ -45,15 +59,11 @@ def get_clients_by_user(user_id: int) -> List[dict]:
         客户端字典列表（包含creator_name和editable）
     """
     with get_db_session() as session:
-        # 查询自己创建的 + 其他人公开的
         clients = session.query(Client, User.name).outerjoin(
             User, Client.creator_id == User.id
         ).filter(
             Client.deleted_at.is_(None),
-            or_(
-                Client.user_id == user_id,
-                Client.is_public == True
-            )
+            Client.user_id == user_id,
         ).order_by(Client.created_at.desc()).all()
 
         result = []
@@ -71,7 +81,7 @@ def get_clients_paginated(
     only_mine: bool = False
 ) -> dict:
     """
-    获取用户可见的客户端列表（游标分页）
+    获取用户创建的客户端列表（游标分页）
 
     Args:
         user_id: 用户ID
@@ -95,17 +105,8 @@ def get_clients_paginated(
         )
 
         # 根据筛选条件过滤
-        if only_mine:
-            # 只看我创建的
-            query = query.filter(Client.user_id == user_id)
-        else:
-            # 我创建的 + 公开的
-            query = query.filter(
-                or_(
-                    Client.user_id == user_id,
-                    Client.is_public == True
-                )
-            )
+        # 仅查看当前用户创建的客户端
+        query = query.filter(Client.user_id == user_id)
 
         # 按ID倒序排列（新的在前）
         query = query.order_by(Client.id.desc())
@@ -286,8 +287,8 @@ def update_client(
     user_id: int,
     name: str,
     types: List[str],
-    is_public: bool = None,
-    agent: str = None
+    agent: str = None,
+    official_cloud_deploy: int = None
 ) -> bool:
     """
     更新客户端信息
@@ -297,8 +298,8 @@ def update_client(
         user_id: 用户ID
         name: 新的客户端名称
         types: 新的任务类型列表
-        is_public: 是否公开
         agent: Agent类型
+        official_cloud_deploy: 官方云部署（0否 1是）
 
     Returns:
         是否更新成功
@@ -308,10 +309,10 @@ def update_client(
             Client.name: name,
             Client.types: types
         }
-        if is_public is not None:
-            update_data[Client.is_public] = is_public
         if agent is not None:
             update_data[Client.agent] = agent
+        if official_cloud_deploy is not None:
+            update_data[Client.official_cloud_deploy] = official_cloud_deploy
 
         affected = session.query(Client).filter(
             Client.id == client_id,
@@ -347,7 +348,8 @@ def get_client_repos(client_id: int) -> List[ClientRepo]:
     """获取客户端的仓库配置列表"""
     with get_db_session() as session:
         repos = session.query(ClientRepo).filter(
-            ClientRepo.client_id == client_id
+            ClientRepo.client_id == client_id,
+            ClientRepo.deleted_at.is_(None)
         ).all()
         return repos
 
@@ -364,8 +366,13 @@ def update_client_repos(client_id: int, repos: List[dict]) -> bool:
         是否成功
     """
     with get_db_session() as session:
-        # 删除旧配置
-        session.query(ClientRepo).filter(ClientRepo.client_id == client_id).delete()
+        # 软删除旧配置
+        session.query(ClientRepo).filter(
+            ClientRepo.client_id == client_id,
+            ClientRepo.deleted_at.is_(None)
+        ).update({
+            ClientRepo.deleted_at: datetime.now()
+        })
 
         # 添加新配置
         for repo in repos:
@@ -394,15 +401,12 @@ def get_client_by_id_no_user_check(client_id: int) -> Optional[Client]:
 
 
 def get_client_with_permission(client_id: int, user_id: int) -> Optional[Client]:
-    """获取客户端（校验权限：创建者或公开）"""
+    """获取客户端（校验权限：仅创建者）"""
     with get_db_session() as session:
         client = session.query(Client).filter(
             Client.id == client_id,
             Client.deleted_at.is_(None),
-            or_(
-                Client.user_id == user_id,
-                Client.is_public == True
-            )
+            Client.user_id == user_id,
         ).first()
         return client
 
@@ -420,18 +424,20 @@ def update_repo_default_branch(repo_id: int, default_branch: str) -> bool:
     """
     with get_db_session() as session:
         affected = session.query(ClientRepo).filter(
-            ClientRepo.id == repo_id
+            ClientRepo.id == repo_id,
         ).update({
             ClientRepo.default_branch: default_branch
         })
         return affected > 0
 
 
-def get_repo_by_id(repo_id: int) -> Optional[ClientRepo]:
+def get_repo_by_id(repo_id: int, client_id: int) -> Optional[ClientRepo]:
     """获取单个仓库配置"""
     with get_db_session() as session:
         repo = session.query(ClientRepo).filter(
-            ClientRepo.id == repo_id
+            ClientRepo.id == repo_id,
+            ClientRepo.client_id == client_id,
+            ClientRepo.deleted_at.is_(None)
         ).first()
         return repo
 
@@ -442,7 +448,6 @@ def get_usable_clients_for_task(user_id: int) -> List[dict]:
 
     包括：
     1. 用户自己创建的客户端
-    2. 用户启动并上报过心跳的客户端（需要该客户端是用户自己创建或当前依然是公开状态）
 
     Args:
         user_id: 用户ID
@@ -461,31 +466,17 @@ def get_usable_clients_for_task(user_id: int) -> List[dict]:
             ).all()
         )
 
-        # 2. 获取用户上报过心跳的客户端ID列表
-        heartbeat_client_ids = set(
-            row[0] for row in session.query(ClientHeartbeat.client_id).filter(
-                ClientHeartbeat.user_id == user_id
-            ).all()
-        )
-
-        # 合并所有可能的客户端ID
-        candidate_ids = own_client_ids.union(heartbeat_client_ids)
-
-        if not candidate_ids:
+        if not own_client_ids:
             return []
 
         # 查询这些客户端的详细信息，同时校验：
         # - 客户端未删除
-        # - 客户端是用户自己创建 OR 客户端是公开的
+        # - 客户端是用户自己创建
         clients = session.query(Client, User.name).outerjoin(
             User, Client.creator_id == User.id
         ).filter(
-            Client.id.in_(candidate_ids),
             Client.deleted_at.is_(None),
-            or_(
-                Client.user_id == user_id,
-                Client.is_public == True
-            )
+            Client.user_id == user_id,
         ).order_by(Client.created_at.desc()).all()
 
         result = []
@@ -496,13 +487,116 @@ def get_usable_clients_for_task(user_id: int) -> List[dict]:
         return result
 
 
+def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:    
+    if user_id is None:
+        """
+        获取 official_cloud_deploy 类型为 1 的客户端，同时 JOIN 其所属用户的官方云部署有效秘钥。
+        若用户没有官方云部署的有效秘钥则不返回该客户端。
+        返回: [{'client_id': int, 'secret': str, 'version': int}, ...]
+        """
+        from .models import UserSecret
+        with get_db_session() as session:
+            query = session.query(Client.id, Client.version, UserSecret.secret).join(
+                UserSecret,
+                (UserSecret.user_id == Client.user_id) &
+                (UserSecret.type == UserSecret.TYPE_CLOUD) &
+                (UserSecret.deleted == 0)
+            ).filter(
+                Client.official_cloud_deploy == 1,
+                Client.deleted_at.is_(None)
+            )
+            rows = query.all()
+            return [{'client_id': client_id, 'secret': secret, 'version': version} for client_id, version, secret in rows]
+
+    """
+    获取用户可用于创建任务的客户端列表，不返回秘钥
+    """
+    with get_db_session() as session:
+        query = session.query(Client.id, Client.version).join(
+            Client.user_id == user_id,
+        ).filter(
+            Client.deleted_at.is_(None)
+        )
+        rows = query.all()
+        return [{'client_id': client_id, 'version': version} for client_id, version in rows]
+
+def increment_client_version(client_id: int, user_id: int) -> bool:
+    """
+    增加客户端配置版本号（用于触发启动器按新版本重建容器）
+    所有会影响到客户端docker执行环境的才需要调用这个接口，其他客户端可以通过配置同步自适应的不需要调用这个接口
+    """
+    with get_db_session() as session:
+        affected = session.query(Client).filter(
+            Client.id == client_id,
+            Client.user_id == user_id,
+            Client.deleted_at.is_(None),
+        ).update({Client.version: Client.version + 1})
+        return affected > 0
+
+
+def get_client_env_vars(client_id: int) -> List[ClientEnvVar]:
+    """获取客户端有效的环境变量列表（deleted_at 为空的记录）"""
+    with get_db_session() as session:
+        return session.query(ClientEnvVar).filter(
+            ClientEnvVar.client_id == client_id,
+            ClientEnvVar.deleted_at.is_(None)
+        ).order_by(ClientEnvVar.id.asc()).all()
+
+
+def get_client_env_vars_by_client_ids(client_ids: List[int]) -> Dict[int, List[ClientEnvVar]]:
+    """批量获取多个客户端的环境变量，按 client_id 分组返回"""
+    if not client_ids:
+        return {}
+    with get_db_session() as session:
+        rows = session.query(ClientEnvVar).filter(
+            ClientEnvVar.client_id.in_(client_ids),
+            ClientEnvVar.deleted_at.is_(None)
+        ).all()
+
+        grouped: Dict[int, List[ClientEnvVar]] = {}
+        for ev in rows:
+            grouped.setdefault(ev.client_id, []).append(ev)
+        return grouped
+
+
+def create_client_env_var(client_id: int, key: str, value: str) -> int:
+    """新增环境变量，返回新记录ID"""
+    with get_db_session() as session:
+        env_var = ClientEnvVar(client_id=client_id, key=key, value=value)
+        session.add(env_var)
+        session.flush()
+        return env_var.id
+
+
+def update_client_env_var(env_var_id: int, client_id: int, key: str, value: str) -> bool:
+    """更新环境变量"""
+    with get_db_session() as session:
+        affected = session.query(ClientEnvVar).filter(
+            ClientEnvVar.id == env_var_id,
+            ClientEnvVar.client_id == client_id,
+            ClientEnvVar.deleted_at.is_(None)
+        ).update({ClientEnvVar.key: key, ClientEnvVar.value: value})
+        return affected > 0
+
+
+def delete_client_env_var(env_var_id: int, client_id: int) -> bool:
+    """软删除环境变量（设置 deleted_at）"""
+    with get_db_session() as session:
+        affected = session.query(ClientEnvVar).filter(
+            ClientEnvVar.id == env_var_id,
+            ClientEnvVar.client_id == client_id,
+            ClientEnvVar.deleted_at.is_(None)
+        ).update({ClientEnvVar.deleted_at: datetime.now()})
+        return affected > 0
+
+
 def check_client_usable_for_task(client_id: int, user_id: int) -> bool:
     """
     校验用户是否可以使用指定客户端创建任务
 
     条件：
     1. 客户端未删除
-    2. 客户端是用户自己创建 OR 客户端当前是公开状态
+    2. 客户端是用户自己创建
 
     Args:
         client_id: 客户端ID
@@ -515,9 +609,6 @@ def check_client_usable_for_task(client_id: int, user_id: int) -> bool:
         client = session.query(Client).filter(
             Client.id == client_id,
             Client.deleted_at.is_(None),
-            or_(
-                Client.user_id == user_id,
-                Client.is_public == True
-            )
+            Client.user_id == user_id,
         ).first()
         return client is not None

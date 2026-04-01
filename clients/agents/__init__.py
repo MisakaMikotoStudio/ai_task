@@ -5,24 +5,28 @@ Agents 模块 - 各类 AI Agent 的抽象封装
 """
 
 from .base_agent import BaseAgent
-from .claude_code_agent import ClaudeCodeAgent
+from .claude_agent_sdk_agent import ClaudeAgentSdkAgent
+from .claude_code_cli_agent import ClaudeCodeCliAgent
 from .open_code_agent import OpenCodeAgent
-from .minimax_agent import MinimaxAgent
+
+# 向后兼容历史导出名
+ClaudeCodeAgent = ClaudeCodeCliAgent
 
 __all__ = [
     'BaseAgent',
     'ClaudeCodeAgent',
+    'ClaudeCodeCliAgent',
+    'ClaudeAgentSdkAgent',
     'OpenCodeAgent',
-    'MinimaxAgent',
     'get_agent_by_name',
     'AGENT_REGISTRY',
 ]
 
 # Agent 注册表：名称 -> Agent 类
 AGENT_REGISTRY = {
-    'Claude Code': ClaudeCodeAgent,
+    'claude sdk': ClaudeAgentSdkAgent,
+    'claude cli': ClaudeCodeCliAgent,
     'Open Code': OpenCodeAgent,
-    'Minimax': MinimaxAgent,
 }
 
 
@@ -40,6 +44,13 @@ def get_agent_by_name(agent_name: str) -> BaseAgent:
         ValueError: 如果 Agent 名称无效
     """
     agent_class = AGENT_REGISTRY.get(agent_name)
+    if agent_class is None:
+        # 大小写不敏感兜底匹配
+        agent_name_lower = agent_name.lower()
+        for key, cls in AGENT_REGISTRY.items():
+            if key.lower() == agent_name_lower:
+                agent_class = cls
+                break
     if agent_class is None:
         available = ', '.join(AGENT_REGISTRY.keys())
         raise ValueError(f"未知的 Agent 类型: {agent_name}，可用类型: {available}")

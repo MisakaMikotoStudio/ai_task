@@ -31,7 +31,6 @@ def create_app(config: WebConfig) -> Flask:
     url_prefix = config.server.url_prefix.rstrip('/') if config.server.url_prefix else ''
     
     # 保存配置到 app.config
-    app.config['APISERVER_URL'] = config.apiserver.url
     app.config['URL_PREFIX'] = url_prefix
     
     # 创建蓝图
@@ -42,7 +41,6 @@ def create_app(config: WebConfig) -> Flask:
     def get_config():
         return jsonify({
             'apiserver': {
-                'url': config.apiserver.url,
                 'host': config.apiserver.host,
                 'path_prefix': config.apiserver.path_prefix
             }
@@ -63,27 +61,35 @@ def create_app(config: WebConfig) -> Flask:
     return app
 
 
+def _load_config() -> WebConfig:
+    config_path = os.environ.get('WEB_CONFIG', 'config.toml')
+    if not os.path.exists(config_path):
+        print(f"Error: Config file not found: {config_path}")
+        sys.exit(1)
+    return WebConfig.from_toml(config_path)
+
+
+# gunicorn 入口：gunicorn "main:app" 时自动加载
+# 配置路径通过环境变量 WEB_CONFIG 指定，默认 config.toml
+app = create_app(_load_config())
+
+
 def main():
     parser = argparse.ArgumentParser(description='AI Task Management Web Server')
-    parser.add_argument('--config', '-c', type=str, default='config.toml',
+    parser.add_argument('--config', '-c', type=str, default=None,
                         help='Path to configuration file (TOML format)')
     args = parser.parse_args()
-    
-    # 加载配置
-    if not os.path.exists(args.config):
-        print(f"Error: Config file not found: {args.config}")
-        sys.exit(1)
-    
-    config = WebConfig.from_toml(args.config)
-    
-    # 创建应用
-    app = create_app(config)
-    
-    # 启动服务器
+
+    if args.config:
+        os.environ['WEB_CONFIG'] = args.config
+
+    config = _load_config()
     url_prefix = config.server.url_prefix.rstrip('/') if config.server.url_prefix else ''
     print(f"Starting Web Server on http://{config.server.host}:{config.server.port}{url_prefix}")
-    print(f"API Server configured at: {config.apiserver.url}")
-    app.run(
+    print(f"API Server configured at: {config.apiserver.host}{config.apiserver.path_prefix}")
+
+    flask_app = create_app(config)
+    flask_app.run(
         host=config.server.host,
         port=config.server.port,
         debug=False

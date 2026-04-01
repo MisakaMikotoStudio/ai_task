@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Chat</title>
+    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked-highlight@2.1.1/lib/index.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/javascript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/bash.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/json.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/xml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/css.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/sql.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/java.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/go.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/typescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/yaml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/markdown.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/shell.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/kotlin.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/swift.min.js"></script>
+    <style>
+        /* ===== Layout ===== */
+        body { overflow: hidden; }
+
+        .chat-page {
+            display: flex;
+            height: 100vh;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+
+        /* ===== Sidebar ===== */
+        .chat-sidebar {
+            width: 260px;
+            min-width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Fixed top: title */
+        .sidebar-header {
+            padding: 12px 12px 10px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+        }
+
+        .sidebar-nav-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-task-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+
+        .sidebar-task-id {
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 2px 6px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        .sidebar-client-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+            text-decoration: none;
+            padding: 2px 0;
+            margin-bottom: 8px;
+            transition: var(--transition);
+        }
+
+        .sidebar-client-link:hover {
+            color: var(--accent-primary);
+        }
+
+        .sidebar-client-link .client-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .sidebar-client-link:hover .client-dot {
+            background: var(--accent-primary);
+        }
+
+        .sidebar-client-types {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .sidebar-client-type-tag {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: rgba(163, 113, 247, 0.12);
+            color: var(--accent-purple);
+            border: 1px solid rgba(163, 113, 247, 0.2);
+            font-weight: 500;
+        }
+
+        /* New chat btn */
+        .new-chat-btn {
+            width: 100%;
+            padding: 7px 10px;
+            background: rgba(88, 166, 255, 0.12);
+            color: var(--accent-primary);
+            border-radius: 7px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid rgba(88, 166, 255, 0.25);
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+
+        .new-chat-btn:hover {
+            background: rgba(88, 166, 255, 0.2);
+            border-color: rgba(88, 166, 255, 0.4);
+        }
+
+        /* Scrollable sidebar body */
+        .sidebar-body {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-body::-webkit-scrollbar { width: 3px; }
+        .sidebar-body::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+
+        /* Section label */
+        .sidebar-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            padding: 10px 12px 4px;
+        }
+
+        /* ── 开发文档 section ── */
+        .sidebar-docs {
+            padding: 0 8px 4px;
+        }
+
+        .sidebar-doc-link {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: var(--accent-primary);
+            text-decoration: none;
+            transition: var(--transition);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sidebar-doc-link:hover {
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent-primary);
+        }
+
+        .sidebar-doc-empty {
+            padding: 4px 8px 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* ── Git Push section ── */
+        .sidebar-gitpush {
+            padding: 0 8px 4px;
+        }
+
+        .gitpush-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 7px;
+            padding: 7px 10px;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+
+        .gitpush-repo {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 3px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .gitpush-repo a { color: var(--accent-primary); text-decoration: none; }
+        .gitpush-repo a:hover { text-decoration: underline; }
+
+        .gitpush-meta {
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-bottom: 2px;
+        }
+
+        .gitpush-branch {
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            background: var(--bg-card);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--text-secondary);
+        }
+
+        .gitpush-status {
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+
+        .gitpush-status.success {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-success);
+        }
+
+        .gitpush-status.failed {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--accent-danger);
+        }
+
+        .gitpush-mr a {
+            color: var(--accent-primary);
+            font-size: 11px;
+            text-decoration: none;
+        }
+
+        .gitpush-mr a:hover { text-decoration: underline; }
+
+        .gitpush-empty {
+            padding: 4px 8px 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* ── 最近 / Chat list ── */
+        .sidebar-chat-list {
+            flex: 1;
+            padding: 0 6px 8px;
+        }
+
+        .chat-item {
+            padding: 8px 10px;
+            border-radius: 7px;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-bottom: 1px;
+            border: 1px solid transparent;
+        }
+
+        .chat-item:hover { background: var(--bg-tertiary); }
+
+        .chat-item.active {
+            background: var(--bg-card);
+            border-color: var(--border-color);
+        }
+
+        .chat-item-row1 {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 3px;
+        }
+
+        .chat-item-id {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            font-family: 'Courier New', monospace;
+        }
+
+        .chat-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .chat-status-dot.running {
+            background: var(--accent-warning);
+            box-shadow: 0 0 4px var(--accent-warning);
+            animation: pulse-dot 1.5s infinite;
+        }
+        .chat-status-dot.completed { background: var(--accent-success); }
+        .chat-status-dot.terminated { background: var(--accent-danger); }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .chat-status-label {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .chat-status-label.running { color: var(--accent-warning); }
+        .chat-status-label.completed { color: var(--accent-success); }
+        .chat-status-label.terminated { color: var(--accent-danger); }
+
+        .chat-item-row2 {
+            font-size: 12px;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.3;
+        }
+
+        .chat-item.active .chat-item-row2 { color: var(--text-primary); }
+
+        .chat-sidebar-empty {
+            padding: 16px 8px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        /* Divider */
+        .sidebar-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+            flex-shrink: 0;
+        }
+
+        /* ===== Main ===== */
+        .chat-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Top bar */
+        .chat-topbar {
+            height: 52px;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .chat-topbar-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chat-topbar-badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        .chat-topbar-badge.running {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--accent-warning);
+            border: 1px solid rgba(210, 153, 34, 0.3);
+        }
+
+        .chat-topbar-badge.completed {
+            background: rgba(63, 185, 80, 0.1);
+            color: var(--accent-success);
+            border: 1px solid rgba(63, 185, 80, 0.2);
+        }
+
+        .chat-topbar-badge.terminated {
+            background: rgba(248, 81, 73, 0.1);
+            color: var(--accent-danger);
+            border: 1px solid rgba(248, 81, 73, 0.2);
+        }
+
+        /* Empty / no-select */
+        .chat-no-selection {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .chat-no-selection-icon { font-size: 48px; opacity: 0.2; }
+        .chat-no-selection-text { font-size: 15px; color: var(--text-secondary); font-weight: 500; }
+        .chat-no-selection-sub { font-size: 13px; color: var(--text-muted); }
+
+        /* Active chat container */
+        .chat-active-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ===== Messages feed ===== */
+        .chat-feed {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        .chat-feed::-webkit-scrollbar { width: 5px; }
+        .chat-feed::-webkit-scrollbar-track { background: transparent; }
+        .chat-feed::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+        .feed-welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            gap: 10px;
+            color: var(--text-muted);
+        }
+
+        .feed-welcome-icon { font-size: 36px; opacity: 0.3; }
+        .feed-welcome-text { font-size: 14px; color: var(--text-secondary); }
+        .feed-welcome-sub { font-size: 12px; }
+
+        /* ===== Message Turn ===== */
+        /* Each "turn" = one user message + one agent reply */
+        .msg-turn {
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .msg-turn:last-child { border-bottom: none; }
+
+        /* User row */
+        .msg-user-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px 20px 12px;
+            background: var(--bg-primary);
+        }
+
+        .msg-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .msg-avatar.user-avatar {
+            background: rgba(88, 166, 255, 0.2);
+            color: var(--accent-primary);
+            border: 1px solid rgba(88, 166, 255, 0.3);
+        }
+
+        .msg-avatar.agent-avatar {
+            background: rgba(163, 113, 247, 0.15);
+            color: var(--accent-purple);
+            border: 1px solid rgba(163, 113, 247, 0.25);
+        }
+
+        .msg-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .msg-header {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .msg-role {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: 0.02em;
+        }
+
+        .msg-time {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .msg-text {
+            font-size: 14px;
+            line-height: 1.65;
+            color: var(--text-primary);
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+
+        /* Agent row */
+        .msg-agent-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 20px 16px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Agent output formatting — full Markdown */
+        .msg-output {
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+
+        .msg-output > *:first-child { margin-top: 0; }
+        .msg-output > *:last-child { margin-bottom: 0; }
+
+        .msg-output p { margin: 0 0 10px; }
+        .msg-output p:last-child { margin-bottom: 0; }
+
+        /* Headings */
+        .msg-output h1, .msg-output h2, .msg-output h3,
+        .msg-output h4, .msg-output h5, .msg-output h6 {
+            color: var(--text-primary);
+            font-weight: 600;
+            line-height: 1.35;
+            margin: 20px 0 10px;
+        }
+        .msg-output h1 { font-size: 1.45em; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; }
+        .msg-output h2 { font-size: 1.25em; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
+        .msg-output h3 { font-size: 1.1em; }
+        .msg-output h4 { font-size: 1em; }
+        .msg-output h5 { font-size: 0.92em; }
+        .msg-output h6 { font-size: 0.85em; color: var(--text-secondary); }
+
+        /* Bold / Italic */
+        .msg-output strong { font-weight: 600; color: var(--text-primary); }
+        .msg-output em { font-style: italic; }
+
+        /* Links */
+        .msg-output a {
+            color: var(--accent-primary);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.15s;
+        }
+        .msg-output a:hover { border-bottom-color: var(--accent-primary); }
+
+        /* Lists */
+        .msg-output ul, .msg-output ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+        .msg-output li { margin: 4px 0; }
+        .msg-output li > p { margin: 4px 0; }
+        .msg-output ul { list-style: disc; }
+        .msg-output ol { list-style: decimal; }
+        .msg-output ul ul { list-style: circle; }
+        .msg-output ul ul ul { list-style: square; }
+
+        /* Task list (checkbox) */
+        .msg-output li.task-list-item {
+            list-style: none;
+            margin-left: -20px;
+        }
+        .msg-output li.task-list-item input[type="checkbox"] {
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        /* Blockquote */
+        .msg-output blockquote {
+            margin: 10px 0;
+            padding: 6px 14px;
+            border-left: 3px solid var(--accent-primary);
+            background: rgba(88, 166, 255, 0.05);
+            color: var(--text-secondary);
+            border-radius: 0 6px 6px 0;
+        }
+        .msg-output blockquote p { margin: 4px 0; }
+
+        /* Code — inline */
+        .msg-output code {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 0.88em;
+            font-family: 'Courier New', 'Consolas', monospace;
+            color: var(--accent-primary);
+        }
+
+        /* Code — block */
+        .msg-output pre {
+            position: relative;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin: 12px 0;
+            overflow: hidden;
+        }
+
+        .msg-output pre code {
+            display: block;
+            background: none;
+            border: none;
+            border-radius: 0;
+            padding: 14px 16px;
+            overflow-x: auto;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: var(--text-primary);
+        }
+
+        /* Code block language label */
+        .msg-output pre .code-lang-label {
+            position: absolute;
+            top: 0;
+            right: 0;
+            font-size: 10px;
+            padding: 2px 10px 2px 8px;
+            color: var(--text-muted);
+            background: rgba(255,255,255,0.04);
+            border-bottom-left-radius: 6px;
+            user-select: none;
+            pointer-events: none;
+            font-family: system-ui, sans-serif;
+            letter-spacing: 0.02em;
+        }
+
+        /* Table */
+        .msg-output table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 13px;
+        }
+        .msg-output th, .msg-output td {
+            border: 1px solid var(--border-color);
+            padding: 7px 10px;
+            text-align: left;
+        }
+        .msg-output th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .msg-output tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+
+        /* Horizontal rule */
+        .msg-output hr {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            margin: 16px 0;
+        }
+
+        /* Images */
+        .msg-output img {
+            max-width: 100%;
+            border-radius: 6px;
+            margin: 8px 0;
+        }
+
+        /* Del (strikethrough) */
+        .msg-output del { opacity: 0.55; }
+
+        /* Status footer in agent row */
+        .msg-status-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .msg-status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        .msg-status-chip.pending {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--accent-warning);
+        }
+
+        .msg-status-chip.running {
+            background: rgba(88, 166, 255, 0.12);
+            color: var(--accent-primary);
+        }
+
+        .msg-status-chip.completed {
+            background: rgba(63, 185, 80, 0.1);
+            color: var(--accent-success);
+        }
+
+        .msg-status-chip.terminated {
+            background: rgba(248, 81, 73, 0.1);
+            color: var(--accent-danger);
+        }
+
+        /* Extra action buttons in status row */
+        .msg-extra-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            text-decoration: none;
+            border: none;
+            background: none;
+            line-height: 1;
+        }
+
+        .msg-extra-btn.doc-btn {
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent-primary);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+        }
+
+        .msg-extra-btn.doc-btn:hover {
+            background: rgba(88, 166, 255, 0.2);
+            border-color: rgba(88, 166, 255, 0.35);
+        }
+
+        .msg-extra-btn.mr-btn {
+            background: rgba(163, 113, 247, 0.1);
+            color: var(--accent-purple);
+            border: 1px solid rgba(163, 113, 247, 0.2);
+        }
+
+        .msg-extra-btn.mr-btn:hover {
+            background: rgba(163, 113, 247, 0.2);
+            border-color: rgba(163, 113, 247, 0.35);
+        }
+
+        /* Merge Request Detail Modal */
+        .mr-modal-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 22px;
+            min-width: 380px;
+            max-width: 560px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .mr-detail-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 8px;
+        }
+
+        .mr-detail-card:last-child { margin-bottom: 0; }
+
+        .mr-detail-repo {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .mr-detail-row {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .mr-detail-row:last-child { margin-bottom: 0; }
+
+        .mr-detail-label {
+            color: var(--text-muted);
+            min-width: 40px;
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+
+        .mr-detail-value {
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        .mr-detail-value code {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+            color: var(--text-primary);
+        }
+
+        .mr-detail-value.mr-links a {
+            color: var(--accent-primary);
+            text-decoration: none;
+            display: block;
+            margin-bottom: 2px;
+            word-break: break-all;
+        }
+
+        .mr-detail-value.mr-links a:hover { text-decoration: underline; }
+
+        /* Merge Request Modal Table */
+        .mr-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .mr-table th, .mr-table td {
+            border: 1px solid var(--border-color);
+            padding: 8px 10px;
+            vertical-align: top;
+            text-align: left;
+        }
+
+        .mr-table th {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .mr-table td {
+            color: var(--text-secondary);
+        }
+
+        .mr-table td code {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+            color: var(--text-primary);
+        }
+
+        .mr-table a {
+            color: var(--accent-primary);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.15s;
+        }
+
+        .mr-table a:hover {
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .mr-empty-text {
+            text-align: center;
+            padding: 16px 0;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        /* Make sidebar gitpush cards clickable */
+        .gitpush-card.clickable {
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .gitpush-card.clickable:hover {
+            border-color: rgba(163, 113, 247, 0.3);
+            background: rgba(163, 113, 247, 0.05);
+        }
+
+        /* Typing animation */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 0;
+        }
+
+        .typing-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            animation: typing-bounce 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: 0s; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing-bounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+            30% { transform: translateY(-5px); opacity: 1; }
+        }
+
+        /* ===== Input Area ===== */
+        .chat-composer {
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            padding: 12px 16px 14px;
+            flex-shrink: 0;
+        }
+
+        .composer-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .composer-hint.warn { color: var(--accent-warning); }
+
+        .composer-box {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            overflow: hidden;
+        }
+
+        .composer-box:focus-within {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.08);
+        }
+
+        .composer-box.locked {
+            opacity: 0.55;
+            /* Disable input via input.disabled + sendBtn hidden (JS).
+               pointer-events: none blocks the stop-btn click. */
+            pointer-events: auto;
+        }
+
+        .composer-textarea {
+            width: 100%;
+            padding: 11px 14px 4px;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+            min-height: 44px;
+            max-height: 180px;
+            overflow-y: auto;
+            display: block;
+        }
+
+        .composer-textarea::placeholder { color: var(--text-muted); }
+
+        .composer-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 4px 10px 8px;
+            gap: 8px;
+        }
+
+        .composer-hint-inline {
+            flex: 1;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .send-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 14px;
+            background: var(--accent-primary);
+            color: white;
+            border-radius: 7px;
+            font-size: 13px;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .send-btn:hover { background: #4d9de0; }
+        .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .stop-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 14px;
+            background: rgba(248, 81, 73, 0.12);
+            color: var(--accent-danger);
+            border-radius: 7px;
+            font-size: 13px;
+            font-weight: 500;
+            border: 1px solid rgba(248, 81, 73, 0.25);
+            transition: var(--transition);
+        }
+
+        .stop-btn:hover { background: rgba(248, 81, 73, 0.22); }
+        .stop-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        /* ===== Modal ===== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.show { display: flex; }
+
+        .modal-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 22px;
+            min-width: 320px;
+            max-width: 440px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+        }
+
+        .modal-head h3 { font-size: 15px; color: var(--text-primary); }
+
+        .modal-close {
+            font-size: 18px;
+            color: var(--text-muted);
+            line-height: 1;
+            transition: var(--transition);
+        }
+
+        .modal-close:hover { color: var(--text-primary); }
+
+        .modal-form-group { margin-bottom: 14px; }
+
+        .modal-form-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .modal-form-group input {
+            width: 100%;
+            padding: 9px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 7px;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .modal-form-group input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.08);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 18px;
+        }
+
+        /* ===== Toast ===== */
+        .chat-toast {
+            position: fixed;
+            bottom: 22px;
+            left: 50%;
+            transform: translateX(-50%) translateY(16px);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 7px;
+            padding: 8px 18px;
+            font-size: 13px;
+            color: var(--text-primary);
+            opacity: 0;
+            transition: all 0.25s ease;
+            z-index: 2000;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        .chat-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .chat-toast.success { border-color: var(--accent-success); color: var(--accent-success); }
+        .chat-toast.error { border-color: var(--accent-danger); color: var(--accent-danger); }
+    </style>
+</head>
+<body>
+<div class="chat-page">
+
+    <!-- ===== Sidebar ===== -->
+    <aside class="chat-sidebar">
+        <!-- 固定顶部：任务标题 + 客户端 + 新建 -->
+        <div class="sidebar-header">
+            <div class="sidebar-nav-row">
+                <span class="sidebar-task-name" id="sidebar-task-name">加载中...</span>
+                <span class="sidebar-task-id" id="sidebar-task-id">#-</span>
+            </div>
+            <a class="sidebar-client-link" id="sidebar-client-link" href="index.html#/clients" target="_blank" style="display:none;">
+                <span class="client-dot"></span>
+                <span id="sidebar-client-name"></span>
+            </a>
+            <div class="sidebar-client-types" id="sidebar-client-types" style="display:none;"></div>
+            <button class="new-chat-btn" onclick="showNewChatModal()">＋ 新建 Chat</button>
+        </div>
+
+        <!-- 可滚动区域 -->
+        <div class="sidebar-body">
+
+            <!-- 开发文档 -->
+            <div class="sidebar-section-label">开发文档</div>
+            <div class="sidebar-docs" id="sidebar-docs">
+                <div class="sidebar-doc-empty">暂无文档</div>
+            </div>
+
+            <div class="sidebar-divider"></div>
+
+            <!-- 变更详情 -->
+            <div class="sidebar-section-label">变更详情</div>
+            <div class="sidebar-gitpush" id="sidebar-gitpush">
+                <div class="gitpush-empty">暂无推送记录</div>
+            </div>
+
+            <div class="sidebar-divider"></div>
+
+            <!-- 最近 Chat -->
+            <div class="sidebar-section-label">最近</div>
+            <div class="sidebar-chat-list" id="chat-list">
+                <div class="chat-sidebar-empty">暂无 Chat</div>
+            </div>
+
+        </div>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="chat-main">
+
+        <!-- No selection -->
+        <div class="chat-no-selection" id="no-selection-view">
+            <div class="chat-no-selection-icon">💬</div>
+            <div class="chat-no-selection-text">选择或新建一个 Chat</div>
+            <div class="chat-no-selection-sub">在左侧列表点击，或点击「新建 Chat」</div>
+        </div>
+
+        <!-- Active chat -->
+        <div class="chat-active-view" id="active-view" style="display:none;">
+            <!-- Top bar -->
+            <div class="chat-topbar">
+                <div class="chat-topbar-title" id="topbar-title">Chat 标题</div>
+                <div class="chat-topbar-badge" id="topbar-badge"></div>
+            </div>
+
+            <!-- Message feed -->
+            <div class="chat-feed" id="chat-feed">
+                <div class="feed-welcome" id="feed-welcome">
+                    <div class="feed-welcome-icon">✨</div>
+                    <div class="feed-welcome-text">开始对话</div>
+                    <div class="feed-welcome-sub">在下方输入您的问题</div>
+                </div>
+            </div>
+
+            <!-- Composer -->
+            <div class="chat-composer">
+                <div class="composer-hint" id="composer-hint">
+                    <span>💬</span>
+                    <span id="composer-hint-text">尽管问，带图也行</span>
+                </div>
+                <div class="composer-box" id="composer-box">
+                    <textarea
+                        class="composer-textarea"
+                        id="chat-input"
+                        placeholder="输入消息..."
+                        rows="1"
+                        onkeydown="handleInputKeydown(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <div class="composer-footer">
+                        <span class="composer-hint-inline">Ctrl+Enter 发送</span>
+                        <button class="send-btn" id="send-btn" onclick="sendMessage()">
+                            <span>↑</span> 发送
+                        </button>
+                        <button class="stop-btn" id="stop-btn" onclick="terminateMessage()" style="display:none;">
+                            ⬛ 终止
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- New Chat Modal -->
+<div class="modal-overlay" id="new-chat-modal">
+    <div class="modal-card">
+        <div class="modal-head">
+            <h3>新建 Chat</h3>
+            <button class="modal-close" onclick="closeNewChatModal()">×</button>
+        </div>
+        <form id="new-chat-form" onsubmit="submitNewChat(event)">
+            <div class="modal-form-group">
+                <label>Chat 标题 <span style="color:var(--text-muted)">(最多 32 字符)</span></label>
+                <input type="text" id="new-chat-title" placeholder="请输入 Chat 标题" maxlength="32" required>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" onclick="closeNewChatModal()">取消</button>
+                <button type="submit" class="btn-primary">创建</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Merge Request Detail Modal -->
+<div class="modal-overlay" id="merge-request-modal">
+    <div class="mr-modal-card">
+        <div class="modal-head">
+            <h3>变更详情</h3>
+            <button class="modal-close" onclick="closeMergeRequestModal()">×</button>
+        </div>
+        <div id="merge-request-body">
+            <div class="mr-empty-text">暂无变更记录</div>
+        </div>
+    </div>
+</div>
+
+<div class="chat-toast" id="chat-toast"></div>
+
+<script src="js/utils.js?v=3"></script>
+<script src="js/api.js?v=9"></script>
+<script src="js/chat.js?v=5"></script>
+</body>
+</html>

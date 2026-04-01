@@ -4,12 +4,11 @@
 用户数据访问对象 - SQLAlchemy ORM 版本
 """
 
-import secrets
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 
 from .connection import get_db_session
-from .models import User, UserSecret
+from .models import User
 
 
 def create_user(name: str, password_hash: str) -> int:
@@ -86,51 +85,3 @@ def check_user_exists(name: str) -> bool:
     with get_db_session() as session:
         count = session.query(User).filter(User.name == name).count()
         return count > 0
-
-
-# ========== 秘钥管理 ==========
-
-def get_user_secrets(user_id: int) -> List[UserSecret]:
-    """获取用户的秘钥列表"""
-    with get_db_session() as session:
-        secrets_list = session.query(UserSecret).filter(
-            UserSecret.user_id == user_id
-        ).order_by(UserSecret.created_at.desc()).all()
-        return secrets_list
-
-
-def create_user_secret(user_id: int, name: str) -> UserSecret:
-    """创建新秘钥（随机生成64位字符串）"""
-    with get_db_session() as session:
-        # 生成64位随机字符串
-        secret_value = secrets.token_hex(32)  # 32 bytes = 64 hex chars
-        user_secret = UserSecret(
-            user_id=user_id,
-            name=name,
-            secret=secret_value
-        )
-        session.add(user_secret)
-        session.flush()
-        return user_secret
-
-
-def delete_user_secret(secret_id: int, user_id: int) -> bool:
-    """删除秘钥"""
-    with get_db_session() as session:
-        affected = session.query(UserSecret).filter(
-            UserSecret.id == secret_id,
-            UserSecret.user_id == user_id
-        ).delete()
-        return affected > 0
-
-
-def get_user_by_secret(secret: str) -> Optional[User]:
-    """通过秘钥获取用户"""
-    with get_db_session() as session:
-        user_secret = session.query(UserSecret).filter(
-            UserSecret.secret == secret
-        ).first()
-        if not user_secret:
-            return None
-        user = session.query(User).filter(User.id == user_secret.user_id).first()
-        return user

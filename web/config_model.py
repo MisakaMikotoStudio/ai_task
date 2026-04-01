@@ -22,7 +22,6 @@ class ServerConfig:
 @dataclass
 class ApiServerConfig:
     """后端 API 服务器配置"""
-    url: str = ""  # 完整 URL，优先级最高
     host: str = ""  # 后端主机地址，例如 "http://127.0.0.1:8105"
     path_prefix: str = "/api"  # 路径前缀，默认 /api
 
@@ -49,4 +48,4 @@ class WebConfig:
 if __name__ == "__main__":
     config = WebConfig.from_toml("config.toml")
     print(f"Web Server: {config.server.host}:{config.server.port}")
-    print(f"API Server: {config.apiserver.url}")
+    print(f"API Server: {config.apiserver.host}{config.apiserver.path_prefix}")

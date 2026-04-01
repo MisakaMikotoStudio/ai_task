@@ -6,7 +6,8 @@
 
 import random
 import string
-from typing import Optional, Dict, List
+import json
+from typing import Optional, Dict, List, Any
 
 from .connection import get_db_session
 from .models import Task
@@ -68,7 +69,8 @@ def get_tasks_by_user(user_id: int, status: Optional[str] = None, client_id: Opt
         query = session.query(Task, Client.name).outerjoin(
             Client, Task.client_id == Client.id
         ).filter(
-            Task.user_id == user_id
+            Task.user_id == user_id,
+            Task.deleted == 0
         )
         
         # 添加状态过滤
@@ -103,7 +105,8 @@ def get_task_by_id(task_id: int, user_id: int) -> Optional[Task]:
     with get_db_session() as session:
         task = session.query(Task).filter(
             Task.id == task_id,
-            Task.user_id == user_id
+            Task.user_id == user_id,
+            Task.deleted == 0
         ).first()
         return task
 
@@ -123,7 +126,8 @@ def update_task_status(task_id: int, user_id: int, status: str) -> bool:
     with get_db_session() as session:
         affected = session.query(Task).filter(
             Task.id == task_id,
-            Task.user_id == user_id
+            Task.user_id == user_id,
+            Task.deleted == 0
         ).update({
             Task.status: status
         })
@@ -155,7 +159,8 @@ def update_task_flow(task_id: int, user_id: int, flow: Optional[Dict] = None, fl
         
         affected = session.query(Task).filter(
             Task.id == task_id,
-            Task.user_id == user_id
+            Task.user_id == user_id,
+            Task.deleted == 0
         ).update(update_data)
         return affected > 0
 
@@ -180,14 +185,15 @@ def update_task_desc(task_id: int, user_id: int, desc: str, status: Optional[str
 
         affected = session.query(Task).filter(
             Task.id == task_id,
-            Task.user_id == user_id
+            Task.user_id == user_id,
+            Task.deleted == 0
         ).update(update_data)
         return affected > 0
 
 
 def delete_task(task_id: int, user_id: int) -> bool:
     """
-    删除任务
+    软删除任务（deleted=1）
 
     Args:
         task_id: 任务ID
@@ -199,8 +205,11 @@ def delete_task(task_id: int, user_id: int) -> bool:
     with get_db_session() as session:
         affected = session.query(Task).filter(
             Task.id == task_id,
-            Task.user_id == user_id
-        ).delete()
+            Task.user_id == user_id,
+            Task.deleted == 0
+        ).update({
+            Task.deleted: 1
+        })
         return affected > 0
 
 
@@ -219,6 +228,21 @@ def update_task_client(task_id: int, user_id: int, client_id: int) -> bool:
     with get_db_session() as session:
         affected = session.query(Task).filter(
             Task.id == task_id,
-            Task.user_id == user_id
+            Task.user_id == user_id,
+            Task.deleted == 0
         ).update({Task.client_id: client_id})
+        return affected > 0
+
+
+def update_task_extra(task_id: int, user_id: int, extra: Dict[str, Any]) -> bool:
+    """
+    更新任务的 extra 字段（存储 JSON 字符串）。
+    """
+    extra_json = json.dumps(extra or {}, ensure_ascii=False)
+    with get_db_session() as session:
+        affected = session.query(Task).filter(
+            Task.id == task_id,
+            Task.user_id == user_id,
+            Task.deleted == 0
+        ).update({Task.extra: extra_json})
         return affected > 0

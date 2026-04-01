@@ -4,10 +4,14 @@
 用户业务逻辑服务层
 """
 
+from typing import Optional
+
+from dao.models import User
 from dao.user_dao import (
     create_user, get_user_by_name, get_user_by_id,
     update_last_access, check_user_exists
 )
+from dao.secret_dao import get_user_id_by_secret
 from dao.session_dao import create_session, get_session_by_token
 
 class UserInfo:
@@ -23,6 +27,8 @@ class UserInfo:
             'token': self.token,
         }
 
+
+RESERVED_USERNAMES = {'admin'}
 
 def register_user(name: str, password_hash: str) -> dict:
     """
@@ -50,12 +56,14 @@ def register_user(name: str, password_hash: str) -> dict:
     if len(name) > 32:
         raise Exception('用户名长度不能超过32个字符')
     
+    if name.lower() in RESERVED_USERNAMES:
+        raise Exception('该用户名为系统保留账号，不允许注册')
+    
     if check_user_exists(name):
         raise Exception('用户名已存在')
     
     user_id = create_user(name, password_hash)
-    token = create_session(user_id).token
-    
+    token = create_session(user_id).token    
     return UserInfo(user_id, name, token)
 
 
@@ -123,3 +131,11 @@ def get_user_info(token: str) -> UserInfo:
         raise Exception('用户不存在或Token无效')
     
     return UserInfo(user.id, user.name, token)
+
+
+def get_user_by_secret(secret: str) -> Optional[User]:
+    """通过秘钥获取用户（secret_dao 只负责查 user_id，由此处完成完整用户查询）"""
+    user_id = get_user_id_by_secret(secret)
+    if user_id is None:
+        return None
+    return get_user_by_id(user_id)

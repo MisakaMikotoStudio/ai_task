@@ -13,12 +13,9 @@ async function initAPIConfig() {
         if (response.ok) {
             const config = await response.json();
             if (config.apiserver) {
-                const { url, host, path_prefix } = config.apiserver;
-                if (url) {
-                    // 优先使用完整 url
-                    API_BASE = url.replace(/\/$/, '');
-                } else if (host) {
-                    // 否则用 host + path_prefix
+                const { host, path_prefix } = config.apiserver;
+                if (host) {
+                    // 使用 host + path_prefix
                     const hostPart = host.replace(/\/$/, '');
                     const pathPart = path_prefix || '/api';
                     API_BASE = hostPart + pathPart;
@@ -134,6 +131,7 @@ const clientAPI = {
         const body = { name, types };
         if (options.is_public !== undefined) body.is_public = options.is_public;
         if (options.agent !== undefined) body.agent = options.agent;
+        if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
@@ -145,6 +143,7 @@ const clientAPI = {
         const body = { name, types };
         if (options.is_public !== undefined) body.is_public = options.is_public;
         if (options.agent !== undefined) body.agent = options.agent;
+        if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -181,6 +180,34 @@ const clientAPI = {
     // 获取心跳记录
     async getHeartbeats() {
         return request('/client/heartbeats');
+    },
+
+    // 获取环境变量列表
+    async getEnvVars(id) {
+        return request(`/client/${id}/env-vars`);
+    },
+
+    // 新增环境变量
+    async createEnvVar(id, key, value) {
+        return request(`/client/${id}/env-vars`, {
+            method: 'POST',
+            body: JSON.stringify({ key, value })
+        });
+    },
+
+    // 更新环境变量
+    async updateEnvVar(id, envVarId, key, value) {
+        return request(`/client/${id}/env-vars/${envVarId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ key, value })
+        });
+    },
+
+    // 删除环境变量
+    async deleteEnvVar(id, envVarId) {
+        return request(`/client/${id}/env-vars/${envVarId}`, {
+            method: 'DELETE'
+        });
     }
 };
 
@@ -386,6 +413,66 @@ const okrAPI = {
         return request(`/okr/objectives/${objectiveId}/key-results/reorder`, {
             method: 'POST',
             body: JSON.stringify({ kr_ids: krIds })
+        });
+    }
+};
+
+// Chat API
+const chatAPI = {
+    async listChats(taskId) {
+        return request(`/chat/task/${taskId}/chats`);
+    },
+
+    async createChat(taskId, title, sessionid = null) {
+        const body = { title };
+        if (sessionid) body.sessionid = sessionid;
+        return request(`/chat/task/${taskId}/chats`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    },
+
+    async getChat(taskId, chatId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}`);
+    },
+
+    async updateChatStatus(taskId, chatId, status) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status })
+        });
+    },
+
+    async deleteChat(taskId, chatId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}`, {
+            method: 'DELETE'
+        });
+    },
+
+    async listMessages(taskId, chatId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages`);
+    },
+
+    async createMessage(taskId, chatId, input, extra = {}) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ input, extra })
+        });
+    },
+
+    async updateMessageStatus(taskId, chatId, messageId, status, output = null) {
+        const body = { status };
+        if (output !== null) body.output = output;
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify(body)
+        });
+    },
+
+    // 软删除消息（用户终止），返回 { input } 用于回填输入框
+    async deleteMessage(taskId, chatId, messageId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, {
+            method: 'DELETE'
         });
     }
 };

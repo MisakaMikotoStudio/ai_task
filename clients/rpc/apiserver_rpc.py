@@ -92,7 +92,7 @@ class ApiServerRpc:
         endpoint: str,
         json_data: Optional[Dict] = None,
         params: Optional[Dict] = None,
-        _network_retry_count: int = 0
+        network_retry_count: int = 0
     ) -> Dict[str, Any]:
         """
         发送请求（内部方法）
@@ -102,7 +102,7 @@ class ApiServerRpc:
             endpoint: API 端点（如 /api/task）
             json_data: JSON 请求体
             params: URL 查询参数
-            _network_retry_count: 网络异常重试次数（内部使用）
+            network_retry_count: 网络异常重试次数（内部使用）
             
         Returns:
             响应数据
@@ -114,12 +114,13 @@ class ApiServerRpc:
         max_network_retries = 10
         
         try:
+            headers = self._get_headers()
             response = requests.request(
                 method=method,
                 url=url,
                 json=json_data,
                 params=params,
-                headers=self._get_headers(),
+                headers=headers,
                 timeout=self._timeout
             )
             
@@ -131,6 +132,7 @@ class ApiServerRpc:
                 content_preview = response.text[:500] if response.text else "(空响应)"
                 logger.error(
                     f"JSON 解析失败 [{method}] {endpoint}: {json_err}, "
+                    f"请求traceId={headers['traceId']}, "
                     f"HTTP状态码: {response.status_code}, "
                     f"响应内容预览: {content_preview}"
                 )
@@ -145,6 +147,7 @@ class ApiServerRpc:
                     f"API调用失败 [{method}] {url}, "
                     f"params={params}, body={json_data}, "
                     f"HTTP状态码: {response.status_code}, "
+                    f"请求traceId={headers['traceId']}, "
                     f"响应: {data.get('message', '请求失败')}"
                 )
                 raise ApiException(
@@ -156,8 +159,8 @@ class ApiServerRpc:
             
         except requests.RequestException as e:
             # 网络异常重试逻辑：最多重试3次，每次间隔10秒
-            if _network_retry_count < max_network_retries:
-                next_retry = _network_retry_count + 1
+            if network_retry_count < max_network_retries:
+                next_retry = network_retry_count + 1
                 sleep_seconds = 10
                 logger.warning(
                     f"网络异常 [{method}] {endpoint}: {e}，"
@@ -166,11 +169,20 @@ class ApiServerRpc:
                 time.sleep(sleep_seconds)
                 return self._request(
                     method, endpoint, json_data, params,
-                    _network_retry_count=next_retry
+                    network_retry_count=next_retry
                 )
             
             logger.error(f"请求异常 [{method}] {endpoint}: {e}，已达到最大重试次数")
             raise ApiException(0, f"请求异常: {e}")
+
+    def check_health(self):
+        """
+        检查 API 服务器健康状态
+
+        Returns:
+            None
+        """
+        self._request("GET", "/api/health", network_retry_count=3)
     
     # ==================== 用户相关 API ====================
     
@@ -185,20 +197,6 @@ class ApiServerRpc:
     
     # ==================== 任务相关 API ====================
         
-    def get_running_tasks(self, client_id: int) -> List[Task]:
-        """
-        获取状态为进行中的任务列表
-        
-        Args:
-            client_id: 可选，指定客户端 ID 进行筛选（0 表示未分配客户端的任务）
-        
-        Returns:
-            运行中的任务列表
-        """
-        params = {'status': 'running', 'clientId': client_id}
-        result = self._request('GET', '/api/task', params=params)
-        data = result.get('data', [])
-        return [Task.from_dict(item) for item in data]
     
     def get_task(self, task_id: int) -> Optional[Task]:
         """
@@ -246,6 +244,20 @@ class ApiServerRpc:
             return False
 
     # ==================== 客户端相关 API ====================
+
+    def get_running_chat_message(self, client_id: int) -> List[Dict[str, Any]]:
+        """
+        获取需要客户端处理的运行中对话任务列表
+        
+        Args:
+            client_id: 可选，指定客户端 ID 进行筛选（0 表示未分配客户端的任务）
+        
+        Returns:
+            对话任务列表（每项包含 task_id/chat_id/chat_messages）
+        """
+        result = self._request('GET', f'/api/client/{client_id}/running_chat_message')
+        return result.get('data', [])
+
     def sync_client(self, client_id: int, instance_uuid: str) -> Dict[str, Any]:
         """
         客户端心跳同步
@@ -263,7 +275,8 @@ class ApiServerRpc:
         result = self._request(
             'POST', 
             f'/api/client/{client_id}/heartbeat',
-            json_data={'instance_uuid': instance_uuid}
+            json_data={'instance_uuid': instance_uuid},
+            network_retry_count=10
         )
         return result.get('data', {})
 
@@ -305,6 +318,109 @@ class ApiServerRpc:
         except ApiException as e:
             logger.warning(f"更新仓库默认分支失败: {e.message}")
             return False
+
+    # ==================== 同步执行结果（给客户端写入数据库） ====================
+    def sync_task_execute(
+        self,
+        task_id: int,
+        develop_doc: str,
+        merge_request: List[Dict[str, Any]],
+    ):
+        """
+        /api/task/sync_execute
+        将 task 分支差异与开发文档链接写入 ai_task_tasks.extra
+        """
+        payload = {
+            "task_id": task_id,
+            "develop_doc": develop_doc,
+            "merge_request": merge_request
+        }
+        self._request("POST", "/api/task/sync_execute", json_data=payload)
+
+    def sync_chat_msg_sync_execute(
+        self,
+        task_id: int,
+        chat_id: int,
+        message_id: int,
+        develop_doc: str,
+        merge_request: List[Dict[str, Any]],
+    ):
+        """
+        /api/chat/msg/sync_execute
+        将 develop_doc/merge_request 写入 ai_task_chat_message.extra
+        """
+        payload = {
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "develop_doc": develop_doc,
+            "merge_request": merge_request or []
+        }
+        self._request("POST", "/api/chat/msg/sync_execute", json_data=payload)
+
+    def update_chat_status(
+        self,
+        task_id: int,
+        chat_id: int,
+        status: str,
+    ) -> bool:
+        """
+        /api/chat/update_chat_status
+        更新 Chat 状态（running / completed / terminated）
+        """
+        payload = {
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "status": status,
+        }
+        try:
+            self._request("POST", "/api/chat/update_chat_status", json_data=payload)
+            return True
+        except ApiException as e:
+            logger.warning(f"更新 Chat 状态失败: {e.message}")
+            return False
+
+    def update_message_status(
+        self,
+        task_id: int,
+        chat_id: int,
+        message_id: int,
+        status: str,
+    ) -> bool:
+        """
+        /api/chat/msg/update_message_status
+        更新 Message 状态（running / completed / terminated）
+        """
+        payload = {
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "status": status,
+        }
+        return self._request("POST",f"/api/chat/msg/update_message_status", json_data=payload)
+
+    def agent_reply_chat_msg(
+        self,
+        task_id: int,
+        chat_id: int,
+        message_id: int,
+        reply: str,
+        session_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        /api/chat/msg/agent_reply
+        将 agent 执行结果同步回数据库：
+        - ai_task_chat_message.output = agent reply
+        - ai_task_chat.session_id = agent session_id
+        """
+        payload = {
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply": reply,
+            "session_id": session_id,
+        }
+        return self._request("POST", "/api/chat/msg/agent_reply", json_data=payload)
 
 
 class ApiException(Exception):
