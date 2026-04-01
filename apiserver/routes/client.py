@@ -505,6 +505,65 @@ def get_running_chat_message_api(client_id):
     })
 
 
+@client_bp.route('/<int:client_id>/copy', methods=['POST'])
+@login_required
+def copy_client_api(client_id):
+    """
+    复制客户端（复制基本信息、环境变量、仓库配置）
+
+    URL Parameters:
+        client_id: int  # 源客户端ID
+
+    Response:
+        成功 (201):
+            {
+                "code": 201,
+                "message": "客户端复制成功",
+                "data": {"id": int, "name": str}
+            }
+        未找到 (404):
+            {"code": 404, "message": "客户端不存在"}
+    """
+    source_client = get_client_by_id(client_id, request.user_info.id)
+    if not source_client:
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
+
+    repos = get_client_repos(client_id)
+    env_vars = get_client_env_vars(client_id)
+
+    # 生成不重名的副本名称
+    suffix = '_副本'
+    base = source_client.name[:16 - len(suffix)]
+    copy_name = base + suffix
+    counter = 2
+    while check_client_name_exists(request.user_info.id, copy_name):
+        suffix_n = f'_副本{counter}'
+        copy_name = source_client.name[:16 - len(suffix_n)] + suffix_n
+        counter += 1
+        if counter > 99:
+            return jsonify({'code': 400, 'message': '副本名称生成失败，请手动重命名后重试'}), 400
+
+    new_client_id = create_client(
+        request.user_info.id,
+        copy_name,
+        source_client.types or [],
+        agent=source_client.agent or 'claude sdk',
+        official_cloud_deploy=source_client.official_cloud_deploy or 0
+    )
+
+    if repos:
+        update_client_repos(new_client_id, [repo.to_dict() for repo in repos])
+
+    for ev in env_vars:
+        create_client_env_var(new_client_id, ev.key, ev.value or '')
+
+    return jsonify({
+        'code': 201,
+        'message': '客户端复制成功',
+        'data': {'id': new_client_id, 'name': copy_name}
+    }), 201
+
+
 @client_bp.route('/<int:client_id>/repos', methods=['GET'])
 @login_required
 def get_client_repos_api(client_id):

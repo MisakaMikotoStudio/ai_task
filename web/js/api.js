@@ -208,6 +208,13 @@ const clientAPI = {
         return request(`/client/${id}/env-vars/${envVarId}`, {
             method: 'DELETE'
         });
+    },
+
+    // 复制客户端
+    async copy(id) {
+        return request(`/client/${id}/copy`, {
+            method: 'POST'
+        });
     }
 };
 

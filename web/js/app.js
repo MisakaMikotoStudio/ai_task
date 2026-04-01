@@ -650,6 +650,7 @@ function renderClientRow(client) {
     let actionsHtml = '';
     if (client.editable) {
         actionsHtml = `<button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
+            <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>`;
     } else if (client.is_public) {
         actionsHtml = `<button class="btn-action btn-info" onclick="openClientConfig(${client.id}, 'view')">查看</button>`;
@@ -680,10 +681,20 @@ async function deleteClient(id) {
     if (!confirm('确定要删除这个客户端吗？')) {
         return;
     }
-    
+
     try {
         await clientAPI.delete(id);
         showToast('客户端删除成功', 'success');
+        loadClients();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function copyClient(id) {
+    try {
+        const result = await clientAPI.copy(id);
+        showToast(`客户端复制成功，新名称: ${result.name}`, 'success');
         loadClients();
     } catch (error) {
         showToast(error.message, 'error');
