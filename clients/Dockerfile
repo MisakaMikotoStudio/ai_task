@@ -84,6 +84,10 @@ RUN pip3 install --break-system-packages \
   claude-agent-sdk \
   requests
 
+# 初始化 Claude CLI 配置，避免每次启动都执行登录
+RUN mkdir -p /home/node/.claude && \
+echo '{"hasCompletedOnboarding": true}' > /home/node/.claude.json
+
 WORKDIR /app
 ARG COMMIT_HASH
 COPY --chown=node:node . /app
