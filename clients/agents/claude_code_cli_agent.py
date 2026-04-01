@@ -44,6 +44,10 @@ class ClaudeCodeCliAgent(BaseAgent):
         timeout: Optional[int] = 1800,
         session_id: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
+        auth_error = self._ensure_authenticated(trace_id, cwd)
+        if auth_error:
+            return auth_error, None
+
         cmd = [
             "claude", "-p",
             "--output-format", "stream-json",
@@ -161,6 +165,75 @@ class ClaudeCodeCliAgent(BaseAgent):
         logger.info(f"[{trace_id}] [{self.name}] 调用完毕, session_id: {result_session_id},"
                     f"reply:\n***************\n{final_output}\n***************\n")
         return final_output, result_session_id
+
+    def _ensure_authenticated(self, trace_id: str, cwd: str) -> Optional[str]:
+        """确保 Claude CLI 已登录；未登录时尝试自动登录。"""
+        logger.info(f"[{trace_id}] [{self.name}] 检查 Claude CLI 登录状态")
+        status_proc = subprocess.run(
+            ["claude", "auth", "status", "--text"],
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=60,
+        )
+        status_output = "\n".join(
+            part.strip() for part in (status_proc.stdout, status_proc.stderr) if part and part.strip()
+        )
+        is_logged_in = status_proc.returncode == 0 and "not logged in" not in status_output.lower()
+        if is_logged_in:
+            return None
+
+        logger.warning(
+            f"[{trace_id}] [{self.name}] 检测到未登录，尝试执行 `claude auth login` "
+            f"(status_code={status_proc.returncode}, output={status_output or 'N/A'})"
+        )
+        login_proc = subprocess.run(
+            ["claude", "auth", "login"],
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=180,
+        )
+        login_output = "\n".join(
+            part.strip() for part in (login_proc.stdout, login_proc.stderr) if part and part.strip()
+        )
+        if login_proc.returncode != 0:
+            error_msg = (
+                f"[{trace_id}] [{self.name}] 自动登录失败 (code={login_proc.returncode})"
+                + (f"\noutput: {login_output}" if login_output else "")
+            )
+            logger.error(error_msg)
+            return error_msg
+
+        # 登录成功后再次确认状态，避免出现 CLI 返回码成功但实际未落地凭据的情况
+        verify_proc = subprocess.run(
+            ["claude", "auth", "status", "--text"],
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=60,
+        )
+        verify_output = "\n".join(
+            part.strip() for part in (verify_proc.stdout, verify_proc.stderr) if part and part.strip()
+        )
+        verified = verify_proc.returncode == 0 and "not logged in" not in verify_output.lower()
+        if not verified:
+            error_msg = (
+                f"[{trace_id}] [{self.name}] 自动登录后状态校验失败"
+                f" (code={verify_proc.returncode})"
+                + (f"\noutput: {verify_output}" if verify_output else "")
+            )
+            logger.error(error_msg)
+            return error_msg
+
+        logger.info(f"[{trace_id}] [{self.name}] Claude CLI 自动登录成功")
+        return None
 
     # ==================== 日志方法 ====================
 
