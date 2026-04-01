@@ -4,6 +4,7 @@
 任务业务逻辑服务层
 """
 
+import json
 from typing import Optional, Dict, List, Any
 
 from dao.task_dao import (
@@ -16,8 +17,10 @@ from dao.task_dao import (
     delete_task as dao_delete_task,
     update_task_client as dao_update_task_client
 )
-from dao.client_dao import get_client_by_id, check_client_usable_for_task
+from dao.client_dao import get_client_by_id, get_client_by_id_no_user_check, check_client_usable_for_task
 from dao.models import Task
+
+from dao.task_dao import update_task_extra
 
 
 def process_flow_for_frontend(flow: Dict[str, Any]) -> Dict[str, Any]:
@@ -284,9 +287,35 @@ def get_task(task_id: int, user_id: int) -> Dict:
     task = dao_get_task_by_id(task_id, user_id)
     if not task:
         raise TaskNotFoundException('任务不存在')
-    
-    # 处理 flow 数据为前端格式
+
     task_dict = task.to_dict()
+
+    # 补充客户端名称和类型列表
+    if task.client_id:
+        client = get_client_by_id_no_user_check(task.client_id)
+        if client:
+            task_dict['client_name'] = client.name
+            task_dict['client_types'] = client.types or []
+        else:
+            task_dict['client_name'] = None
+            task_dict['client_types'] = []
+    else:
+        task_dict['client_types'] = []
+
+    # 解析 extra JSON，提取 develop_doc 和 merge_request
+    extra_raw = task.extra or ''
+    if extra_raw:
+        try:
+            extra_data = json.loads(extra_raw)
+            task_dict['develop_doc'] = extra_data.get('develop_doc', '')
+            task_dict['merge_request'] = extra_data.get('merge_request', [])
+        except (json.JSONDecodeError, TypeError):
+            task_dict['develop_doc'] = ''
+            task_dict['merge_request'] = []
+    else:
+        task_dict['develop_doc'] = ''
+        task_dict['merge_request'] = []
+
     return task_dict
 
 
@@ -472,3 +501,20 @@ def review_task(task_id: int, user_id: int, action: str, feedback: Optional[str]
         # 更新 flow 和 flow_status 为 revising
         dao_update_task_flow(task_id, user_id, flow=flow, flow_status='revising')
         return {'success': True, 'message': '已提交修订反馈', 'flow_status': 'revising'}
+
+
+def sync_execute(
+    task_id: int,
+    user_id: int,
+    develop_doc: str,
+    merge_request: List[Dict[str, Any]]
+) -> Dict:
+    """
+    同步执行差异信息到 ai_task_tasks.extra
+    """
+    extra = {
+        "develop_doc": develop_doc or "",
+        "merge_request": merge_request or []
+    }
+    ok = update_task_extra(task_id=task_id, user_id=user_id, extra=extra)
+    return {"success": ok, "message": "同步成功" if ok else "同步失败"}

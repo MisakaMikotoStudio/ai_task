@@ -6,6 +6,7 @@
 
 import logging
 from abc import ABC, abstractmethod
+from os import name
 from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,34 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 class BaseChecker(ABC):
-    """检查器基类"""
-    
+    """检查器基类"""    
     def __init__(self, config: "ClientConfig"):
-        """
-        初始化检查器
-        
-        Args:
-            config: 客户端配置
-        """
         self.config = config
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
     
-    def add_error(self, message: str):
-        """添加错误信息"""
-        self.errors.append(message)
-    
-    def add_warning(self, message: str):
-        """添加警告信息"""
-        self.warnings.append(message)
-    
-    def clear_messages(self):
-        """清空错误和警告信息"""
-        self.errors = []
-        self.warnings = []
-    
+    def print_error_message(self, message: str):
+        """打印错误信息"""
+        logger.error(f"✗ {self.__class__.__name__} - {message}")    
+
+    def print_warning_message(self, message: str):
+        """打印警告信息"""
+        logger.warning(f"⚠ {self.name} - {message}")
+
     @abstractmethod
-    def check(self, **kwargs) -> bool:
+    def check(self) -> bool:
         """
         执行检查
         

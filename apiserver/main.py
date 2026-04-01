@@ -17,6 +17,21 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+
+
+class _QuietPollFilter(logging.Filter):
+    """过滤高频轮询接口的 werkzeug 请求日志，避免刷屏"""
+    _quiet_prefixes = (
+        '"GET /api/task ',
+        '"GET /api/health ',
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(p in msg for p in self._quiet_prefixes)
+
+
+logging.getLogger('werkzeug').addFilter(_QuietPollFilter())
 from flask_cors import CORS
 
 from config_model import AppConfig
@@ -26,7 +41,7 @@ from routes.client import client_bp
 from routes.task import task_bp
 from routes.okr import okr_bp
 from routes.todo import todo_bp
-from routes.cloud import cloud_bp
+from routes.chat import chat_bp
 
 
 def create_app(config: AppConfig) -> Flask:
@@ -49,7 +64,7 @@ def create_app(config: AppConfig) -> Flask:
     app.register_blueprint(task_bp, url_prefix=f'{prefix}/api/task')
     app.register_blueprint(okr_bp, url_prefix=f'{prefix}/api/okr')
     app.register_blueprint(todo_bp, url_prefix=f'{prefix}/api/todo')
-    app.register_blueprint(cloud_bp, url_prefix=f'{prefix}/api/cloud')
+    app.register_blueprint(chat_bp, url_prefix=f'{prefix}/api/chat')
     
     # 请求结束时清理session
     @app.teardown_appcontext

@@ -6,7 +6,7 @@ API 服务器连接检查器
 
 import logging
 
-import requests
+from requests.exceptions import ConnectionError, Timeout
 
 from .base_checker import BaseChecker
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ApiServerChecker(BaseChecker):
     """API 服务器连接检查器"""
     
-    def check(self, **kwargs) -> bool:
+    def check(self) -> bool:
         """
         检查后端 API 服务器是否联通
         
@@ -25,20 +25,16 @@ class ApiServerChecker(BaseChecker):
         """
         url = self.config.apiserver_rpc.base_url
         try:
-            # 尝试访问 API 服务器（健康检查或根路径）
-            response = requests.get(f"{url}/api/health", timeout=10)
-            if response.status_code < 500:
-                logger.info(f"✓ API 服务器联通: {url}")
-                return True
-            else:
-                self.add_error(f"API 服务器返回错误状态码: {response.status_code}")
-                return False
-        except requests.exceptions.ConnectionError:
-            self.add_error(f"无法连接到 API 服务器: {url}")
+            logger.info(f"检查 API 服务器健康状态: {url}")
+            self.config.apiserver_rpc.check_health()
+            logger.info(f"✓ API 服务器联通: {url}")
+            return True
+        except ConnectionError:
+            self.print_error_message(f"无法连接到 API 服务器: {url}")
             return False
-        except requests.exceptions.Timeout:
-            self.add_error(f"连接 API 服务器超时: {url}")
+        except Timeout:
+            self.print_error_message(f"连接 API 服务器超时: {url}")
             return False
         except Exception as e:
-            self.add_error(f"API 服务器检查异常: {e}")
+            self.print_error_message(f"API 服务器检查异常: {e}")
             return False

@@ -658,6 +658,15 @@ input, select, textarea {
     background: rgba(163, 113, 247, 0.25);
 }
 
+.btn-chat {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.btn-chat:hover {
+    background: rgba(63, 185, 80, 0.25);
+}
+
 .btn-approve {
     background: rgba(34, 197, 94, 0.15);
     color: #22c55e;

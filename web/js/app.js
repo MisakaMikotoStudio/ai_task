@@ -216,6 +216,12 @@ function initNavigation() {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const view = item.dataset.view;
+            const targetHash = `#/${view}`;
+            // 当 hash 未变化时，hashchange 不会触发，需要手动切换视图
+            if (window.location.hash === targetHash) {
+                switchToView(view);
+                return;
+            }
             window.location.hash = `/${view}`;
         });
     });
@@ -654,6 +660,7 @@ function renderClientRow(client) {
     <tr>
         <td>${client.id}</td>
         <td><strong>${escapeHtml(client.name)}</strong></td>
+        <td>${client.version ?? '-'}</td>
         <td>${escapeHtml(client.creator_name || '-')}</td>
         <td>${client.is_public ? '<span class="status-tag status-running">是</span>' : '<span class="status-tag status-pending">否</span>'}</td>
         <td class="time-display ${getHeartbeatClass(client.last_sync_at)}">${formatRelativeTime(client.last_sync_at)}</td>
@@ -752,13 +759,14 @@ async function openClientConfig(id, mode) {
     }
 
     // 加载 Agent 列表
-    let agentOptions = ['cloud', 'Claude Code'];
+    let agentOptions = ['claude sdk', 'claude cli'];
     try {
         const r = await clientAPI.getAgents();
         if (r.data && r.data.length > 0) agentOptions = r.data;
     } catch (e) { console.warn('获取Agent列表失败', e); }
 
     const agentSelect = document.getElementById('cfg-client-agent');
+    const officialCloudDeploySelect = document.getElementById('cfg-client-official-cloud-deploy');
     agentSelect.innerHTML = agentOptions.map(a =>
         `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`
     ).join('');
@@ -778,7 +786,8 @@ async function openClientConfig(id, mode) {
             // 填充基本信息
             document.getElementById('cfg-client-name').value = clientData.name;
             document.getElementById('cfg-client-is-public').value = clientData.is_public ? 'true' : 'false';
-            agentSelect.value = clientData.agent || 'cloud';
+            agentSelect.value = clientData.agent || 'claude sdk';
+            officialCloudDeploySelect.value = String(clientData.official_cloud_deploy ?? 0);
         } catch (error) {
             showToast(error.message, 'error');
             return;
@@ -786,7 +795,8 @@ async function openClientConfig(id, mode) {
     } else {
         document.getElementById('cfg-client-name').value = '';
         document.getElementById('cfg-client-is-public').value = 'false';
-        agentSelect.value = agentOptions[0] || 'cloud';
+        agentSelect.value = agentOptions[0] || 'claude sdk';
+        officialCloudDeploySelect.value = '0';
     }
 
     // 只读模式下禁用基本信息表单字段
@@ -823,13 +833,18 @@ function cfgInitBasicForm() {
         const name = document.getElementById('cfg-client-name').value.trim();
         const isPublic = document.getElementById('cfg-client-is-public').value === 'true';
         const agent = document.getElementById('cfg-client-agent').value;
+        const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
 
         if (!name) { showToast('客户端名称不能为空', 'error'); return; }
 
         try {
             if (cfgClientId === null) {
                 // 新建
-                const result = await clientAPI.create(name, [], { is_public: isPublic, agent });
+                const result = await clientAPI.create(name, [], {
+                    is_public: isPublic,
+                    agent,
+                    official_cloud_deploy: officialCloudDeploy
+                });
                 cfgClientId = result.data.id;
                 cfgClientMode = 'edit';
                 showToast('客户端创建成功，请继续配置环境变量和仓库', 'success');
@@ -842,11 +857,15 @@ function cfgInitBasicForm() {
                 loadClients();
             } else {
                 // 更新
-                await clientAPI.update(cfgClientId, name, [], { is_public: isPublic, agent });
+                await clientAPI.update(cfgClientId, name, [], {
+                    is_public: isPublic,
+                    agent,
+                    official_cloud_deploy: officialCloudDeploy
+                });
                 showToast('基本信息保存成功', 'success');
                 loadClients();
             }
-            // 更新环境变量提示（agent 类型可能变了）
+            // 刷新环境变量 tab
             cfgRenderEnvVarsTab();
         } catch (error) {
             showToast(error.message, 'error');
@@ -857,16 +876,12 @@ function cfgInitBasicForm() {
 // ---- 环境变量管理 ----
 
 function cfgRenderEnvVarsTab() {
-    const agent = document.getElementById('cfg-client-agent')?.value || '';
     const tipEl = document.getElementById('env-vars-tip');
     const addBtn = document.getElementById('add-env-var-btn');
-    const isCloud = (agent.toLowerCase() === 'cloud');
 
     if (tipEl) {
-        tipEl.textContent = isCloud
-            ? '以下环境变量将在 cloud agent 启动时自动注入'
-            : '注意：仅在 Agent 类型为 cloud 时，环境变量才有效';
-        tipEl.className = 'config-section-tip ' + (isCloud ? 'tip-info' : 'tip-warn');
+        tipEl.textContent = '注意：仅在docker方式启动客户端或者使用cloud客户端时，环境变量才有效';
+        tipEl.className = 'config-section-tip tip-warn';
     }
 
     // 只读或无 id 时隐藏添加按钮
@@ -1191,21 +1206,9 @@ function renderTasks(tasks) {
             flowStatusHtml = flowStatusText;
         }
 
-        // 审核相关按钮：reviewing 状态显示通过和修订，done 状态显示修订
-        const isReviewing = task.flow_status === 'reviewing';
-        const isDone = task.flow_status === 'done';
-        let reviewButtons = '';
-        if (isReviewing) {
-            reviewButtons = `<button class="btn-action btn-approve" onclick="approveTask(${task.id})">通过</button>
-                <button class="btn-action btn-revise" onclick="showReviseModal(${task.id})">修订</button>`;
-        } else if (isDone) {
-            reviewButtons = `<button class="btn-action btn-revise" onclick="showReviseModal(${task.id})">修订</button>`;
-        }
-
         return `
         <tr>
-            <td><span class="task-id">${task.id}</span></td>
-            <td><span class="task-key">${task.key}</span></td>
+            <td><span class="task-id">${task.id ?? '-'}</span></td>
             <td>${escapeHtml(task.title)}</td>
             <td>
                 <select class="status-select status-${task.status}" onchange="updateTaskStatus(${task.id}, this.value, this)">
@@ -1215,17 +1218,12 @@ function renderTasks(tasks) {
                     <option value="completed" ${task.status === 'completed' ? 'selected' : ''}>已结束</option>
                 </select>
             </td>
-            <td>${task.client_name ? escapeHtml(task.client_name) : '<span class="text-muted">-</span>'}</td>
-            <td>${flowStatusHtml}</td>
+            <td>${escapeHtml(task.client_name || '-')}</td>
             <td class="time-display">${formatDateTime(task.created_at)}</td>
-            <td class="time-display">${formatDateTime(task.updated_at)}</td>
             <td>
-                <button class="btn-action btn-info" onclick="showTaskDetailModal(${task.id})">任务详情</button>
+                <button class="btn-action btn-chat" onclick="openTaskChat(${task.id})">Chat</button>
                 <button class="btn-action btn-delete" onclick="deleteTask(${task.id})">删除</button>
-                <button class="btn-action btn-edit" onclick="showFlowDetailModal(${task.id})">执行详情</button>
                 <button class="btn-action btn-reset" onclick="resetTask(${task.id})">重置</button>
-                ${isClientError ? `<button class="btn-action btn-retry" onclick="retryTask(${task.id})">重试</button>` : ''}
-                ${reviewButtons}
             </td>
         </tr>
     `}).join('');
@@ -1431,11 +1429,25 @@ function renderTaskEditModal(task) {
             `;
         }
 
+        const timesHtml = !isEditing ? `
+            <div class="form-row">
+                <div class="form-group form-group-half">
+                    <label>创建时间</label>
+                    <div class="readonly-field text-muted">${formatDateTime(task.created_at)}</div>
+                </div>
+                <div class="form-group form-group-half">
+                    <label>更新时间</label>
+                    <div class="readonly-field text-muted">${formatDateTime(task.updated_at)}</div>
+                </div>
+            </div>
+        ` : '';
+
         headerInfoHtml = `
             <div class="form-row">
                 ${clientHtml}
                 ${statusHtml}
             </div>
+            ${timesHtml}
         `;
     }
     
@@ -1445,7 +1457,7 @@ function renderTaskEditModal(task) {
         // 编辑模式 - 可编辑链接
         linksHtml = `
             <div class="form-group">
-                <label>相关链接</label>
+                <label>相关链接 <span class="text-muted">(agent执行不会使用)</span></label>
                 <div class="links-editor">
                     <table class="types-table" id="links-table">
                         <thead>
@@ -1487,16 +1499,16 @@ function renderTaskEditModal(task) {
     
     // 描述区域
     let descHtml = '';
-    if (isCreateMode) {
-        // 创建模式 - 可编辑描述
+    if (isCreateMode || isEditing) {
+        // 创建/编辑模式 - 可编辑描述
         descHtml = `
             <div class="form-group">
-                <label>任务描述</label>
-                <textarea id="task-edit-desc" placeholder="请输入任务描述">${escapeHtml(taskEditDesc)}</textarea>
+                <label>任务描述 <span class="required">*</span></label>
+                <textarea id="task-edit-desc" placeholder="请输入任务描述" required>${escapeHtml(taskEditDesc)}</textarea>
             </div>
         `;
     } else {
-        // 查看/编辑模式 - 描述只读
+        // 查看模式 - 描述只读
         const descContent = taskEditDesc 
             ? `<div class="task-desc-text">${escapeHtml(taskEditDesc)}</div>`
             : '<span class="text-muted">暂无任务描述</span>';
@@ -1539,8 +1551,8 @@ function renderTaskEditModal(task) {
             <div class="task-edit-scroll">
                 ${titleInputHtml}
                 ${headerInfoHtml}
-                ${linksHtml}
-                ${descHtml}
+                ${isCreateMode ? '' : linksHtml}
+                ${isCreateMode ? '' : descHtml}
             </div>
             ${actionsHtml}
         </div>
@@ -1601,7 +1613,13 @@ async function saveTaskEdit() {
     if (descTextarea) {
         taskEditDesc = descTextarea.value;
     }
-    
+
+    taskEditDesc = (taskEditDesc ?? '').trim();
+    if (!isCreateMode && !taskEditDesc) {
+        showToast('请输入任务描述', 'error');
+        return;
+    }
+
     // 过滤掉空的链接
     const validLinks = taskEditLinks.filter(link => link.title || link.url);
     
@@ -1638,12 +1656,15 @@ async function saveTaskEdit() {
             showToast(error.message, 'error');
         }
     } else {
-        // 编辑模式 - 更新客户端和状态（标题和描述不可编辑）
+        // 编辑模式 - 更新客户端/状态/描述（标题不可编辑）
         try {
             const newStatus = document.getElementById('task-edit-status')?.value;
             const newClientId = document.getElementById('task-edit-client')?.value;
             const parsedClientId = newClientId ? parseInt(newClientId) : 0;
             
+            // 更新描述（包含相关链接）
+            await taskAPI.updateDesc(taskEditCurrentId, descJson);
+
             // 更新客户端
             await taskAPI.updateClient(taskEditCurrentId, parsedClientId);
             
@@ -1657,6 +1678,7 @@ async function saveTaskEdit() {
             // 更新缓存
             if (window.tasksCache && window.tasksCache[taskEditCurrentId]) {
                 window.tasksCache[taskEditCurrentId].client_id = parsedClientId;
+                window.tasksCache[taskEditCurrentId].desc = descJson;
                 if (newStatus) {
                     window.tasksCache[taskEditCurrentId].status = newStatus;
                 }
@@ -2256,13 +2278,20 @@ function renderSecrets(secrets) {
 
     emptyState.classList.remove('show');
 
-    tbody.innerHTML = secrets.map(secret => `
+    const sorted = [...secrets].sort((a, b) => {
+        if (a.type === 'cloud' && b.type !== 'cloud') return -1;
+        if (a.type !== 'cloud' && b.type === 'cloud') return 1;
+        return new Date(a.created_at) - new Date(b.created_at);
+    });
+
+    tbody.innerHTML = sorted.map(secret => `
         <tr>
             <td>${escapeHtml(secret.name)}</td>
             <td><code style="font-size: 12px; word-break: break-all;">${escapeHtml(secret.secret)}</code></td>
+            <td class="time-display">${formatDateTime(secret.last_used_at)}</td>
             <td class="time-display">${formatDateTime(secret.created_at)}</td>
             <td>
-                <button class="btn-action btn-delete" onclick="deleteSecret(${secret.id})">删除</button>
+                ${secret.type !== 'cloud' ? `<button class="btn-action btn-delete" onclick="deleteSecret(${secret.id})">删除</button>` : ''}
             </td>
         </tr>
     `).join('');
@@ -2313,6 +2342,12 @@ function initSecrets() {
     if (addBtn) {
         addBtn.addEventListener('click', showAddSecretModal);
     }
+}
+
+// ===== Chat 跳转 =====
+
+function openTaskChat(taskId) {
+    window.open(`chat.html?task_id=${taskId}`, '_blank');
 }
 
 // ===== 工具函数 =====

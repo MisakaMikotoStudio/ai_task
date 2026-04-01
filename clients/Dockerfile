@@ -83,3 +83,7 @@ RUN pip3 config set global.index-url https://mirrors.cloud.tencent.com/pypi/simp
 RUN pip3 install --break-system-packages \
   claude-agent-sdk \
   requests
+
+WORKDIR /app
+ARG COMMIT_HASH
+COPY --chown=node:node . /app

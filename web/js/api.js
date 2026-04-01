@@ -131,6 +131,7 @@ const clientAPI = {
         const body = { name, types };
         if (options.is_public !== undefined) body.is_public = options.is_public;
         if (options.agent !== undefined) body.agent = options.agent;
+        if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
@@ -142,6 +143,7 @@ const clientAPI = {
         const body = { name, types };
         if (options.is_public !== undefined) body.is_public = options.is_public;
         if (options.agent !== undefined) body.agent = options.agent;
+        if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -411,6 +413,66 @@ const okrAPI = {
         return request(`/okr/objectives/${objectiveId}/key-results/reorder`, {
             method: 'POST',
             body: JSON.stringify({ kr_ids: krIds })
+        });
+    }
+};
+
+// Chat API
+const chatAPI = {
+    async listChats(taskId) {
+        return request(`/chat/task/${taskId}/chats`);
+    },
+
+    async createChat(taskId, title, sessionid = null) {
+        const body = { title };
+        if (sessionid) body.sessionid = sessionid;
+        return request(`/chat/task/${taskId}/chats`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    },
+
+    async getChat(taskId, chatId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}`);
+    },
+
+    async updateChatStatus(taskId, chatId, status) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status })
+        });
+    },
+
+    async deleteChat(taskId, chatId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}`, {
+            method: 'DELETE'
+        });
+    },
+
+    async listMessages(taskId, chatId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages`);
+    },
+
+    async createMessage(taskId, chatId, input, extra = {}) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ input, extra })
+        });
+    },
+
+    async updateMessageStatus(taskId, chatId, messageId, status, output = null) {
+        const body = { status };
+        if (output !== null) body.output = output;
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify(body)
+        });
+    },
+
+    // 软删除消息（用户终止），返回 { input } 用于回填输入框
+    async deleteMessage(taskId, chatId, messageId) {
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, {
+            method: 'DELETE'
         });
     }
 };
