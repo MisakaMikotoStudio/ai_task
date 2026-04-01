@@ -230,7 +230,7 @@ class CodeDevelopWorker(BaseWorker):
 
             chat_branch_merge_request.append({
                 "repo_name": git_repo.name,
-                "branch_name": task_branch,
+                "branch_name": chat_branch,
                 "latest_commitId": diff_result.commit_id,
                 "merge_url": diff_result.merge_url
             })
