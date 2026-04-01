@@ -10,8 +10,8 @@ from routes.auth_plugin import login_required
 from dao.models import Chat, ChatMessage
 from dao.chat_dao import (
     create_chat, get_chats_by_task, get_chat_by_id, update_chat_status, delete_chat,
-    create_chat_message, get_messages_by_chat, get_running_message, update_message_status,
-    soft_delete_message, update_message_output_and_extra, update_chat_sessionid, get_message_by_id
+    create_chat_message, get_messages_by_chat, get_running_message, 
+    soft_delete_message, update_message, update_chat_sessionid, get_message_by_id
 )
 from dao.task_dao import get_task_by_id
 
@@ -170,37 +170,6 @@ def create_message_api(task_id, chat_id):
     return jsonify({'code': 201, 'message': '消息创建成功', 'data': msg.to_dict()}), 201
 
 
-@chat_bp.route('/task/<int:task_id>/chats/<int:chat_id>/messages/<int:message_id>/status', methods=['PATCH'])
-@login_required
-def update_message_status_api(task_id, chat_id, message_id):
-    """更新消息状态（供Agent调用：running / completed）"""
-    task = get_task_by_id(task_id=task_id, user_id=request.user_info.id)
-    if not task:
-        return jsonify({'code': 404, 'message': '任务不存在'}), 404
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
-
-    status = data.get('status', '')
-    output = data.get('output')
-
-    from dao.models import ChatMessage
-    valid_statuses = [ChatMessage.STATUS_RUNNING, ChatMessage.STATUS_COMPLETED, ChatMessage.STATUS_TERMINATED]
-    if status not in valid_statuses:
-        return jsonify({'code': 400, 'message': '无效的状态值'}), 400
-
-    ok = update_message_status(message_id, chat_id, status, output)
-    if not ok:
-        return jsonify({'code': 404, 'message': '消息不存在'}), 404
-
-    if status in [ChatMessage.STATUS_COMPLETED, ChatMessage.STATUS_TERMINATED]:
-        update_chat_status(chat_id, task_id,
-                           'completed' if status == ChatMessage.STATUS_COMPLETED else 'terminated')
-
-    return jsonify({'code': 200, 'message': '状态更新成功'})
-
-
 @chat_bp.route('/task/<int:task_id>/chats/<int:chat_id>/messages/<int:message_id>', methods=['DELETE'])
 @login_required
 def delete_message_api(task_id, chat_id, message_id):
@@ -251,21 +220,14 @@ def sync_execute_message_api():
     # 校验任务归属
     task = get_task_by_id(task_id=task_id, user_id=request.user_info.id)
     if not task:
-        return jsonify({'code': 404, 'message': '任务不存在'}), 404
+        return jsonify({'code': 400, 'message': '任务不存在'}), 400
 
     extra = {
         'develop_doc': develop_doc,
         'merge_request': merge_request
     }
-    ok = update_message_output_and_extra(
-        task_id=int(task_id),
-        chat_id=int(chat_id),
-        message_id=int(message_id),
-        extra=extra
-    )
-
-    if not ok:
-        return jsonify({'code': 404, 'message': '消息不存在或已删除'}), 404
+    update_message(task_id=int(task_id), chat_id=int(chat_id), message_id=int(message_id), extra=extra, status=ChatMessage.STATUS_COMPLETED)
+    update_chat_status(chat_id=int(chat_id), task_id=int(task_id), status=Chat.STATUS_COMPLETED)
 
     return jsonify({'code': 200, 'message': '同步成功'})
 
@@ -319,7 +281,7 @@ def update_message_status_by_client_api():
     if status not in valid_statuses:
         return jsonify({'code': 400, 'message': '无效的状态值'}), 400
 
-    ok = update_message_status(message_id=message_id, chat_id=chat_id, status=status)
+    ok = update_message(task_id=task_id, chat_id=chat_id, message_id=message_id, status=status)
     if not ok:
         return jsonify({'code': 400, 'message': '消息不存在或已删除'}), 400
     ok = update_chat_status(chat_id=chat_id, task_id=task_id, status=status)
@@ -354,12 +316,7 @@ def agent_reply_message_api():
     if session_id is not None and len(session_id) > 64:
         return jsonify({'code': 400, 'message': 'sessionId最多64个字符'}), 400
 
-    ok_msg = update_message_status(
-        message_id=message_id,
-        chat_id=chat_id,
-        status=ChatMessage.STATUS_COMPLETED,
-        output=reply,
-    )
+    ok_msg = update_message(task_id=task_id, chat_id=chat_id, message_id=message_id, output=reply)
     if not ok_msg:
         return jsonify({'code': 400, 'message': '消息不存在或已删除'}), 400
 
@@ -367,9 +324,6 @@ def agent_reply_message_api():
         ok_session = update_chat_sessionid(task_id=task_id, chat_id=chat_id, sessionid=session_id)
         if not ok_session:
             return jsonify({'code': 400, 'message': 'Chat不存在或已删除'}), 400
-
-    update_chat_status(int(chat_id), int(task_id), Chat.STATUS_COMPLETED)
-
     return jsonify({'code': 200, 'message': '同步成功'})
 
 def _check_releation(user_id: int, task_id: int | None, chat_id: int | None, message_id: int | None) -> bool:

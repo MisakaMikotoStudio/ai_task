@@ -129,35 +129,27 @@ def get_running_message(chat_id: int, task_id: int) -> Optional[ChatMessage]:
             ChatMessage.status.in_([ChatMessage.STATUS_PENDING, ChatMessage.STATUS_RUNNING])
         ).first()
 
-
-def update_message_status(message_id: int, chat_id: int, status: str,
-                          output: Optional[str] = None) -> bool:
-    """更新消息状态（供Agent调用）"""
-    with get_db_session() as session:
-        update_data = {ChatMessage.status: status}
-        if output is not None:
-            update_data[ChatMessage.output] = output
-        affected = session.query(ChatMessage).filter(
-            ChatMessage.id == message_id,
-            ChatMessage.chat_id == chat_id,
-            ChatMessage.deleted == 0
-        ).update(update_data)
-        return affected > 0
-
-
-def update_message_output_and_extra(
+def update_message(
     task_id: int,
     chat_id: int,
     message_id: int,
-    extra: Optional[dict] = None
+    output: Optional[str] = None,
+    extra: Optional[dict] = None,
+    status: Optional[str] = None
 ) -> bool:
     """
-    更新 ChatMessage 的 extra 字段。
+    更新 ChatMessage 的 output/extra/status 字段。
     """
     with get_db_session() as session:
-        update_data = {
-            ChatMessage.extra: extra or {},
-        }
+        update_data = {}
+        if extra is not None:
+            update_data[ChatMessage.extra] = extra
+        if status is not None:
+            update_data[ChatMessage.status] = status
+        if output is not None:
+            update_data[ChatMessage.output] = output
+        if not update_data:
+            return False
         affected = session.query(ChatMessage).filter(
             ChatMessage.id == message_id,
             ChatMessage.chat_id == chat_id,
@@ -165,7 +157,6 @@ def update_message_output_and_extra(
             ChatMessage.deleted == 0
         ).update(update_data)
         return affected > 0
-
 
 def soft_delete_message(message_id: int, chat_id: int, task_id: int) -> Optional[str]:
     """
