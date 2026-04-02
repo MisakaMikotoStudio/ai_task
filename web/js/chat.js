@@ -46,11 +46,6 @@ function formatTime(dateStr) {
         d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
-function truncate(str, n) {
-    if (!str) return '';
-    return str.length > n ? str.slice(0, n) + '…' : str;
-}
-
 // ===== Task info =====
 async function loadTaskInfo() {
     try {
@@ -96,31 +91,18 @@ function renderSidebarExtra(info) {
     const gpEl = document.getElementById('sidebar-gitpush');
     const storeKey = 'task_sidebar';
     mergeRequestStore[storeKey] = mergeRequest;
+    const summary = mergeRequest.length > 0
+        ? `共 ${mergeRequest.length} 条变更记录，点击查看详情`
+        : '暂无推送记录，点击查看详情';
 
-    if (mergeRequest.length === 0) {
-        gpEl.innerHTML = `
-            <div style="padding: 4px 0 0;">
-                <button class="msg-extra-btn mr-btn" onclick="showMergeRequestModal('${storeKey}')">🔀 变更详情</button>
-            </div>`;
-    } else {
-        gpEl.innerHTML = mergeRequest.map(item => {
-            const repoName = item.repo_name || '';
-            const branchName = item.branch_name || '';
-            const mergeUrl = item.merge_url || '';
-            const mrLinks = mergeUrl
-                ? `<a href="${escapeHtml(mergeUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Pull Request</a>`
-                : '';
-
-            return `
-            <div class="gitpush-card clickable" onclick="showMergeRequestModal('${storeKey}')">
-                <div class="gitpush-repo">${escapeHtml(repoName)}</div>
-                <div class="gitpush-meta">
-                    <span class="gitpush-branch">${escapeHtml(branchName)}</span>
-                </div>
-                ${mrLinks ? `<div class="gitpush-mr">${mrLinks}</div>` : ''}
-            </div>`;
-        }).join('');
-    }
+    gpEl.innerHTML = `
+        <button type="button" class="sidebar-action-btn" onclick="showMergeRequestModal('${storeKey}')">
+            <span class="sidebar-action-icon">🔀</span>
+            <span class="sidebar-action-text">
+                <span class="sidebar-action-title">查看变更详情</span>
+                <span class="sidebar-action-subtitle">${escapeHtml(summary)}</span>
+            </span>
+        </button>`;
 }
 
 // ===== Chat list =====
@@ -129,6 +111,12 @@ async function loadChats() {
         const res = await chatAPI.listChats(taskId);
         chatsCache = res.data || [];
         renderChatList();
+
+        if (chatsCache.length === 0) return;
+
+        const hasCurrentChat = currentChatId && chatsCache.some(chat => chat.id === currentChatId);
+        const targetChatId = hasCurrentChat ? currentChatId : chatsCache[0].id;
+        await selectChat(targetChatId);
     } catch (e) {
         showToast(e.message, 'error');
     }
@@ -147,7 +135,7 @@ function renderChatList() {
     container.innerHTML = chatsCache.map(chat => {
         const active = chat.id === currentChatId ? 'active' : '';
         const st = chat.status || 'completed';
-        const preview = truncate(chat.title, 10);
+        const preview = chat.title || `Chat #${chat.id}`;
 
         return `
         <div class="chat-item ${active}" onclick="selectChat(${chat.id})">
