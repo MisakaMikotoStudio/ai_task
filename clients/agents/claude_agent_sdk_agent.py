@@ -50,46 +50,76 @@ class ClaudeAgentSdkAgent(BaseAgent):
         timeout: int,
         session_id: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
+        stderr_lines: list[str] = []
+
+        def _stderr_callback(line: str) -> None:
+            stderr_lines.append(line)
+            logger.debug(f"[{trace_id}] [CLI stderr] {line}")
+
         options = ClaudeAgentOptions(
             cwd=cwd,
             permission_mode="bypassPermissions",
+            stderr=_stderr_callback,
         )
+        if session_id:
+            options.resume = session_id
 
         output_parts = []
         with anyio.fail_after(timeout):
-            query_kwargs = {"prompt": prompt, "options": options}
-            if session_id:
-                query_kwargs["session_id"] = session_id
-
-            # NOTE: don't json.dumps raw query_kwargs for log, because options may not be JSON-serializable.
-            query_kwargs_log = dict(query_kwargs)
-            query_kwargs_log["options"] = self._safe_options_for_log(options)
             logger.info(
-                f"[{trace_id}] [{self.name}] query_kwargs={json.dumps(query_kwargs_log, ensure_ascii=False, default=str)}"
+                f"[{trace_id}] [{self.name}] query_kwargs="
+                f"{json.dumps({'prompt': prompt, 'options': self._safe_options_for_log(options)}, ensure_ascii=False, default=str)}"
             )
-            async for message in query(**query_kwargs):
-                if isinstance(message, AssistantMessage):
-                    self._log_assistant_message(trace_id, message, output_parts)
-                elif isinstance(message, UserMessage):
-                    self._log_user_message(trace_id, message)
-                elif isinstance(message, SystemMessage):
-                    logger.info(f"[{trace_id}] [系统] {message.data}")
-                elif isinstance(message, ResultMessage):
-                    self._log_result_message(trace_id, message)
-                    session_id = (
-                        getattr(message, "session_id", None)
-                        or getattr(message, "sessionId", None)
-                        or getattr(message, "session", None)
+            try:
+                session_id = await self._consume_query(
+                    trace_id, prompt, options, output_parts, session_id,
+                )
+            except Exception as exc:
+                if session_id and options.resume:
+                    logger.warning(
+                        f"[{trace_id}] query with resume={session_id} failed ({exc}), "
+                        f"stderr={''.join(stderr_lines)!r}. Retrying without resume..."
+                    )
+                    stderr_lines.clear()
+                    options.resume = None
+                    session_id = await self._consume_query(
+                        trace_id, prompt, options, output_parts, session_id=None,
                     )
                 else:
-                    logger.info(
-                        f"[{trace_id}] [未知消息类型] {type(message).__name__}: {message!r}"
+                    logger.error(
+                        f"[{trace_id}] query failed: {exc}, stderr={''.join(stderr_lines)!r}"
                     )
+                    raise
 
         final_output = "\n".join(output_parts).strip()
         logger.info(f"[{trace_id}] {self.name} 调用完毕, session_id: {session_id},"
                     f"reply:\n***************\n{final_output}\n***************\n")
         return final_output, session_id
+
+    async def _consume_query(
+        self,
+        trace_id: str,
+        prompt: str,
+        options: ClaudeAgentOptions,
+        output_parts: list,
+        session_id: Optional[str],
+    ) -> Optional[str]:
+        """Run query() and consume all messages; return the session_id from ResultMessage."""
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                self._log_assistant_message(trace_id, message, output_parts)
+            elif isinstance(message, UserMessage):
+                self._log_user_message(trace_id, message)
+            elif isinstance(message, SystemMessage):
+                logger.info(f"[{trace_id}] [系统] {message.data}")
+            elif isinstance(message, ResultMessage):
+                self._log_result_message(trace_id, message)
+                session_id = message.session_id
+            else:
+                logger.info(
+                    f"[{trace_id}] [未知消息类型] {type(message).__name__}: {message!r}"
+                )
+        return session_id
 
     def _log_assistant_message(self, trace_id: str, message: AssistantMessage, output_parts: list) -> None:
         for block in message.content:
