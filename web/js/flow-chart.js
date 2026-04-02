@@ -81,13 +81,17 @@ class FlowChart {
 
         const nodeMap = new Map();
         const inDegree = new Map();
-        const children = new Map();
+        const children = new Map(); // adjacency list: source -> [target...]
+        const levelByNode = new Map(); // nodeId -> layer index
 
         // 初始化
+        const nodeOrderIndex = new Map();
         this.flow.nodes.forEach(node => {
+            nodeOrderIndex.set(node.id, nodeOrderIndex.size);
             nodeMap.set(node.id, node);
             inDegree.set(node.id, 0);
             children.set(node.id, []);
+            levelByNode.set(node.id, 0);
         });
 
         // 根据 edges 计算入度和子节点
@@ -99,44 +103,38 @@ class FlowChart {
             children.set(edge.source, childList);
         });
 
-        // BFS 分层
-        const levels = [];
-        const visited = new Set();
-        
-        // 找到所有入度为 0 的节点作为起始层
-        let currentLevel = [];
+        // 拓扑遍历 + 动态维护层级：level(child)=max(level(child), level(parent)+1)
+        // 复杂度：O(V+E)，避免原实现里对子节点反复 filter/every 的开销。
+        const queue = [];
         inDegree.forEach((degree, nodeId) => {
-            if (degree === 0) currentLevel.push(nodeId);
+            if (degree === 0) queue.push(nodeId);
         });
 
-        while (currentLevel.length > 0) {
-            levels.push(currentLevel);
-            currentLevel.forEach(id => visited.add(id));
+        let qIndex = 0;
+        while (qIndex < queue.length) {
+            const nodeId = queue[qIndex++];
+            const parentLevel = levelByNode.get(nodeId) || 0;
 
-            const nextLevel = [];
-            currentLevel.forEach(nodeId => {
-                const childNodes = children.get(nodeId) || [];
-                childNodes.forEach(childId => {
-                    if (!visited.has(childId) && !nextLevel.includes(childId)) {
-                        // 检查所有父节点是否已访问
-                        const allParentsVisited = this.flow.edges
-                            .filter(e => e.target === childId)
-                            .every(e => visited.has(e.source));
-                        if (allParentsVisited) {
-                            nextLevel.push(childId);
-                        }
-                    }
-                });
+            const childNodes = children.get(nodeId) || [];
+            childNodes.forEach(childId => {
+                // child layer 取所有父节点层级的最大值
+                const nextLevel = parentLevel + 1;
+                const oldLevel = levelByNode.get(childId) || 0;
+                if (nextLevel > oldLevel) levelByNode.set(childId, nextLevel);
+
+                // Kahn 算法：维护入度，保证拓扑处理顺序
+                const deg = inDegree.get(childId) || 0;
+                inDegree.set(childId, deg - 1);
+                if (deg - 1 === 0) queue.push(childId);
             });
-            currentLevel = nextLevel;
         }
 
-        // 添加未访问的节点（处理孤立节点）
+        // 按 layer 聚合节点（保持与 this.flow.nodes 相同的稳定顺序）
+        const levels = [];
         this.flow.nodes.forEach(node => {
-            if (!visited.has(node.id)) {
-                if (levels.length === 0) levels.push([]);
-                levels[levels.length - 1].push(node.id);
-            }
+            const lvl = levelByNode.get(node.id) || 0;
+            if (!levels[lvl]) levels[lvl] = [];
+            levels[lvl].push(node.id);
         });
 
         // 计算位置（从上到下布局 - 垂直方向）

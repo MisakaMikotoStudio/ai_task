@@ -5,10 +5,10 @@ OKR 数据访问对象
 """
 
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime, timezone
 
 from .connection import get_db_session
-from .models import Objective, KeyResult, Task
+from .models import Objective, KeyResult
 
 
 # ========== Objective CRUD ==========
@@ -23,7 +23,6 @@ def create_objective(user_id: int, title: str, description: Optional[str] = None
             title=title,
             description=description,
             status=Objective.STATUS_DRAFT,
-            progress=0,
             cycle_type=cycle_type,
             cycle_start=cycle_start,
             cycle_end=cycle_end
@@ -39,7 +38,10 @@ def get_objectives_by_user(user_id: int, cycle_type: Optional[str] = None,
                            cycle_end: Optional[date] = None) -> List[Objective]:
     """获取用户的目标列表，支持按周期范围过滤"""
     with get_db_session() as session:
-        query = session.query(Objective).filter(Objective.user_id == user_id)
+        query = session.query(Objective).filter(
+            Objective.user_id == user_id,
+            Objective.deleted_at.is_(None)
+        )
         if cycle_type:
             query = query.filter(Objective.cycle_type == cycle_type)
         if status:
@@ -58,7 +60,10 @@ def get_objectives_with_krs(user_id: int, cycle_type: Optional[str] = None,
     """一次性获取用户指定周期的所有OKR数据（含KRs），避免N+1查询"""
     with get_db_session() as session:
         # 先查询符合条件的目标
-        query = session.query(Objective).filter(Objective.user_id == user_id)
+        query = session.query(Objective).filter(
+            Objective.user_id == user_id,
+            Objective.deleted_at.is_(None)
+        )
         if cycle_type:
             query = query.filter(Objective.cycle_type == cycle_type)
         if cycle_start:
@@ -73,7 +78,9 @@ def get_objectives_with_krs(user_id: int, cycle_type: Optional[str] = None,
         # 收集所有目标ID，一次性查询所有KRs
         obj_ids = [obj.id for obj in objectives]
         all_krs = session.query(KeyResult).filter(
-            KeyResult.objective_id.in_(obj_ids)
+            KeyResult.user_id == user_id,
+            KeyResult.objective_id.in_(obj_ids),
+            KeyResult.deleted_at.is_(None)
         ).order_by(KeyResult.sort_order.asc(), KeyResult.created_at.asc()).all()
 
         # 按objective_id分组
@@ -99,7 +106,8 @@ def get_objective_by_id(objective_id: int, user_id: int) -> Optional[Objective]:
     with get_db_session() as session:
         return session.query(Objective).filter(
             Objective.id == objective_id,
-            Objective.user_id == user_id
+            Objective.user_id == user_id,
+            Objective.deleted_at.is_(None)
         ).first()
 
 
@@ -107,7 +115,7 @@ def update_objective(objective_id: int, user_id: int, **kwargs) -> bool:
     """更新目标"""
     with get_db_session() as session:
         update_data = {}
-        allowed_fields = ['title', 'description', 'status', 'progress', 'sort_order',
+        allowed_fields = ['title', 'description', 'status', 'sort_order',
                           'cycle_type', 'cycle_start', 'cycle_end']
         for field in allowed_fields:
             if field in kwargs and kwargs[field] is not None:
@@ -118,75 +126,68 @@ def update_objective(objective_id: int, user_id: int, **kwargs) -> bool:
 
         affected = session.query(Objective).filter(
             Objective.id == objective_id,
-            Objective.user_id == user_id
+            Objective.user_id == user_id,
+            Objective.deleted_at.is_(None)
         ).update(update_data)
         return affected > 0
 
 
 def delete_objective(objective_id: int, user_id: int) -> bool:
-    """删除目标（级联删除KRs，并清空关联Task的key_result_id）"""
+    """删除目标（级联删除KRs）"""
     with get_db_session() as session:
-        # 获取该目标下所有KR的ID
-        kr_ids = [kr.id for kr in session.query(KeyResult.id).filter(
-            KeyResult.objective_id == objective_id
-        ).all()]
+        now = datetime.now(timezone.utc)
 
-        # 清空关联任务的key_result_id
-        if kr_ids:
-            session.query(Task).filter(Task.key_result_id.in_(kr_ids)).update(
-                {Task.key_result_id: None}, synchronize_session=False
-            )
-
-        # 删除所有关联的KR
-        session.query(KeyResult).filter(KeyResult.objective_id == objective_id).delete()
-
-        # 删除目标
+        # 软删除目标
         affected = session.query(Objective).filter(
             Objective.id == objective_id,
-            Objective.user_id == user_id
-        ).delete()
+            Objective.user_id == user_id,
+            Objective.deleted_at.is_(None)
+        ).update({Objective.deleted_at: now}, synchronize_session=False)
         return affected > 0
 
 
 # ========== KeyResult CRUD ==========
 
-def create_key_result(objective_id: int, title: str, description: Optional[str] = None,
-                      target_value: Optional[float] = None, unit: Optional[str] = None) -> KeyResult:
+def create_key_result(objective_id: int, user_id: int, title: str,
+                       description: Optional[str] = None) -> KeyResult:
     """创建关键结果"""
     with get_db_session() as session:
         kr = KeyResult(
             objective_id=objective_id,
+            user_id=user_id,
             title=title,
-            description=description,
-            target_value=target_value,
-            current_value=0,
-            unit=unit,
-            progress=0
+            description=description
         )
         session.add(kr)
         session.flush()
         return kr
 
 
-def get_key_results_by_objective(objective_id: int) -> List[KeyResult]:
+def get_key_results_by_objective(objective_id: int, user_id: int) -> List[KeyResult]:
     """获取目标下的所有KR"""
     with get_db_session() as session:
         return session.query(KeyResult).filter(
-            KeyResult.objective_id == objective_id
+            KeyResult.user_id == user_id,
+            KeyResult.objective_id == objective_id,
+            KeyResult.deleted_at.is_(None)
         ).order_by(KeyResult.sort_order.asc(), KeyResult.created_at.asc()).all()
 
 
-def get_key_result_by_id(kr_id: int) -> Optional[KeyResult]:
+def get_key_result_by_id(kr_id: int, user_id: int) -> Optional[KeyResult]:
     """获取指定KR"""
     with get_db_session() as session:
-        return session.query(KeyResult).filter(KeyResult.id == kr_id).first()
+        return session.query(KeyResult).filter(
+            KeyResult.id == kr_id,
+            KeyResult.user_id == user_id,
+            KeyResult.deleted_at.is_(None)
+        ).first()
 
 
-def update_key_result(kr_id: int, **kwargs) -> bool:
+def update_key_result(kr_id: int, user_id: int, **kwargs) -> bool:
     """更新KR"""
     with get_db_session() as session:
         update_data = {}
-        allowed_fields = ['title', 'description', 'target_value', 'current_value', 'unit', 'progress', 'sort_order']
+        allowed_fields = ['title', 'description', 'sort_order']
         for field in allowed_fields:
             if field in kwargs and kwargs[field] is not None:
                 update_data[getattr(KeyResult, field)] = kwargs[field]
@@ -194,26 +195,25 @@ def update_key_result(kr_id: int, **kwargs) -> bool:
         if not update_data:
             return True
 
-        affected = session.query(KeyResult).filter(KeyResult.id == kr_id).update(update_data)
+        affected = session.query(KeyResult).filter(
+            KeyResult.id == kr_id,
+            KeyResult.user_id == user_id,
+            KeyResult.deleted_at.is_(None)
+        ).update(update_data)
         return affected > 0
 
 
-def delete_key_result(kr_id: int) -> bool:
-    """删除KR（并清空关联Task的key_result_id）"""
+def delete_key_result(kr_id: int, user_id: int) -> bool:
+    """删除KR"""
     with get_db_session() as session:
-        # 清空关联任务的key_result_id
-        session.query(Task).filter(Task.key_result_id == kr_id).update(
-            {Task.key_result_id: None}, synchronize_session=False
-        )
-        # 删除KR
-        affected = session.query(KeyResult).filter(KeyResult.id == kr_id).delete()
+        # 软删除KR
+        now = datetime.now(timezone.utc)
+        affected = session.query(KeyResult).filter(
+            KeyResult.id == kr_id,
+            KeyResult.user_id == user_id,
+            KeyResult.deleted_at.is_(None)
+        ).update({KeyResult.deleted_at: now}, synchronize_session=False)
         return affected > 0
-
-
-def get_tasks_by_key_result(kr_id: int) -> List[Task]:
-    """获取关联到指定KR的任务"""
-    with get_db_session() as session:
-        return session.query(Task).filter(Task.key_result_id == kr_id).all()
 
 
 def reorder_objectives(user_id: int, objective_ids: List[int]) -> bool:
@@ -222,17 +222,20 @@ def reorder_objectives(user_id: int, objective_ids: List[int]) -> bool:
         for idx, obj_id in enumerate(objective_ids):
             session.query(Objective).filter(
                 Objective.id == obj_id,
-                Objective.user_id == user_id
+                Objective.user_id == user_id,
+                Objective.deleted_at.is_(None)
             ).update({Objective.sort_order: idx})
         return True
 
 
-def reorder_key_results(objective_id: int, kr_ids: List[int]) -> bool:
+def reorder_key_results(objective_id: int, user_id: int, kr_ids: List[int]) -> bool:
     """重新排序关键结果，根据传入的ID顺序设置sort_order"""
     with get_db_session() as session:
         for idx, kr_id in enumerate(kr_ids):
             session.query(KeyResult).filter(
                 KeyResult.id == kr_id,
-                KeyResult.objective_id == objective_id
+                KeyResult.objective_id == objective_id,
+                KeyResult.user_id == user_id,
+                KeyResult.deleted_at.is_(None)
             ).update({KeyResult.sort_order: idx})
         return True

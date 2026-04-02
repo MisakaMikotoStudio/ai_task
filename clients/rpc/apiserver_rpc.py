@@ -24,12 +24,10 @@ class Task:
     id: int
     key: str
     title: str
-    desc: str
     status: str
     status_text: str
     client_id: Optional[int]  # 可为 None，表示未分配客户端
     client_name: Optional[str]
-    type: str
     flow: Dict[str, Any]
     flow_status: str
     created_at: Optional[str]
@@ -42,12 +40,10 @@ class Task:
             id=data.get('id', 0),
             key=data.get('key', ''),
             title=data.get('title', ''),
-            desc=data.get('desc', ''),
             status=data.get('status', ''),
             status_text=data.get('status_text', ''),
             client_id=data.get('client_id'),  # 可为 None
             client_name=data.get('client_name'),
-            type=data.get('type', ''),
             flow=data.get('flow', {}),
             flow_status=data.get('flow_status', ''),
             created_at=data.get('created_at'),
@@ -115,6 +111,7 @@ class ApiServerRpc:
         
         try:
             headers = self._get_headers()
+            logger.debug(f"请求: {method} {endpoint}, json_data={json_data}, params={params}")
             response = requests.request(
                 method=method,
                 url=url,
@@ -123,6 +120,7 @@ class ApiServerRpc:
                 headers=headers,
                 timeout=self._timeout
             )
+            logger.debug(f"响应: {response.status_code}, {response.text}")
             
             # 尝试解析 JSON 响应
             try:

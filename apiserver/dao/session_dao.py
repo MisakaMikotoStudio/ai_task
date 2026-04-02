@@ -4,7 +4,7 @@
 用户会话数据访问对象
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import secrets
 
@@ -22,7 +22,7 @@ def generate_session_token() -> str:
     return secrets.token_hex(32)
 
 
-def create_session(user_id: int, expire_days: int = 7) -> str:
+def create_session(user_id: int, expire_days: int = 7) -> UserSession:
     """
     创建用户会话
     
@@ -31,11 +31,11 @@ def create_session(user_id: int, expire_days: int = 7) -> str:
         expire_days: 过期天数，默认7天
         
     Returns:
-        生成的 token
+        新创建的会话对象
     """
     token = generate_session_token()
-    expires_at = datetime.now() + timedelta(days=expire_days)
-    
+    expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
+
     with get_db_session() as session:
         user_session = UserSession(
             user_id=user_id,
@@ -57,8 +57,10 @@ def get_session_by_token(token: str) -> Optional[UserSession]:
     Returns:
         UserSession 对象或 None
     """
+    now = datetime.now(timezone.utc)
     with get_db_session() as session:
         user_session = session.query(UserSession).filter(
-            UserSession.token == token
+            UserSession.token == token,
+            UserSession.expires_at > now
         ).first()
         return user_session

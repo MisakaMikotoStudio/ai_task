@@ -46,7 +46,7 @@ def init_connection(config: DatabaseConfig):
         pool_recycle=3600,       # 连接回收时间（1小时）
         pool_pre_ping=True,      # 使用前检测连接是否存活
         connect_args={
-            "init_command": "SET SESSION time_zone='+08:00'"
+            "init_command": "SET SESSION time_zone='+00:00'"
         }
     )
     

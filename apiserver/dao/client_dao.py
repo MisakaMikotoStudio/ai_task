@@ -4,19 +4,18 @@
 客户端数据访问对象 - SQLAlchemy ORM 版本
 """
 
-from datetime import datetime
-from typing import Optional, List, Dict
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
 
 from sqlalchemy import or_
 
 from .connection import get_db_session
-from .models import Client, ClientRepo, ClientEnvVar, User
+from .models import Client, ClientRepo, ClientEnvVar
 
 
 def create_client(
     user_id: int,
     name: str,
-    types: List[str],
     agent: str = 'claude sdk',
     official_cloud_deploy: int = 0
 ) -> int:
@@ -26,7 +25,6 @@ def create_client(
     Args:
         user_id: 用户ID
         name: 客户端名称
-        types: 支持的任务类型列表
         agent: Agent类型
         official_cloud_deploy: 官方云部署（0否 1是）
 
@@ -37,8 +35,6 @@ def create_client(
         client = Client(
             user_id=user_id,
             name=name,
-            types=types,
-            creator_id=user_id,
             agent=agent,
             official_cloud_deploy=official_cloud_deploy,
             version=1,  # 初始化版本，确保启动器能按版本命名容器
@@ -56,88 +52,20 @@ def get_clients_by_user(user_id: int) -> List[dict]:
         user_id: 用户ID
 
     Returns:
-        客户端字典列表（包含creator_name和editable）
+        客户端字典列表（包含editable）
     """
     with get_db_session() as session:
-        clients = session.query(Client, User.name).outerjoin(
-            User, Client.creator_id == User.id
-        ).filter(
+        clients = session.query(Client).filter(
             Client.deleted_at.is_(None),
             Client.user_id == user_id,
         ).order_by(Client.created_at.desc()).all()
 
         result = []
-        for client, creator_name in clients:
-            data = client.to_dict(include_creator_name=creator_name or '')
+        for client in clients:
+            data = client.to_dict()
             data['editable'] = (client.user_id == user_id)
             result.append(data)
         return result
-
-
-def get_clients_paginated(
-    user_id: int,
-    cursor: Optional[int] = None,
-    limit: int = 20,
-    only_mine: bool = False
-) -> dict:
-    """
-    获取用户创建的客户端列表（游标分页）
-
-    Args:
-        user_id: 用户ID
-        cursor: 游标（上一页最后一条记录的client_id），None表示第一页
-        limit: 每页数量，默认20
-        only_mine: 是否只看我创建的，默认False
-
-    Returns:
-        {
-            "items": [...],       # 客户端列表
-            "next_cursor": int,   # 下一页游标，None表示没有更多数据
-            "has_more": bool      # 是否有更多数据
-        }
-    """
-    with get_db_session() as session:
-        # 构建基础查询
-        query = session.query(Client, User.name).outerjoin(
-            User, Client.creator_id == User.id
-        ).filter(
-            Client.deleted_at.is_(None)
-        )
-
-        # 根据筛选条件过滤
-        # 仅查看当前用户创建的客户端
-        query = query.filter(Client.user_id == user_id)
-
-        # 按ID倒序排列（新的在前）
-        query = query.order_by(Client.id.desc())
-
-        # 应用游标条件
-        if cursor is not None:
-            query = query.filter(Client.id < cursor)
-
-        # 多查一条用于判断是否有更多数据
-        clients = query.limit(limit + 1).all()
-
-        # 判断是否有更多数据
-        has_more = len(clients) > limit
-        if has_more:
-            clients = clients[:limit]
-
-        # 构建结果
-        result = []
-        for client, creator_name in clients:
-            data = client.to_dict(include_creator_name=creator_name or '')
-            data['editable'] = (client.user_id == user_id)
-            result.append(data)
-
-        # 计算下一页游标
-        next_cursor = result[-1]['id'] if result and has_more else None
-
-        return {
-            'items': result,
-            'next_cursor': next_cursor,
-            'has_more': has_more
-        }
 
 
 def get_client_by_id(client_id: int, user_id: int) -> Optional[Client]:
@@ -197,7 +125,7 @@ def delete_client(client_id: int, user_id: int) -> bool:
             Client.user_id == user_id,
             Client.deleted_at.is_(None)
         ).update({
-            Client.deleted_at: datetime.now()
+            Client.deleted_at: datetime.now(timezone.utc)
         })
         return affected > 0
 
@@ -219,7 +147,7 @@ def update_heartbeat(client_id: int, user_id: int) -> bool:
             Client.user_id == user_id,
             Client.deleted_at.is_(None)
         ).update({
-            Client.last_sync_at: datetime.now()
+            Client.last_sync_at: datetime.now(timezone.utc)
         })
         return affected > 0
 
@@ -255,7 +183,7 @@ def update_heartbeat_with_uuid(
         if not client:
             return False, "客户端不存在"
         
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         # 情况1: UUID相同，直接更新心跳时间
         if client.instance_uuid == instance_uuid:
@@ -285,10 +213,9 @@ def update_heartbeat_with_uuid(
 def update_client(
     client_id: int,
     user_id: int,
-    name: str,
-    types: List[str],
-    agent: str = None,
-    official_cloud_deploy: int = None
+    name: Optional[str] = None,
+    agent: Optional[str] = None,
+    official_cloud_deploy: Optional[int] = None
 ) -> bool:
     """
     更新客户端信息
@@ -297,7 +224,6 @@ def update_client(
         client_id: 客户端ID
         user_id: 用户ID
         name: 新的客户端名称
-        types: 新的任务类型列表
         agent: Agent类型
         official_cloud_deploy: 官方云部署（0否 1是）
 
@@ -305,14 +231,15 @@ def update_client(
         是否更新成功
     """
     with get_db_session() as session:
-        update_data = {
-            Client.name: name,
-            Client.types: types
-        }
-        if agent is not None:
+        update_data = {}
+        if name:
+            update_data[Client.name] = name
+        if agent:
             update_data[Client.agent] = agent
         if official_cloud_deploy is not None:
             update_data[Client.official_cloud_deploy] = official_cloud_deploy
+        if not update_data:
+            return False
 
         affected = session.query(Client).filter(
             Client.id == client_id,
@@ -344,74 +271,70 @@ def check_client_name_exists_exclude(user_id: int, name: str, exclude_id: int) -
         return count > 0
 
 
-def get_client_repos(client_id: int) -> List[ClientRepo]:
+def get_client_repos(client_id: int, user_id: int) -> List[ClientRepo]:
     """获取客户端的仓库配置列表"""
     with get_db_session() as session:
         repos = session.query(ClientRepo).filter(
             ClientRepo.client_id == client_id,
+            ClientRepo.user_id == user_id,
             ClientRepo.deleted_at.is_(None)
         ).all()
         return repos
 
 
-def update_client_repos(client_id: int, repos: List[dict]) -> bool:
+def apply_client_repo_sync(
+    client_id: int,
+    user_id: int,
+    delete_ids: List[int],
+    updates: List[Dict[str, Any]],
+    inserts: List[Dict[str, Any]],
+) -> None:
     """
-    批量更新客户端仓库配置（全量替换）
-
-    Args:
-        client_id: 客户端ID
-        repos: 仓库配置列表，每项包含 desc/url/token/default_branch/is_docs_repo
-
-    Returns:
-        是否成功
+    在同一事务内执行：按 ID 软删除、按行更新、插入新仓库。
     """
+    now = datetime.now(timezone.utc)
     with get_db_session() as session:
-        # 软删除旧配置
-        session.query(ClientRepo).filter(
-            ClientRepo.client_id == client_id,
-            ClientRepo.deleted_at.is_(None)
-        ).update({
-            ClientRepo.deleted_at: datetime.now()
-        })
-
-        # 添加新配置
-        for repo in repos:
-            new_repo = ClientRepo(
-                client_id=client_id,
-                desc=repo.get('desc', ''),
-                url=repo.get('url', ''),
-                token=repo.get('token'),
-                default_branch=repo.get('default_branch', ''),
-                branch_prefix=repo.get('branch_prefix', 'ai_'),
-                docs_repo=repo.get('docs_repo', False)
+        if delete_ids:
+            session.query(ClientRepo).filter(
+                ClientRepo.client_id == client_id,
+                ClientRepo.user_id == user_id,
+                ClientRepo.id.in_(delete_ids),
+                ClientRepo.deleted_at.is_(None),
+            ).update({ClientRepo.deleted_at: now}, synchronize_session=False)
+        for row in updates:
+            rid = row["id"]
+            session.query(ClientRepo).filter(
+                ClientRepo.id == rid,
+                ClientRepo.client_id == client_id,
+                ClientRepo.user_id == user_id,
+                ClientRepo.deleted_at.is_(None),
+            ).update(
+                {
+                    ClientRepo.desc: row["desc"],
+                    ClientRepo.url: row["url"],
+                    ClientRepo.token: row.get("token"),
+                    ClientRepo.default_branch: row.get("default_branch", ""),
+                    ClientRepo.branch_prefix: row.get("branch_prefix", "ai_"),
+                    ClientRepo.docs_repo: row.get("docs_repo", False),
+                },
+                synchronize_session=False,
             )
-            session.add(new_repo)
-
-        return True
-
-
-def get_client_by_id_no_user_check(client_id: int) -> Optional[Client]:
-    """获取客户端（不校验用户）"""
-    with get_db_session() as session:
-        client = session.query(Client).filter(
-            Client.id == client_id,
-            Client.deleted_at.is_(None)
-        ).first()
-        return client
-
-
-def get_client_with_permission(client_id: int, user_id: int) -> Optional[Client]:
-    """获取客户端（校验权限：仅创建者）"""
-    with get_db_session() as session:
-        client = session.query(Client).filter(
-            Client.id == client_id,
-            Client.deleted_at.is_(None),
-            Client.user_id == user_id,
-        ).first()
-        return client
+        for ins in inserts:
+            session.add(
+                ClientRepo(
+                    client_id=client_id,
+                    user_id=user_id,
+                    desc=ins.get("desc", ""),
+                    url=ins.get("url", ""),
+                    token=ins.get("token"),
+                    default_branch=ins.get("default_branch", ""),
+                    branch_prefix=ins.get("branch_prefix", "ai_"),
+                    docs_repo=ins.get("docs_repo", False),
+                )
+            )
 
 
-def update_repo_default_branch(repo_id: int, default_branch: str) -> bool:
+def update_repo_default_branch(repo_id: int, user_id: int, default_branch: str) -> bool:
     """
     更新单个仓库的默认分支
     
@@ -425,66 +348,23 @@ def update_repo_default_branch(repo_id: int, default_branch: str) -> bool:
     with get_db_session() as session:
         affected = session.query(ClientRepo).filter(
             ClientRepo.id == repo_id,
+            ClientRepo.user_id == user_id,
         ).update({
             ClientRepo.default_branch: default_branch
         })
         return affected > 0
 
 
-def get_repo_by_id(repo_id: int, client_id: int) -> Optional[ClientRepo]:
+def get_repo_by_id(repo_id: int, client_id: int, user_id: int) -> Optional[ClientRepo]:
     """获取单个仓库配置"""
     with get_db_session() as session:
         repo = session.query(ClientRepo).filter(
             ClientRepo.id == repo_id,
             ClientRepo.client_id == client_id,
+            ClientRepo.user_id == user_id,
             ClientRepo.deleted_at.is_(None)
         ).first()
         return repo
-
-
-def get_usable_clients_for_task(user_id: int) -> List[dict]:
-    """
-    获取用户可用于创建任务的客户端列表
-
-    包括：
-    1. 用户自己创建的客户端
-
-    Args:
-        user_id: 用户ID
-
-    Returns:
-        可用客户端字典列表
-    """
-    from .models import ClientHeartbeat
-
-    with get_db_session() as session:
-        # 1. 获取用户自己创建的客户端ID集合
-        own_client_ids = set(
-            row[0] for row in session.query(Client.id).filter(
-                Client.user_id == user_id,
-                Client.deleted_at.is_(None)
-            ).all()
-        )
-
-        if not own_client_ids:
-            return []
-
-        # 查询这些客户端的详细信息，同时校验：
-        # - 客户端未删除
-        # - 客户端是用户自己创建
-        clients = session.query(Client, User.name).outerjoin(
-            User, Client.creator_id == User.id
-        ).filter(
-            Client.deleted_at.is_(None),
-            Client.user_id == user_id,
-        ).order_by(Client.created_at.desc()).all()
-
-        result = []
-        for client, creator_name in clients:
-            data = client.to_dict(include_creator_name=creator_name or '')
-            data['editable'] = (client.user_id == user_id)
-            result.append(data)
-        return result
 
 
 def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:    
@@ -500,7 +380,7 @@ def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:
                 UserSecret,
                 (UserSecret.user_id == Client.user_id) &
                 (UserSecret.type == UserSecret.TYPE_CLOUD) &
-                (UserSecret.deleted == 0)
+                (UserSecret.deleted_at.is_(None))
             ).filter(
                 Client.official_cloud_deploy == 1,
                 Client.deleted_at.is_(None)
@@ -509,16 +389,37 @@ def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:
             return [{'client_id': client_id, 'secret': secret, 'version': version} for client_id, version, secret in rows]
 
     """
-    获取用户可用于创建任务的客户端列表，不返回秘钥
+    获取用户可用于创建任务的客户端列表，不返回秘钥，官方云部署客户端不返回
     """
     with get_db_session() as session:
-        query = session.query(Client.id, Client.version).join(
+        query = session.query(Client.id, Client.version).filter(
             Client.user_id == user_id,
-        ).filter(
-            Client.deleted_at.is_(None)
+            Client.official_cloud_deploy == 0,
+            Client.deleted_at.is_(None),
         )
         rows = query.all()
         return [{'client_id': client_id, 'version': version} for client_id, version in rows]
+
+
+def get_cannot_run_client_ids_by_user(user_id: int, client_ids: List[int]) -> List[int]:
+    """
+    在传入的 client_ids 中，返回属于该用户但是不能运行的客户端 ID。
+    顺序与 client_ids 中首次出现的顺序一致。
+    不能运行的客户端包括：
+    1. 官方云部署客户端
+    2. 已软删除客户端
+    """
+    if not client_ids:
+        return []
+    with get_db_session() as session:
+        rows = session.query(Client.id).filter(
+            Client.user_id == user_id,
+            Client.id.in_(client_ids),
+            or_(Client.official_cloud_deploy == 1, Client.deleted_at.isnot(None)),
+        ).all()
+        deleted_set = {r[0] for r in rows}
+        return [cid for cid in client_ids if cid in deleted_set]
+
 
 def increment_client_version(client_id: int, user_id: int) -> bool:
     """
@@ -534,17 +435,19 @@ def increment_client_version(client_id: int, user_id: int) -> bool:
         return affected > 0
 
 
-def get_client_env_vars(client_id: int) -> List[ClientEnvVar]:
+def get_client_env_vars(client_id: int, user_id: int) -> List[ClientEnvVar]:
     """获取客户端有效的环境变量列表（deleted_at 为空的记录）"""
     with get_db_session() as session:
         return session.query(ClientEnvVar).filter(
             ClientEnvVar.client_id == client_id,
+            ClientEnvVar.user_id == user_id,
             ClientEnvVar.deleted_at.is_(None)
         ).order_by(ClientEnvVar.id.asc()).all()
 
 
 def get_client_env_vars_by_client_ids(client_ids: List[int]) -> Dict[int, List[ClientEnvVar]]:
-    """批量获取多个客户端的环境变量，按 client_id 分组返回"""
+    """批量获取多个客户端的环境变量，按 client_id 分组返回。
+    谨慎使用：这个接口不限制用户ID，可能会泄露其他用户的环境变量，仅用于admin场景批量获取配置。"""
     if not client_ids:
         return {}
     with get_db_session() as session:
@@ -559,38 +462,83 @@ def get_client_env_vars_by_client_ids(client_ids: List[int]) -> Dict[int, List[C
         return grouped
 
 
-def create_client_env_var(client_id: int, key: str, value: str) -> int:
+def create_client_env_var(client_id: int, user_id: int, key: str, value: str) -> int:
     """新增环境变量，返回新记录ID"""
     with get_db_session() as session:
-        env_var = ClientEnvVar(client_id=client_id, key=key, value=value)
+        env_var = ClientEnvVar(client_id=client_id, user_id=user_id, key=key, value=value)
         session.add(env_var)
         session.flush()
         return env_var.id
 
 
-def update_client_env_var(env_var_id: int, client_id: int, key: str, value: str) -> bool:
+def update_client_env_var(env_var_id: int, client_id: int, user_id: int, key: str, value: str) -> bool:
     """更新环境变量"""
     with get_db_session() as session:
         affected = session.query(ClientEnvVar).filter(
             ClientEnvVar.id == env_var_id,
             ClientEnvVar.client_id == client_id,
+            ClientEnvVar.user_id == user_id,
             ClientEnvVar.deleted_at.is_(None)
         ).update({ClientEnvVar.key: key, ClientEnvVar.value: value})
         return affected > 0
 
 
-def delete_client_env_var(env_var_id: int, client_id: int) -> bool:
-    """软删除环境变量（设置 deleted_at）"""
+def delete_client_env_var(env_var_id: int, client_id: int, user_id: int) -> bool:
+    """软删除环境变量（设置 deleted_at，UTC）"""
     with get_db_session() as session:
         affected = session.query(ClientEnvVar).filter(
             ClientEnvVar.id == env_var_id,
             ClientEnvVar.client_id == client_id,
+            ClientEnvVar.user_id == user_id,
             ClientEnvVar.deleted_at.is_(None)
-        ).update({ClientEnvVar.deleted_at: datetime.now()})
+        ).update({ClientEnvVar.deleted_at: datetime.now(timezone.utc)})
         return affected > 0
 
 
-def check_client_usable_for_task(client_id: int, user_id: int) -> bool:
+def apply_client_env_var_sync(
+    client_id: int,
+    user_id: int,
+    delete_ids: List[int],
+    updates: List[Dict[str, Any]],
+    inserts: List[Dict[str, Any]],
+) -> None:
+    """
+    在同一事务内：按 ID 软删除（deleted_at 为 UTC）、更新、插入环境变量。
+    """
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        if delete_ids:
+            session.query(ClientEnvVar).filter(
+                ClientEnvVar.client_id == client_id,
+                ClientEnvVar.user_id == user_id,
+                ClientEnvVar.id.in_(delete_ids),
+                ClientEnvVar.deleted_at.is_(None),
+            ).update({ClientEnvVar.deleted_at: now}, synchronize_session=False)
+        for row in updates:
+            session.query(ClientEnvVar).filter(
+                ClientEnvVar.id == row["id"],
+                ClientEnvVar.client_id == client_id,
+                ClientEnvVar.user_id == user_id,
+                ClientEnvVar.deleted_at.is_(None),
+            ).update(
+                {
+                    ClientEnvVar.key: row["key"],
+                    ClientEnvVar.value: row.get("value", ""),
+                },
+                synchronize_session=False,
+            )
+        for ins in inserts:
+            session.add(
+                ClientEnvVar(
+                    client_id=client_id,
+                    user_id=user_id,
+                    key=ins["key"],
+                    value=ins.get("value", ""),
+                )
+            )
+
+
+def check_client_usable_for_user(client_id: int, user_id: int) -> bool:
     """
     校验用户是否可以使用指定客户端创建任务
 

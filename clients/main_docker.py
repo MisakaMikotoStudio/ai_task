@@ -25,6 +25,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _configure_log_level(log_level: str) -> None:
+    level_name = (log_level or "INFO").upper()
+    level = getattr(logging, level_name, None)
+    if not isinstance(level, int):
+        raise ValueError(f"无效日志等级: {log_level}")
+    logging.getLogger().setLevel(level)
+    logger.setLevel(level)
+
+
 def get_image_tag() -> str:
     """
     生成镜像名：tag 使用当前文件所在目录 git 提交哈希前 8 位。
@@ -91,7 +100,8 @@ def start_container(
     secret: str,
     apiserver: str,
     workspace: str,
-    env_vars: list | None = None
+    env_vars: list | None = None,
+    log_level: str = "INFO",
 ):
     """
     为指定云客户端启动 Docker 容器，若容器已存在（运行中或已退出）则跳过。
@@ -158,6 +168,7 @@ def start_container(
         "--secret", secret,
         "--client-id", str(client_id),
         "--workspace", "/workspace",
+        "--log-level", log_level,
     ]
 
     if env_vars:
@@ -193,7 +204,9 @@ def fetch_client_configs(apiserver: str, secret: str, client_ids: list[int] | No
     headers = {'X-Client-Secret': secret, 'Content-Type': 'application/json'}
     payload_in = {'clientIds': client_ids or []}
 
+    logger.debug(f"请求: {url}, json={payload_in}")
     response = requests.post(url, headers=headers, json=payload_in, timeout=10)
+    logger.debug(f"响应: {response.status_code}, {response.text}")
 
     try:
         payload = response.json()
@@ -260,7 +273,10 @@ def main():
                         help='宿主机工作目录根路径')
     parser.add_argument('--client_id', '-i', type=int, required=False, default=None,
                         help='指定启动的客户端ID，不指定则启动所有云客户端（仅admin账号才有这个权限）')
+    parser.add_argument('--log-level', '-l', type=str, required=False, default='INFO',
+                        help='日志等级，例如 DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
+    _configure_log_level(args.log_level)
 
     os.makedirs(args.workspace, exist_ok=True)
     os.chmod(args.workspace, 0o777)
@@ -311,6 +327,7 @@ def main():
                     apiserver=args.apiserver,
                     workspace=args.workspace + '/' + str(client_id),
                     env_vars=env_vars,
+                    log_level=args.log_level,
                 )
         except Exception as e:
             logger.error(f"获取客户端配置失败: {e}")

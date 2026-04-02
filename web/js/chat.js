@@ -8,6 +8,8 @@ let taskInfo = null;
 let currentChatId = null;
 let chatsCache = [];
 let messagesCache = [];
+let messagesFingerprint = '';
+const outputHtmlCache = new Map();
 let runningMessageId = null;
 let pollTimer = null;
 let mergeRequestStore = {};
@@ -24,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
     taskId = parseInt(params.get('task_id'));
     if (!taskId) {
-        showToastMsg('缺少 task_id 参数', 'error');
+        showToast('缺少 task_id 参数', 'error');
         return;
     }
 
@@ -33,20 +35,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ===== Helpers =====
-function showToastMsg(msg, type = 'info') {
-    const el = document.getElementById('chat-toast');
-    el.textContent = msg;
-    el.className = `chat-toast show ${type}`;
-    setTimeout(() => el.classList.remove('show'), 3000);
-}
-
-function esc(text) {
-    if (!text) return '';
-    const d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-}
-
 function formatTime(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
@@ -63,12 +51,6 @@ function truncate(str, n) {
     return str.length > n ? str.slice(0, n) + '…' : str;
 }
 
-function goBack() {
-    window.close();
-    if (window.history.length > 1) window.history.back();
-    else window.location.href = 'index.html';
-}
-
 // ===== Task info =====
 async function loadTaskInfo() {
     try {
@@ -83,16 +65,6 @@ async function loadTaskInfo() {
         if (clientName) {
             document.getElementById('sidebar-client-name').textContent = clientName;
             document.getElementById('sidebar-client-link').style.display = 'inline-flex';
-        }
-
-        // 客户端类型标签
-        const clientTypes = taskInfo.client_types || [];
-        const typesEl = document.getElementById('sidebar-client-types');
-        if (clientTypes.length > 0) {
-            typesEl.innerHTML = clientTypes.map(t =>
-                `<span class="sidebar-client-type-tag">${esc(t)}</span>`
-            ).join('');
-            typesEl.style.display = 'flex';
         }
 
         renderSidebarExtra(taskInfo);
@@ -115,7 +87,7 @@ function renderSidebarExtra(info) {
         docsEl.innerHTML = '<div class="sidebar-doc-empty">暂无文档</div>';
     } else {
         docsEl.innerHTML = `
-            <a class="sidebar-doc-link" href="${esc(developDoc)}" target="_blank" rel="noopener noreferrer">
+            <a class="sidebar-doc-link" href="${escapeHtml(developDoc)}" target="_blank" rel="noopener noreferrer">
                 📄 开发文档
             </a>`;
     }
@@ -136,14 +108,14 @@ function renderSidebarExtra(info) {
             const branchName = item.branch_name || '';
             const mergeUrl = item.merge_url || '';
             const mrLinks = mergeUrl
-                ? `<a href="${esc(mergeUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Pull Request</a>`
+                ? `<a href="${escapeHtml(mergeUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Pull Request</a>`
                 : '';
 
             return `
             <div class="gitpush-card clickable" onclick="showMergeRequestModal('${storeKey}')">
-                <div class="gitpush-repo">${esc(repoName)}</div>
+                <div class="gitpush-repo">${escapeHtml(repoName)}</div>
                 <div class="gitpush-meta">
-                    <span class="gitpush-branch">${esc(branchName)}</span>
+                    <span class="gitpush-branch">${escapeHtml(branchName)}</span>
                 </div>
                 ${mrLinks ? `<div class="gitpush-mr">${mrLinks}</div>` : ''}
             </div>`;
@@ -158,7 +130,7 @@ async function loadChats() {
         chatsCache = res.data || [];
         renderChatList();
     } catch (e) {
-        showToastMsg(e.message, 'error');
+        showToast(e.message, 'error');
     }
 }
 
@@ -184,7 +156,7 @@ function renderChatList() {
                 <span class="chat-status-dot ${st}"></span>
                 <span class="chat-status-label ${st}">${statusLabel[st] || st}</span>
             </div>
-            <div class="chat-item-row2">${esc(preview)}</div>
+            <div class="chat-item-row2">${escapeHtml(preview)}</div>
         </div>`;
     }).join('');
 }
@@ -217,10 +189,12 @@ async function loadMessages(chatId) {
     try {
         const res = await chatAPI.listMessages(taskId, chatId);
         messagesCache = res.data || [];
+        // 让轮询指纹与当前缓存对齐，避免首次轮询做重复渲染/请求
+        messagesFingerprint = getMessagesFingerprint(messagesCache);
         renderFeed();
         updateComposerState();
     } catch (e) {
-        showToastMsg(e.message, 'error');
+        showToast(e.message, 'error');
     }
 }
 
@@ -257,14 +231,14 @@ function renderFeed() {
                     <span class="msg-role">You</span>
                     <span class="msg-time">${formatTime(msg.created_at)}</span>
                 </div>
-                <div class="msg-text">${esc(msg.input)}</div>
+                <div class="msg-text">${escapeHtml(msg.input)}</div>
             </div>
         </div>`;
 
         // Agent row
         let outputHtml;
         if (msg.output) {
-            outputHtml = `<div class="msg-output">${renderOutput(msg.output)}</div>`;
+            outputHtml = `<div class="msg-output">${renderOutputCached(msg)}</div>`;
         } else if (msg.status === 'pending' || msg.status === 'running') {
             outputHtml = `
                 <div class="typing-indicator">
@@ -279,7 +253,7 @@ function renderFeed() {
         // Extra buttons: develop_doc + merge_request
         let extraBtns = '';
         if (extra.develop_doc) {
-            extraBtns += `<a class="msg-extra-btn doc-btn" href="${esc(extra.develop_doc)}" target="_blank" rel="noopener noreferrer">📄 开发文档</a>`;
+            extraBtns += `<a class="msg-extra-btn doc-btn" href="${escapeHtml(extra.develop_doc)}" target="_blank" rel="noopener noreferrer">📄 开发文档</a>`;
         }
         const showMrBtn = extra && extra.merge_request !== undefined;
         if (showMrBtn) {
@@ -355,7 +329,28 @@ function renderOutput(output) {
     if (typeof marked !== 'undefined') {
         try { return marked.parse(output); } catch (_) {}
     }
-    return `<p>${esc(output).replace(/\n/g, '<br>')}</p>`;
+    return `<p>${escapeHtml(output).replace(/\n/g, '<br>')}</p>`;
+}
+
+function getOutputCacheKey(msg) {
+    // 用 updated_at + output 长度做区分，避免相同内容在轮询渲染时重复 marked.parse
+    const updated = msg.updated_at || msg.created_at || '';
+    const outputLen = msg.output ? String(msg.output).length : 0;
+    return `${msg.id}|${msg.status}|${updated}|${outputLen}`;
+}
+
+function renderOutputCached(msg) {
+    if (!msg || !msg.output) return '';
+    const key = getOutputCacheKey(msg);
+    const cached = outputHtmlCache.get(key);
+    if (cached) return cached;
+
+    const html = renderOutput(msg.output);
+    outputHtmlCache.set(key, html);
+
+    // 防止缓存无限增长
+    if (outputHtmlCache.size > 1000) outputHtmlCache.clear();
+    return html;
 }
 
 function scrollToBottom() {
@@ -399,16 +394,16 @@ function showMergeRequestModal(storeKey) {
                     const commitId = item.latest_commitId || '';
                     const mergeUrl = item.merge_url || '';
                     const prLinks = mergeUrl
-                        ? `<a href="${esc(mergeUrl)}" target="_blank" rel="noopener noreferrer">PR</a>`
+                        ? `<a href="${escapeHtml(mergeUrl)}" target="_blank" rel="noopener noreferrer">PR</a>`
                         : '';
 
                     const commitShort = commitId ? commitId.substring(0, 12) : '';
 
                     return `
                         <tr>
-                            <td>${esc(repoName)}</td>
-                            <td><code>${esc(branchName || '-')}</code></td>
-                            <td>${commitShort ? `<code>${esc(commitShort)}</code>` : '-'}</td>
+                            <td>${escapeHtml(repoName)}</td>
+                            <td><code>${escapeHtml(branchName || '-')}</code></td>
+                            <td>${commitShort ? `<code>${escapeHtml(commitShort)}</code>` : '-'}</td>
                             <td>${prLinks || '-'}</td>
                         </tr>`;
                 }).join('')}
@@ -463,6 +458,14 @@ function updateComposerState() {
 }
 
 // ===== Polling =====
+function getMessagesFingerprint(list) {
+    // 用 id/status/更新时间做轻量指纹，避免 JSON.stringify 带来的大开销
+    return (list || []).map(m => {
+        const updated = m.updated_at || m.created_at || '';
+        return `${m.id}:${m.status}:${updated}`;
+    }).join('|');
+}
+
 function startPolling() {
     if (pollTimer) return;
     pollTimer = setInterval(async () => {
@@ -470,11 +473,17 @@ function startPolling() {
         try {
             const res = await chatAPI.listMessages(taskId, currentChatId);
             const fresh = res.data || [];
-            if (JSON.stringify(fresh) !== JSON.stringify(messagesCache)) {
+            const nextFingerprint = getMessagesFingerprint(fresh);
+            if (nextFingerprint !== messagesFingerprint) {
+                const prevRunningId = runningMessageId;
+                messagesFingerprint = nextFingerprint;
                 messagesCache = fresh;
                 renderFeed();
                 updateComposerState();
-                await loadChats();
+                // 仅当运行状态开关变化时，才刷新 Chat 列表（减少无意义请求）
+                if (prevRunningId !== runningMessageId) {
+                    await loadChats();
+                }
             }
         } catch { /* silent */ }
     }, 3000);
@@ -486,7 +495,7 @@ function stopPolling() {
 
 // ===== Send =====
 async function sendMessage() {
-    if (!currentChatId) { showToastMsg('请先选择或新建一个 Chat', 'error'); return; }
+    if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
 
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
@@ -502,7 +511,7 @@ async function sendMessage() {
         await loadMessages(currentChatId);
         await loadChats();
     } catch (e) {
-        showToastMsg(e.message, 'error');
+        showToast(e.message, 'error');
     } finally {
         btn.disabled = false;
     }
@@ -526,7 +535,7 @@ async function terminateMessage() {
     try {
         const res = await chatAPI.deleteMessage(taskId, currentChatId, runningMessageId);
         const inputText = res?.data?.input || '';
-        showToastMsg('已撤销，内容已回填', 'success');
+        showToast('已撤销，内容已回填', 'success');
         await loadMessages(currentChatId);
         await loadChats();
         // 回填 input 到输入框并聚焦
@@ -539,7 +548,7 @@ async function terminateMessage() {
             inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
         }
     } catch (e) {
-        showToastMsg(e.message, 'error');
+        showToast(e.message, 'error');
     } finally {
         btn.disabled = false;
         btn.innerHTML = '⬛ 终止';
@@ -566,9 +575,9 @@ async function submitNewChat(e) {
         closeNewChatModal();
         await loadChats();
         await selectChat(res.data.id);
-        showToastMsg('Chat 创建成功', 'success');
+        showToast('Chat 创建成功', 'success');
     } catch (err) {
-        showToastMsg(err.message, 'error');
+        showToast(err.message, 'error');
     }
 }
 

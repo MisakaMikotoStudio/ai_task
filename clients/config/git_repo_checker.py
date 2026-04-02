@@ -26,6 +26,10 @@ class GitRepoChecker(BaseChecker):
         Returns:
             是否可访问
         """
+        if not self.config.code_git:
+            self.print_error_message("未配置任何代码仓库（repos 为空），无法启动客户端")
+            return False
+
         for repo in self.config.code_git:
             url = repo.auth_url            
             try:
@@ -41,12 +45,15 @@ class GitRepoChecker(BaseChecker):
                     self.print_error_message(f"Git 仓库无法访问: {repo.name} ({repo.url}), 错误: {result.stderr.strip()}")
                     return False
                 logger.info(f"✓ Git 仓库可访问: {repo.name} ({repo.url})")
-                return True
+                continue
             except subprocess.TimeoutExpired:
                 self.print_error_message(f"Git 仓库连接超时: {repo.name} ({repo.url})")
+                return False
             except FileNotFoundError:
                 self.print_error_message("Git 命令未找到，请确保已安装 Git")
+                return False
             except Exception as e:
                 self.print_error_message(f"Git 仓库检查异常: {repo.name} ({repo.url}), 错误: {e}")
-        return False
+                return False
+        return True
 

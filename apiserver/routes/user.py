@@ -6,14 +6,17 @@
 
 from flask import Blueprint, request, jsonify
 
-from routes.auth_plugin import login_required
+from routes.auth_plugin import skip_auth
 from service.user_service import register_user, login_user
 from dao.secret_dao import get_user_secrets, create_user_secret, delete_user_secret
 
 user_bp = Blueprint('user', __name__)
 
 
+# ========== 用户管理 ==========
+
 @user_bp.route('/register', methods=['POST'])
+@skip_auth
 def register():
     """
     用户注册接口
@@ -35,14 +38,12 @@ def register():
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
     
-    try:
-        user = register_user(data.get('name', ''), data.get('password_hash', ''))
-        return jsonify({'code': 201, 'message': '注册成功', 'data': user.to_dict()}), 201
-    except Exception as e:
-        return jsonify({'code': 400, 'message': str(e)}), 400
+    user = register_user(data.get('name', ''), data.get('password_hash', ''))
+    return jsonify({'code': 201, 'message': '注册成功', 'data': user.to_dict()}), 201
 
 
 @user_bp.route('/login', methods=['POST'])
+@skip_auth
 def login():
     """
     用户登录接口
@@ -64,19 +65,15 @@ def login():
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
     
-    try:
-        result = login_user(data.get('name', ''), data.get('password_hash', ''))
-        return jsonify({
-            'code': 200,
-            'message': '登录成功',
-            'data': result.to_dict()
-        })
-    except Exception as e:
-        return jsonify({'code': 400, 'message': str(e)}), 400
+    result = login_user(data.get('name', ''), data.get('password_hash', ''))
+    return jsonify({
+        'code': 200,
+        'message': '登录成功',
+        'data': result.to_dict()
+    })
 
 
 @user_bp.route('/me', methods=['GET'])
-@login_required
 def get_current_user():
     """
     获取当前登录用户信息
@@ -93,19 +90,15 @@ def get_current_user():
         未认证 (401):
             {"code": 401, "message": "无效的认证信息"}
     """
-    try:
-        return jsonify({'code': 200, 'message': '获取当前用户信息成功', 'data': request.user_info.to_dict()})
-    except Exception as e:
-        return jsonify({'code': 400, 'message': str(e)}), 400
+    return jsonify({'code': 200, 'message': '获取当前用户信息成功', 'data': request.user_info.to_dict()})
 
 
 # ========== 秘钥管理 ==========
 
 @user_bp.route('/secrets', methods=['GET'])
-@login_required
 def list_secrets():
     """获取当前用户秘钥列表"""
-    secrets_list = get_user_secrets(request.user_info.id)
+    secrets_list = get_user_secrets(user_id=request.user_info.id)
     return jsonify({
         'code': 200,
         'data': [s.to_dict() for s in secrets_list]
@@ -113,7 +106,6 @@ def list_secrets():
 
 
 @user_bp.route('/secrets', methods=['POST'])
-@login_required
 def create_secret():
     """创建新秘钥（随机生成64位字符串）"""
     data = request.get_json() or {}
@@ -125,7 +117,7 @@ def create_secret():
     if len(name) > 64:
         return jsonify({'code': 400, 'message': '秘钥名称长度不能超过64个字符'}), 400
 
-    user_secret = create_user_secret(request.user_info.id, name)
+    user_secret = create_user_secret(user_id=request.user_info.id, name=name)
     return jsonify({
         'code': 201,
         'message': '秘钥创建成功',
@@ -134,10 +126,9 @@ def create_secret():
 
 
 @user_bp.route('/secrets/<int:secret_id>', methods=['DELETE'])
-@login_required
 def delete_secret(secret_id):
     """删除秘钥"""
-    if not delete_user_secret(secret_id, request.user_info.id):
+    if not delete_user_secret(secret_id=secret_id, user_id=request.user_info.id):
         return jsonify({'code': 404, 'message': '秘钥不存在'}), 404
 
     return jsonify({'code': 200, 'message': '秘钥删除成功'})

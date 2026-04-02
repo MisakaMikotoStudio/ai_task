@@ -146,17 +146,32 @@ function formatRelativeTime(dateStr) {
 
 // 显示Toast通知
 function showToast(message, type = 'success') {
+    // 兼容首页（toast-container）与聊天页（chat-toast）
     const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    
-    container.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.animation = 'toastIn 0.3s ease reverse';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    const chatToast = document.getElementById('chat-toast');
+
+    if (container) {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.animation = 'toastIn 0.3s ease reverse';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+        return;
+    }
+
+    if (chatToast) {
+        chatToast.textContent = message;
+        chatToast.className = `chat-toast show ${type}`;
+        setTimeout(() => chatToast.classList.remove('show'), 3000);
+        return;
+    }
+
+    // 最后兜底：容器不存在时退化到控制台
+    console.log(message);
 }
 
 // 本地存储操作
@@ -212,5 +227,13 @@ function setCurrentUser(user) {
 // 检查是否登录
 function isLoggedIn() {
     return !!getToken();
+}
+
+// HTML 转义，避免把不可信内容直接渲染进 innerHTML
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
 }
 

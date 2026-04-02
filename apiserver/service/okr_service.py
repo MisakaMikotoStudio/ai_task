@@ -19,7 +19,6 @@ from dao.okr_dao import (
     get_key_result_by_id as dao_get_kr,
     update_key_result as dao_update_kr,
     delete_key_result as dao_delete_kr,
-    get_tasks_by_key_result as dao_get_tasks_by_kr,
     reorder_objectives as dao_reorder_objectives,
     reorder_key_results as dao_reorder_key_results
 )
@@ -103,7 +102,7 @@ def get_objectives(user_id: int, cycle_type: Optional[str] = None,
     result = []
     for obj in objectives:
         obj_dict = obj.to_dict()
-        krs = dao_get_krs(obj.id)
+        krs = dao_get_krs(obj.id, user_id)
         obj_dict['key_results_count'] = len(krs)
         obj_dict['key_results'] = [kr.to_dict() for kr in krs]
         result.append(obj_dict)
@@ -117,12 +116,13 @@ def get_objective(objective_id: int, user_id: int) -> Dict:
         raise OKRNotFoundException('目标不存在')
 
     obj_dict = obj.to_dict()
-    krs = dao_get_krs(objective_id)
+    krs = dao_get_krs(objective_id, user_id)
     kr_list = []
     for kr in krs:
         kr_dict = kr.to_dict()
-        tasks = dao_get_tasks_by_kr(kr.id)
-        kr_dict['tasks'] = [t.to_dict() for t in tasks]
+        # Current schema doesn't define a KeyResult -> Task relationship.
+        # Keep the response shape stable for the frontend.
+        kr_dict['tasks'] = []
         kr_list.append(kr_dict)
     obj_dict['key_results'] = kr_list
     return obj_dict
@@ -145,11 +145,6 @@ def update_objective(objective_id: int, user_id: int, **kwargs) -> Dict:
 
     if 'status' in kwargs and kwargs['status'] not in Objective.STATUS_TEXT:
         raise OKRValidationException(f'无效的状态，可选值：{list(Objective.STATUS_TEXT.keys())}')
-
-    if 'progress' in kwargs:
-        progress = kwargs['progress']
-        if not isinstance(progress, int) or progress < 0 or progress > 100:
-            raise OKRValidationException('进度必须是0-100之间的整数')
 
     if 'cycle_type' in kwargs and kwargs['cycle_type'] not in Objective.CYCLE_TYPES:
         raise OKRValidationException(f'无效的周期类型，可选值：{Objective.CYCLE_TYPES}')
@@ -179,9 +174,7 @@ def delete_objective(objective_id: int, user_id: int) -> Dict:
 # ========== KeyResult Service ==========
 
 def create_key_result(objective_id: int, user_id: int, title: str,
-                      description: Optional[str] = None,
-                      target_value: Optional[float] = None,
-                      unit: Optional[str] = None) -> Dict:
+                      description: Optional[str] = None) -> Dict:
     """创建关键结果"""
     # 验证目标存在
     obj = dao_get_objective(objective_id, user_id)
@@ -193,13 +186,13 @@ def create_key_result(objective_id: int, user_id: int, title: str,
     if len(title) > 255:
         raise OKRValidationException('KR标题长度不能超过255个字符')
 
-    kr = dao_create_kr(objective_id, title, description, target_value, unit)
+    kr = dao_create_kr(objective_id, user_id, title, description)
     return kr.to_dict()
 
 
 def update_key_result(kr_id: int, user_id: int, **kwargs) -> Dict:
     """更新KR"""
-    kr = dao_get_kr(kr_id)
+    kr = dao_get_kr(kr_id, user_id)
     if not kr:
         raise OKRNotFoundException('关键结果不存在')
 
@@ -217,18 +210,13 @@ def update_key_result(kr_id: int, user_id: int, **kwargs) -> Dict:
             raise OKRValidationException('KR标题长度不能超过255个字符')
         kwargs['title'] = title
 
-    if 'progress' in kwargs:
-        progress = kwargs['progress']
-        if not isinstance(progress, int) or progress < 0 or progress > 100:
-            raise OKRValidationException('进度必须是0-100之间的整数')
-
-    dao_update_kr(kr_id, **kwargs)
+    dao_update_kr(kr_id, user_id, **kwargs)
     return {'success': True, 'message': 'KR更新成功'}
 
 
 def delete_key_result(kr_id: int, user_id: int) -> Dict:
     """删除KR"""
-    kr = dao_get_kr(kr_id)
+    kr = dao_get_kr(kr_id, user_id)
     if not kr:
         raise OKRNotFoundException('关键结果不存在')
 
@@ -237,7 +225,7 @@ def delete_key_result(kr_id: int, user_id: int) -> Dict:
     if not obj:
         raise OKRNotFoundException('关键结果不存在')
 
-    dao_delete_kr(kr_id)
+    dao_delete_kr(kr_id, user_id)
     return {'success': True, 'message': 'KR删除成功'}
 
 
@@ -262,5 +250,5 @@ def reorder_key_results(objective_id: int, user_id: int, kr_ids: List[int]) -> D
     if not kr_ids:
         raise OKRValidationException('KR ID列表不能为空')
 
-    dao_reorder_key_results(objective_id, kr_ids)
+    dao_reorder_key_results(objective_id, user_id, kr_ids)
     return {'success': True, 'message': 'KR排序更新成功'}
