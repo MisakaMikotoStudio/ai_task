@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 from urllib.parse import quote
 
+try:
+    import requests as _requests
+except ImportError:
+    _requests = None
+
 if TYPE_CHECKING:
     from config.config_model import GitRepoConfig
 
@@ -580,6 +585,135 @@ def collect_remote_branch_diff_info(
     except Exception as e:
         logger.error(f"[trace_id={trace_id}] [{repo_dir}] collect_remote_branch_diff_info 异常: {e}", exc_info=True)
         return GitResult(success=False, message=f"操作异常: {str(e)}")
+
+
+def create_github_pr_if_not_exists(
+    repo_url: str,
+    token: Optional[str],
+    head_branch: str,
+    base_branch: str,
+    pr_title: str,
+    pr_body: str = "",
+    trace_id: Optional[str] = None,
+) -> str:
+    """
+    检查指定分支是否已有对应的 GitHub PR，若无则自动创建。
+
+    支持说明：
+    - GitHub：调用 REST API 查询并按需创建 PR，返回 PR HTML URL
+    - GitLab：打印不支持日志，返回空字符串（不报错）
+    - 其他平台 / token 未配置 / API 异常：打印日志，返回空字符串（不报错）
+
+    Args:
+        repo_url:     仓库地址（git@ 或 https://，含或不含 .git 均可）
+        token:        GitHub Personal Access Token（需有 repo 权限）
+        head_branch:  来源分支（PR 的 head）
+        base_branch:  目标分支（PR 的 base，合并目标）
+        pr_title:     PR 标题
+        pr_body:      PR 描述正文（可为空）
+        trace_id:     日志追踪 ID
+
+    Returns:
+        成功时返回 PR 的 HTML URL；失败或不支持时返回空字符串。
+    """
+    if _requests is None:
+        logger.warning(f"[trace_id={trace_id}] requests 库未安装，跳过 GitHub PR 创建")
+        return ""
+
+    try:
+        base_url = get_web_url(repo_url)
+    except ValueError as e:
+        logger.error(f"[trace_id={trace_id}] 解析仓库 URL 失败，跳过 PR 创建: {e}")
+        return ""
+
+    if "gitlab" in base_url:
+        logger.warning(
+            f"[trace_id={trace_id}] GitLab 仓库暂不支持自动创建 MR，跳过: {base_url}"
+        )
+        return ""
+
+    if "github.com" not in base_url:
+        logger.warning(
+            f"[trace_id={trace_id}] 非 GitHub/GitLab 仓库，跳过自动创建 PR: {base_url}"
+        )
+        return ""
+
+    if not token:
+        logger.warning(
+            f"[trace_id={trace_id}] 仓库未配置 token，跳过 GitHub PR 自动创建: {base_url}"
+        )
+        return ""
+
+    # 从 URL 解析 owner / repo
+    path = base_url.split("github.com/", 1)[-1].strip("/")
+    parts = path.split("/")
+    if len(parts) < 2:
+        logger.error(
+            f"[trace_id={trace_id}] 无法从 URL 解析 owner/repo，跳过 PR 创建: {base_url}"
+        )
+        return ""
+    owner, repo_name = parts[0], parts[1]
+
+    api_base = f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+    # 查询是否已有 open PR
+    try:
+        resp = _requests.get(
+            api_base,
+            headers=headers,
+            params={
+                "state": "open",
+                "head": f"{owner}:{head_branch}",
+                "base": base_branch,
+            },
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            prs = resp.json()
+            if prs:
+                pr_url = prs[0]["html_url"]
+                logger.info(
+                    f"[trace_id={trace_id}] GitHub PR 已存在，直接复用: {pr_url}"
+                )
+                return pr_url
+        else:
+            logger.warning(
+                f"[trace_id={trace_id}] 查询 GitHub PR 失败 (status={resp.status_code}): {resp.text[:200]}"
+            )
+            return ""
+    except Exception as e:
+        logger.error(f"[trace_id={trace_id}] 查询 GitHub PR 异常: {e}")
+        return ""
+
+    # 创建新 PR
+    try:
+        resp = _requests.post(
+            api_base,
+            headers=headers,
+            json={
+                "title": pr_title,
+                "head": head_branch,
+                "base": base_branch,
+                "body": pr_body,
+            },
+            timeout=30,
+        )
+        if resp.status_code == 201:
+            pr_url = resp.json()["html_url"]
+            logger.info(f"[trace_id={trace_id}] GitHub PR 创建成功: {pr_url}")
+            return pr_url
+        else:
+            logger.warning(
+                f"[trace_id={trace_id}] 创建 GitHub PR 失败 (status={resp.status_code}): {resp.text[:200]}"
+            )
+            return ""
+    except Exception as e:
+        logger.error(f"[trace_id={trace_id}] 创建 GitHub PR 异常: {e}")
+        return ""
 
 
 # ──────────────────────────────────────────────────────

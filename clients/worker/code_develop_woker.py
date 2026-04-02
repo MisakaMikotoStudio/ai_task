@@ -192,11 +192,19 @@ class CodeDevelopWorker(BaseWorker):
                 continue
             if diff_result.message == "no_diff":
                 continue
+            actual_pr_url = git_utils.create_github_pr_if_not_exists(
+                repo_url=git_repo.url,
+                token=git_repo.token,
+                head_branch=task_branch,
+                base_branch=git_repo.default_branch,
+                pr_title=task_branch,
+                trace_id=self.trace_id,
+            )
             task_branch_merge_request.append({
                 "repo_name": git_repo.name,
                 "branch_name": task_branch,
                 "latest_commitId": diff_result.commit_id,
-                "merge_url": diff_result.merge_url
+                "merge_url": actual_pr_url or diff_result.merge_url
             })
 
         self.client_config.apiserver_rpc.sync_task_execute(
@@ -227,12 +235,19 @@ class CodeDevelopWorker(BaseWorker):
                 continue
             if diff_result.message == "no_diff":
                 continue
-
+            actual_pr_url = git_utils.create_github_pr_if_not_exists(
+                repo_url=git_repo.url,
+                token=git_repo.token,
+                head_branch=chat_branch,
+                base_branch=task_branch,
+                pr_title=chat_branch,
+                trace_id=self.trace_id,
+            )
             chat_branch_merge_request.append({
                 "repo_name": git_repo.name,
                 "branch_name": chat_branch,
                 "latest_commitId": diff_result.commit_id,
-                "merge_url": diff_result.merge_url
+                "merge_url": actual_pr_url or diff_result.merge_url
             })
 
         self.client_config.apiserver_rpc.sync_chat_msg_sync_execute(
