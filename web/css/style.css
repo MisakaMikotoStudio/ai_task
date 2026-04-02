@@ -421,6 +421,15 @@ input, select, textarea {
     gap: 12px;
 }
 
+.tasks-toolbar {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.task-filter-group {
+    flex-wrap: wrap;
+}
+
 .filter-label {
     color: var(--text-secondary);
     font-size: 14px;
@@ -429,6 +438,7 @@ input, select, textarea {
 
 .status-filter-btns {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
 }
 
@@ -536,7 +546,8 @@ input, select, textarea {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius-lg);
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .data-table {
@@ -570,6 +581,112 @@ input, select, textarea {
 
 .data-table tbody tr:last-child td {
     border-bottom: none;
+}
+
+.tasks-table {
+    table-layout: fixed;
+}
+
+.tasks-table .task-col-id {
+    width: 80px;
+}
+
+.tasks-table .task-col-title {
+    width: 34%;
+}
+
+.tasks-table .task-col-status {
+    width: 130px;
+}
+
+.tasks-table .task-col-client {
+    width: 18%;
+}
+
+.tasks-table .task-col-created {
+    width: 168px;
+}
+
+.tasks-table .task-col-actions {
+    width: 190px;
+}
+
+.task-title-cell {
+    max-width: 0;
+}
+
+.task-title-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+.task-actions-cell {
+    white-space: normal;
+}
+
+.task-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.task-actions .btn-action {
+    margin-right: 0;
+}
+
+.page-size-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+}
+
+.task-page-size {
+    min-width: 76px;
+    padding: 6px 28px 6px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+.task-page-size:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.12);
+}
+
+.task-table-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-top: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.01);
+}
+
+.task-pagination-summary,
+.task-page-info {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.task-pagination {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.task-pagination .btn-secondary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 /* Status Badges */
@@ -1105,6 +1222,26 @@ input, select, textarea {
     
     .auth-card {
         padding: 24px;
+    }
+
+    .view-header {
+        align-items: flex-start;
+    }
+
+    .view-header-right {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .task-table-footer {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .task-pagination {
+        width: 100%;
+        justify-content: space-between;
     }
 }
 

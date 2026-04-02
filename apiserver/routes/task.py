@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify
 
 from service.task_service import (
     create_task, get_tasks, get_task, update_status, delete_task,
-    sync_execute
+    sync_execute, TaskValidationException
 )
 from dao.task_dao import get_task_by_id
 
@@ -40,9 +40,32 @@ def create_task_api():
 @task_bp.route('', methods=['GET'])
 def list_tasks():
     """获取任务列表，支持按状态过滤"""
-    status = request.args.get('status')  # 可选查询参数
+    status_param = (request.args.get('status') or '').strip()
+    statuses = [item.strip() for item in status_param.split(',') if item.strip()] if status_param else None
 
-    tasks = get_tasks(request.user_info.id, status)
+    try:
+        page = int(request.args.get('page', 1))
+        page_num = int(request.args.get('pageNum', 20))
+    except (TypeError, ValueError):
+        return jsonify({
+            'code': 400,
+            'message': 'page 和 pageNum 必须是整数',
+            'data': None
+        }), 400
+
+    try:
+        tasks = get_tasks(
+            user_id=request.user_info.id,
+            statuses=statuses,
+            page=page,
+            page_num=page_num
+        )
+    except TaskValidationException as exc:
+        return jsonify({
+            'code': 400,
+            'message': str(exc),
+            'data': None
+        }), 400
 
     return jsonify({
         'code': 200,

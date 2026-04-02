@@ -5,6 +5,7 @@
 """
 
 import json
+import math
 from typing import Optional, Dict, List, Any
 
 from dao.task_dao import (
@@ -69,23 +70,57 @@ def create_task(user_id: int, title: str, client_id: int,
     return task
 
 
-def get_tasks(user_id: int, status: Optional[str] = None) -> List[Dict]:
+def get_tasks(
+    user_id: int,
+    statuses: Optional[List[str]] = None,
+    page: int = 1,
+    page_num: int = 20
+) -> Dict[str, Any]:
     """
     获取用户任务列表
     
     Args:
         user_id: 用户ID
-        status: 任务状态过滤（可选，如 pending/running/completed）
+        statuses: 任务状态过滤列表（可选，如 pending/running/completed）
+        page: 页码，从 1 开始
+        page_num: 每页条数
 
     Returns:
-        任务列表（flow 已处理为前端格式）
+        分页任务列表（flow 已处理为前端格式）
     """
-    # 验证状态值
-    if status and status not in Task.STATUS_TEXT:
-        raise TaskValidationException(f'无效的状态，可选值：{list(Task.STATUS_TEXT.keys())}')
-    
-    tasks = dao_get_tasks_by_user(user_id, status)
-    return tasks
+    if page < 1:
+        raise TaskValidationException('page 必须大于等于 1')
+
+    if page_num < 1 or page_num > 100:
+        raise TaskValidationException('pageNum 必须在 1 到 100 之间')
+
+    normalized_statuses = None
+    if statuses is not None:
+        normalized_statuses = []
+        for status in statuses:
+            status = (status or '').strip()
+            if not status:
+                continue
+            if status not in Task.STATUS_TEXT:
+                raise TaskValidationException(f'无效的状态，可选值：{list(Task.STATUS_TEXT.keys())}')
+            if status not in normalized_statuses:
+                normalized_statuses.append(status)
+
+    task_page = dao_get_tasks_by_user(
+        user_id=user_id,
+        statuses=normalized_statuses,
+        page=page,
+        page_num=page_num
+    )
+    total = task_page['total']
+
+    return {
+        'items': task_page['items'],
+        'total': total,
+        'page': page,
+        'page_num': page_num,
+        'total_pages': math.ceil(total / page_num) if total > 0 else 0
+    }
 
 
 def update_status(task_id: int, user_id: int, status: str) -> Dict:

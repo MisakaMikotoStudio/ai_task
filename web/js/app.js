@@ -15,7 +15,11 @@ const currentUsername = document.getElementById('current-username');
 let clientsCache = [];
 
 // 当前状态筛选值
-let currentStatusFilter = ['pending', 'running', 'suspended', 'completed'];
+let currentStatusFilter = ['pending', 'running', 'suspended'];
+let currentTaskPage = 1;
+let currentTaskPageSize = 20;
+let currentTaskTotal = 0;
+let currentTaskTotalPages = 0;
 
 // 初始化应用
 document.addEventListener('DOMContentLoaded', async () => {
@@ -915,47 +919,112 @@ function cfgRemoveRepo(index) {
 // 初始化任务筛选控件
 function initTaskFilter() {
     const statusFilter = document.getElementById('status-filter');
-    const checkboxes = statusFilter.querySelectorAll('input[type="checkbox"]');
-    
-    checkboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', () => {
-            // 更新按钮样式
-            const label = checkbox.parentElement;
-            if (checkbox.checked) {
-                label.classList.add('checked');
-            } else {
-                label.classList.remove('checked');
-            }
-            
-            // 获取所有选中的值
-            currentStatusFilter = Array.from(checkboxes)
-                .filter(cb => cb.checked)
-                .map(cb => cb.value);
+    const pageSizeSelect = document.getElementById('task-page-num');
+    const prevBtn = document.getElementById('task-page-prev');
+    const nextBtn = document.getElementById('task-page-next');
+
+    if (statusFilter && statusFilter.dataset.initialized !== 'true') {
+        const checkboxes = statusFilter.querySelectorAll('input[type="checkbox"]');
+
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                const label = checkbox.parentElement;
+                if (checkbox.checked) {
+                    label.classList.add('checked');
+                } else {
+                    label.classList.remove('checked');
+                }
+
+                currentStatusFilter = Array.from(checkboxes)
+                    .filter(cb => cb.checked)
+                    .map(cb => cb.value);
+                currentTaskPage = 1;
+                loadTasks();
+            });
+        });
+
+        statusFilter.dataset.initialized = 'true';
+    }
+
+    if (pageSizeSelect && pageSizeSelect.dataset.initialized !== 'true') {
+        pageSizeSelect.value = String(currentTaskPageSize);
+        pageSizeSelect.addEventListener('change', () => {
+            currentTaskPageSize = parseInt(pageSizeSelect.value, 10) || 20;
+            currentTaskPage = 1;
             loadTasks();
         });
-    });
+        pageSizeSelect.dataset.initialized = 'true';
+    }
+
+    if (prevBtn && prevBtn.dataset.initialized !== 'true') {
+        prevBtn.addEventListener('click', () => {
+            if (currentTaskPage <= 1) {
+                return;
+            }
+            currentTaskPage -= 1;
+            loadTasks();
+        });
+        prevBtn.dataset.initialized = 'true';
+    }
+
+    if (nextBtn && nextBtn.dataset.initialized !== 'true') {
+        nextBtn.addEventListener('click', () => {
+            if (currentTaskPage >= currentTaskTotalPages) {
+                return;
+            }
+            currentTaskPage += 1;
+            loadTasks();
+        });
+        nextBtn.dataset.initialized = 'true';
+    }
+
+    updateTaskPagination();
 }
 
 async function loadTasks() {
     try {
-        const result = await taskAPI.list();
-        let allTasks = result.data || [];
-
-        // 根据状态筛选（仅用于显示）
-        let tasks = allTasks;
-        if (currentStatusFilter.length > 0) {
-            tasks = allTasks.filter(task => currentStatusFilter.includes(task.status));
-        }
-        
-        // 按状态排序：进行中 > 未开始 > 已结束
-        const statusOrder = { 'running': 0, 'pending': 1, 'suspended': 2, 'completed': 3 };
-        tasks.sort((a, b) => {
-            const orderA = statusOrder[a.status] ?? 99;
-            const orderB = statusOrder[b.status] ?? 99;
-            return orderA - orderB;
+        const result = await taskAPI.list({
+            status: currentStatusFilter,
+            page: currentTaskPage,
+            pageNum: currentTaskPageSize
         });
-        
+        let tasks = [];
+        let total = 0;
+        let totalPages = 0;
+
+        if (Array.isArray(result.data)) {
+            const allTasks = result.data || [];
+            const filteredTasks = currentStatusFilter.length > 0
+                ? allTasks.filter(task => currentStatusFilter.includes(task.status))
+                : allTasks;
+            const statusOrder = { running: 0, pending: 1, suspended: 2, completed: 3 };
+            filteredTasks.sort((a, b) => {
+                const orderA = statusOrder[a.status] ?? 99;
+                const orderB = statusOrder[b.status] ?? 99;
+                return orderA - orderB;
+            });
+
+            total = filteredTasks.length;
+            totalPages = total > 0 ? Math.ceil(total / currentTaskPageSize) : 0;
+            const start = (currentTaskPage - 1) * currentTaskPageSize;
+            tasks = filteredTasks.slice(start, start + currentTaskPageSize);
+        } else {
+            const pageData = result.data || {};
+            tasks = pageData.items || [];
+            total = pageData.total || 0;
+            totalPages = pageData.total_pages || 0;
+        }
+
+        if (totalPages > 0 && currentTaskPage > totalPages) {
+            currentTaskPage = totalPages;
+            await loadTasks();
+            return;
+        }
+
+        currentTaskTotal = total;
+        currentTaskTotalPages = totalPages;
         renderTasks(tasks);
+        updateTaskPagination();
     } catch (error) {
         showToast(error.message, 'error');
     }
@@ -966,6 +1035,7 @@ function renderTasks(tasks) {
     const emptyState = document.getElementById('tasks-empty');
 
     if (tasks.length === 0) {
+        window.tasksCache = {};
         tbody.innerHTML = '';
         emptyState.classList.add('show');
         return;
@@ -977,24 +1047,14 @@ function renderTasks(tasks) {
     window.tasksCache = tasks.reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
 
     tbody.innerHTML = tasks.map(task => {
-        // 直接使用后端返回的 flow_status 字段
-        const flowStatusText = task.flow_status || '-';
-        
-        // 判断是否是 client_error 状态，如果是则添加错误提示按钮
-        const isClientError = task.flow_status === 'client_error';
-        let flowStatusHtml = '';
-        if (isClientError) {
-            // 从 flow.error 获取错误信息
-            const errorMsg = task.flow && task.flow.error ? task.flow.error : '未知错误';
-            flowStatusHtml = `<span class="flow-status-error" title="${escapeHtml(errorMsg)}">${flowStatusText} <button class="btn-error-detail" onclick="showClientErrorDetail(${task.id})">查看</button></span>`;
-        } else {
-            flowStatusHtml = flowStatusText;
-        }
+        const safeTitle = escapeHtml(task.title);
 
         return `
         <tr>
             <td><span class="task-id">${task.id ?? '-'}</span></td>
-            <td>${escapeHtml(task.title)}</td>
+            <td class="task-title-cell" title="${safeTitle}">
+                <span class="task-title-text">${safeTitle}</span>
+            </td>
             <td>
                 <select class="status-select status-${task.status}" onchange="updateTaskStatus(${task.id}, this.value, this)">
                     <option value="pending" ${task.status === 'pending' ? 'selected' : ''}>未开始</option>
@@ -1005,13 +1065,42 @@ function renderTasks(tasks) {
             </td>
             <td>${escapeHtml(task.client_name || '-')}</td>
             <td class="time-display">${formatDateTime(task.created_at)}</td>
-            <td>
-                <button class="btn-action btn-chat" onclick="openTaskChat(${task.id})">Chat</button>
-                <button class="btn-action btn-delete" onclick="deleteTask(${task.id})">删除</button>
-                <button class="btn-action btn-reset" onclick="resetTask(${task.id})">重置</button>
+            <td class="task-actions-cell">
+                <div class="task-actions">
+                    <button class="btn-action btn-chat" onclick="openTaskChat(${task.id})">Chat</button>
+                    <button class="btn-action btn-delete" onclick="deleteTask(${task.id})">删除</button>
+                    <button class="btn-action btn-reset" onclick="resetTask(${task.id})">重置</button>
+                </div>
             </td>
         </tr>
     `}).join('');
+}
+
+function updateTaskPagination() {
+    const totalInfo = document.getElementById('task-total-info');
+    const pageInfo = document.getElementById('task-page-info');
+    const prevBtn = document.getElementById('task-page-prev');
+    const nextBtn = document.getElementById('task-page-next');
+
+    if (totalInfo) {
+        totalInfo.textContent = `共 ${currentTaskTotal} 条`;
+    }
+
+    if (pageInfo) {
+        if (currentTaskTotalPages > 0) {
+            pageInfo.textContent = `第 ${currentTaskPage} / ${currentTaskTotalPages} 页`;
+        } else {
+            pageInfo.textContent = '第 0 / 0 页';
+        }
+    }
+
+    if (prevBtn) {
+        prevBtn.disabled = currentTaskPage <= 1 || currentTaskTotalPages === 0;
+    }
+
+    if (nextBtn) {
+        nextBtn.disabled = currentTaskPage >= currentTaskTotalPages || currentTaskTotalPages === 0;
+    }
 }
 
 // 统一的任务编辑弹窗状态
