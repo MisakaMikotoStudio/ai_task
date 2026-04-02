@@ -43,30 +43,14 @@ def list_tasks():
     status_param = (request.args.get('status') or '').strip()
     statuses = [item.strip() for item in status_param.split(',') if item.strip()] if status_param else None
 
-    try:
-        page = int(request.args.get('page', 1))
-        page_num = int(request.args.get('pageNum', 20))
-    except (TypeError, ValueError):
-        return jsonify({
-            'code': 400,
-            'message': 'page 和 pageNum 必须是整数',
-            'data': None
-        }), 400
-
-    try:
-        tasks = get_tasks(
-            user_id=request.user_info.id,
-            statuses=statuses,
-            page=page,
-            page_num=page_num
-        )
-    except TaskValidationException as exc:
-        return jsonify({
-            'code': 400,
-            'message': str(exc),
-            'data': None
-        }), 400
-
+    page = int(request.args.get('page', 1))
+    page_num = int(request.args.get('pageNum', 20))
+    tasks = get_tasks(
+        user_id=request.user_info.id,
+        statuses=statuses,
+        page=page,
+        page_num=page_num
+    )
     return jsonify({
         'code': 200,
         'message': '获取任务列表成功',
