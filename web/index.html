@@ -138,10 +138,12 @@
 
                 <!-- 任务列表视图 -->
                 <div id="tasks-view" class="view">
-                    <div class="view-header">
-                        <h2>任务列表</h2>
-                        <div class="view-header-right">
-                            <div class="filter-group">
+                    <div class="view-header tasks-header">
+                        <div class="view-header-left">
+                            <h2>任务列表</h2>
+                        </div>
+                        <div class="view-header-right tasks-toolbar">
+                            <div class="filter-group task-filter-group">
                                 <span class="filter-label">状态筛选：</span>
                                 <div class="status-filter-btns" id="status-filter">
                                     <label class="filter-btn checked">
@@ -153,18 +155,34 @@
                                     <label class="filter-btn checked">
                                         <input type="checkbox" value="suspended" checked> 已挂起
                                     </label>
-                                    <label class="filter-btn checked">
-                                        <input type="checkbox" value="completed" checked> 已结束
+                                    <label class="filter-btn">
+                                        <input type="checkbox" value="completed"> 已结束
                                     </label>
                                 </div>
+                            </div>
+                            <div class="page-size-control">
+                                <label class="filter-label" for="task-page-num">每页</label>
+                                <select id="task-page-num" class="task-page-size">
+                                    <option value="20" selected>20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
                             </div>
                             <button id="add-task-btn" class="btn-primary">
                                 <span>+</span> 新建任务
                             </button>
                         </div>
                     </div>
-                    <div class="table-container">
-                        <table class="data-table">
+                    <div class="table-container task-table-container">
+                        <table class="data-table tasks-table">
+                            <colgroup>
+                                <col class="task-col-id">
+                                <col class="task-col-title">
+                                <col class="task-col-status">
+                                <col class="task-col-client">
+                                <col class="task-col-created">
+                                <col class="task-col-actions">
+                            </colgroup>
                             <thead>
                                 <tr>
                                     <th>任务id</th>
@@ -182,6 +200,14 @@
                         <div id="tasks-empty" class="empty-state">
                             <span class="empty-icon">📭</span>
                             <p>暂无任务</p>
+                        </div>
+                        <div class="table-footer task-table-footer">
+                            <div class="task-pagination-summary" id="task-total-info">共 0 条</div>
+                            <div class="task-pagination">
+                                <button id="task-page-prev" class="btn-secondary btn-small" type="button">上一页</button>
+                                <span id="task-page-info" class="task-page-info">第 0 / 0 页</span>
+                                <button id="task-page-next" class="btn-secondary btn-small" type="button">下一页</button>
+                            </div>
                         </div>
                     </div>
                 </div>

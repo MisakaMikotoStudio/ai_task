@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 
+from sqlalchemy import case
+
 from .connection import get_db_session
 from .models import Task
 
@@ -38,16 +40,23 @@ def create_task(user_id: int, title: str, client_id: int,
         return task
 
 
-def get_tasks_by_user(user_id: int, status: Optional[str] = None) -> List[Dict]:
+def get_tasks_by_user(
+    user_id: int,
+    statuses: Optional[List[str]] = None,
+    page: int = 1,
+    page_num: int = 20
+) -> Dict[str, Any]:
     """
     获取用户的任务（含客户端名称）
 
     Args:
         user_id: 用户ID
-        status: 任务状态过滤（可选）
+        statuses: 任务状态过滤列表（可选）
+        page: 页码，从 1 开始
+        page_num: 每页条数
 
     Returns:
-        任务字典列表
+        分页后的任务字典列表和总数
     """
     from .models import Client
     with get_db_session() as session:
@@ -57,19 +66,38 @@ def get_tasks_by_user(user_id: int, status: Optional[str] = None) -> List[Dict]:
             Task.user_id == user_id,
             Task.deleted_at.is_(None)
         )
-        
-        # 添加状态过滤
-        if status:
-            query = query.filter(Task.status == status)
 
-        tasks = query.order_by(Task.created_at.desc()).all()
+        if statuses:
+            query = query.filter(Task.status.in_(statuses))
+
+        total = query.count()
+
+        status_order = case(
+            (Task.status == Task.STATUS_RUNNING, 0),
+            (Task.status == Task.STATUS_PENDING, 1),
+            (Task.status == Task.STATUS_SUSPENDED, 2),
+            (Task.status == Task.STATUS_COMPLETED, 3),
+            else_=99
+        )
+
+        tasks = query.order_by(
+            status_order.asc(),
+            Task.created_at.desc()
+        ).offset(
+            (page - 1) * page_num
+        ).limit(
+            page_num
+        ).all()
 
         result = []
         for task, client_name in tasks:
             task_dict = task.to_dict()
             task_dict['client_name'] = client_name
             result.append(task_dict)
-        return result
+        return {
+            'items': result,
+            'total': total
+        }
 
 
 def get_task_by_id(task_id: int, user_id: int) -> Optional[Task]:

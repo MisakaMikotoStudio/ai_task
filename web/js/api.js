@@ -178,8 +178,25 @@ const secretAPI = {
 // 任务API
 const taskAPI = {
     // 获取列表
-    async list() {
-        return request('/task');
+    async list(params = {}) {
+        const query = new URLSearchParams();
+
+        if (Array.isArray(params.status) && params.status.length > 0) {
+            query.set('status', params.status.join(','));
+        } else if (typeof params.status === 'string' && params.status.trim()) {
+            query.set('status', params.status.trim());
+        }
+
+        if (params.page !== undefined) {
+            query.set('page', String(params.page));
+        }
+
+        if (params.pageNum !== undefined) {
+            query.set('pageNum', String(params.pageNum));
+        }
+
+        const queryString = query.toString();
+        return request(`/task${queryString ? `?${queryString}` : ''}`);
     },
 
     // 获取单个任务详情
