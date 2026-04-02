@@ -9,7 +9,8 @@ import logging
 import os
 import sys
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, jsonify, request
+from werkzeug.exceptions import HTTPException
 
 # 配置日志格式
 logging.basicConfig(
@@ -42,6 +43,7 @@ from routes.task import task_bp
 from routes.okr import okr_bp
 from routes.todo import todo_bp
 from routes.chat import chat_bp
+from routes.auth_plugin import register_global_auth, skip_auth
 
 
 def create_app(config: AppConfig) -> Flask:
@@ -65,6 +67,36 @@ def create_app(config: AppConfig) -> Flask:
     app.register_blueprint(okr_bp, url_prefix=f'{prefix}/api/okr')
     app.register_blueprint(todo_bp, url_prefix=f'{prefix}/api/todo')
     app.register_blueprint(chat_bp, url_prefix=f'{prefix}/api/chat')
+    register_global_auth(app, api_prefix=f'{prefix}/api')
+
+    api_prefix = f'{prefix}/api'
+
+    @app.errorhandler(Exception)
+    def handle_api_exception(e):
+        """
+        API 全局异常兜底：
+        - 仅对 /api 路由统一 JSON 封装
+        - 未捕获异常统一返回 code=500
+        """
+        if not request.path.startswith(api_prefix):
+            if isinstance(e, HTTPException):
+                return e
+            app.logger.exception('Unhandled non-API exception')
+            return 'Internal Server Error', 500
+
+        if isinstance(e, HTTPException):
+            return jsonify({
+                'code': e.code or 500,
+                'message': e.description or '请求处理失败',
+                'data': None
+            }), e.code or 500
+
+        app.logger.exception('Unhandled API exception')
+        return jsonify({
+            'code': 500,
+            'message': '服务器内部错误',
+            'data': None
+        }), 500
     
     # 请求结束时清理session
     @app.teardown_appcontext
@@ -73,6 +105,7 @@ def create_app(config: AppConfig) -> Flask:
 
     # 健康检查端点
     @app.route(f'{prefix}/api/health')
+    @skip_auth
     def health():
         return {'code': 200, 'message': 'ok', 'data': {'status': 'healthy'}}
 

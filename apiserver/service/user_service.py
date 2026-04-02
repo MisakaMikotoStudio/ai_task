@@ -124,7 +124,11 @@ def get_user_info(token: str) -> UserInfo:
     Raises:
         Exception: 用户不存在时抛出
     """
-    user_id = get_session_by_token(token).user_id
+    user_session = get_session_by_token(token)
+    if not user_session:
+        raise Exception('用户不存在或Token无效')
+
+    user_id = user_session.user_id
     user = get_user_by_id(user_id)
     
     if not user:

@@ -95,25 +95,9 @@ const userAPI = {
 
 // 客户端API
 const clientAPI = {
-    // 获取列表（支持游标分页）
-    async list(options = {}) {
-        const params = new URLSearchParams();
-        if (options.cursor !== undefined && options.cursor !== null) {
-            params.append('cursor', options.cursor);
-        }
-        if (options.limit !== undefined) {
-            params.append('limit', options.limit);
-        }
-        if (options.only_mine !== undefined) {
-            params.append('only_mine', options.only_mine);
-        }
-        const query = params.toString() ? `?${params.toString()}` : '';
-        return request(`/client${query}`);
-    },
-
-    // 获取可用于创建任务的客户端列表
-    async listUsable() {
-        return request('/client/usable');
+    // 获取列表（直接返回全部）
+    async list() {
+        return request('/client');
     },
 
     // 获取单个
@@ -126,24 +110,26 @@ const clientAPI = {
         return request('/client/agents');
     },
 
-    // 创建
-    async create(name, types, options = {}) {
-        const body = { name, types };
-        if (options.is_public !== undefined) body.is_public = options.is_public;
+    // 创建（可选一次性提交 repos、env_vars，与编辑页 PUT 对齐）
+    async create(name, options = {}) {
+        const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.repos !== undefined) body.repos = options.repos;
+        if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
         });
     },
 
-    // 更新
-    async update(id, name, types, options = {}) {
-        const body = { name, types };
-        if (options.is_public !== undefined) body.is_public = options.is_public;
+    // 更新（可选 repos、env_vars 全量同步）
+    async update(id, name, options = {}) {
+        const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.repos !== undefined) body.repos = options.repos;
+        if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -158,58 +144,6 @@ const clientAPI = {
     },
 
     // 心跳
-    async heartbeat(id) {
-        return request(`/client/${id}/heartbeat`, {
-            method: 'POST'
-        });
-    },
-
-    // 获取仓库配置列表
-    async getRepos(id) {
-        return request(`/client/${id}/repos`);
-    },
-
-    // 批量更新仓库配置
-    async updateRepos(id, repos) {
-        return request(`/client/${id}/repos`, {
-            method: 'PUT',
-            body: JSON.stringify({ repos })
-        });
-    },
-
-    // 获取心跳记录
-    async getHeartbeats() {
-        return request('/client/heartbeats');
-    },
-
-    // 获取环境变量列表
-    async getEnvVars(id) {
-        return request(`/client/${id}/env-vars`);
-    },
-
-    // 新增环境变量
-    async createEnvVar(id, key, value) {
-        return request(`/client/${id}/env-vars`, {
-            method: 'POST',
-            body: JSON.stringify({ key, value })
-        });
-    },
-
-    // 更新环境变量
-    async updateEnvVar(id, envVarId, key, value) {
-        return request(`/client/${id}/env-vars/${envVarId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ key, value })
-        });
-    },
-
-    // 删除环境变量
-    async deleteEnvVar(id, envVarId) {
-        return request(`/client/${id}/env-vars/${envVarId}`, {
-            method: 'DELETE'
-        });
-    },
-
     // 复制客户端
     async copy(id) {
         return request(`/client/${id}/copy`, {
@@ -254,8 +188,8 @@ const taskAPI = {
     },
 
     // 创建
-    async create(title, type, clientId = null, desc = null, status = null) {
-        const body = { title, type, desc };
+    async create(title, clientId = null, status = null) {
+        const body = { title };
         // clientId 可选，为 null 时不发送
         if (clientId !== null) {
             body.client_id = clientId;
@@ -277,56 +211,12 @@ const taskAPI = {
         });
     },
 
-    // 更新流程
-    async updateFlow(id, flow, flowStatus = null) {
-        const body = { flow };
-        if (flowStatus !== null) {
-            body.flow_status = flowStatus;
-        }
-        return request(`/task/${id}/flow`, {
-            method: 'PUT',
-            body: JSON.stringify(body)
-        });
-    },
-
     // 删除任务
     async delete(id) {
         return request(`/task/${id}`, {
             method: 'DELETE'
         });
     },
-
-    // 更新任务描述
-    async updateDesc(id, desc, status = null) {
-        const body = { desc };
-        if (status !== null) {
-            body.status = status;
-        }
-        return request(`/task/${id}/desc`, {
-            method: 'PATCH',
-            body: JSON.stringify(body)
-        });
-    },
-
-    // 审核任务（通过/修订）
-    async review(id, action, feedback = null) {
-        const body = { action };
-        if (feedback !== null) {
-            body.feedback = feedback;
-        }
-        return request(`/task/${id}/review`, {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
-    },
-
-    // 更新任务关联的客户端
-    async updateClient(id, clientId) {
-        return request(`/task/${id}/client`, {
-            method: 'PATCH',
-            body: JSON.stringify({ client_id: clientId })
-        });
-    }
 };
 
 // OKR API
@@ -341,11 +231,6 @@ const okrAPI = {
         if (cycleEnd) params.append('cycle_end', cycleEnd);
         const query = params.toString() ? `?${params.toString()}` : '';
         return request(`/okr/objectives${query}`);
-    },
-
-    // 获取目标详情
-    async getObjective(id) {
-        return request(`/okr/objectives/${id}`);
     },
 
     // 创建目标
@@ -379,14 +264,12 @@ const okrAPI = {
 
     // ========== KeyResult ==========
     // 创建KR
-    async createKeyResult(objectiveId, title, description = null, targetValue = null, unit = null) {
+    async createKeyResult(objectiveId, title, description = null) {
         return request(`/okr/objectives/${objectiveId}/key-results`, {
             method: 'POST',
             body: JSON.stringify({
                 title,
-                description,
-                target_value: targetValue,
-                unit
+                description
             })
         });
     },
@@ -437,10 +320,6 @@ const chatAPI = {
             method: 'POST',
             body: JSON.stringify(body)
         });
-    },
-
-    async getChat(taskId, chatId) {
-        return request(`/chat/task/${taskId}/chats/${chatId}`);
     },
 
     async updateChatStatus(taskId, chatId, status) {

@@ -4,7 +4,7 @@
 用户数据访问对象 - SQLAlchemy ORM 版本
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from .connection import get_db_session
@@ -68,7 +68,7 @@ def update_last_access(user_id: int):
     """
     with get_db_session() as session:
         session.query(User).filter(User.id == user_id).update({
-            User.last_access_at: datetime.now()
+            User.last_access_at: datetime.now(timezone.utc)
         })
 
 

@@ -14,17 +14,8 @@ const currentUsername = document.getElementById('current-username');
 // 客户端数据缓存
 let clientsCache = [];
 
-// 任务列表自动刷新定时器
-let tasksRefreshTimer = null;
-
 // 当前状态筛选值
 let currentStatusFilter = ['pending', 'running', 'suspended', 'completed'];
-
-// 任务 flow_status 缓存（用于检测变化）
-let taskFlowStatusCache = {};
-
-// 浏览器通知是否已授权
-let notificationPermission = 'default';
 
 // 初始化应用
 document.addEventListener('DOMContentLoaded', async () => {
@@ -36,90 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
     initForms();
     initModals();
-    initNotification();
 });
-
-// ===== 浏览器通知 =====
-
-// 初始化通知权限
-function initNotification() {
-    // 检查浏览器是否支持通知
-    if (!('Notification' in window)) {
-        console.log('此浏览器不支持通知功能');
-        return;
-    }
-    
-    notificationPermission = Notification.permission;
-    
-    // 如果还没有请求过权限，在用户首次交互时请求
-    if (notificationPermission === 'default') {
-        // 在页面上添加一个提示，让用户点击授权
-        document.addEventListener('click', requestNotificationPermission, { once: true });
-    }
-}
-
-// 请求通知权限
-async function requestNotificationPermission() {
-    if (!('Notification' in window)) return;
-    
-    if (Notification.permission === 'default') {
-        try {
-            const permission = await Notification.requestPermission();
-            notificationPermission = permission;
-            if (permission === 'granted') {
-                console.log('通知权限已授权');
-            }
-        } catch (error) {
-            console.error('请求通知权限失败:', error);
-        }
-    }
-}
-
-// 发送浏览器通知
-function sendNotification(title, body, taskKey) {
-    if (!('Notification' in window)) return;
-    
-    if (Notification.permission !== 'granted') return;
-    
-    const notification = new Notification(title, {
-        body: body,
-        icon: 'favicon.ico', // 可选：添加图标
-        tag: `task-${taskKey}`, // 相同 tag 的通知会合并
-        requireInteraction: false
-    });
-    
-    // 点击通知时聚焦到页面
-    notification.onclick = function() {
-        window.focus();
-        notification.close();
-    };
-    
-    // 5秒后自动关闭
-    setTimeout(() => notification.close(), 5000);
-}
-
-// 检测 flow_status 变化并发送通知
-function checkFlowStatusChanges(tasks) {
-    if (Notification.permission !== 'granted') return;
-    
-    tasks.forEach(task => {
-        const taskId = task.id;
-        const currentFlowStatus = task.flow_status || '';
-        const previousFlowStatus = taskFlowStatusCache[taskId];
-        
-        // 如果之前有缓存，且状态发生了变化
-        if (previousFlowStatus !== undefined && previousFlowStatus !== currentFlowStatus) {
-            sendNotification(
-                `任务状态更新: ${task.key}`,
-                `${task.title}\n执行状态: ${previousFlowStatus || '-'} → ${currentFlowStatus || '-'}`,
-                task.key
-            );
-        }
-        
-        // 更新缓存
-        taskFlowStatusCache[taskId] = currentFlowStatus;
-    });
-}
 
 // ===== 认证相关 =====
 
@@ -137,9 +45,6 @@ function initAuth() {
 function showLoginPage() {
     loginPage.classList.add('active');
     mainPage.classList.remove('active');
-    
-    // 停止任务列表自动刷新
-    stopTasksAutoRefresh();
 }
 
 function showMainPage() {
@@ -163,9 +68,6 @@ function showMainPage() {
     loadTasks();
     loadTodos();
     loadSecrets();
-
-    // 启动任务列表自动刷新（每10秒）
-    startTasksAutoRefresh();
 }
 
 async function loadUserInfo() {
@@ -409,12 +311,7 @@ function showModal(title, content) {
 
 // 当前客户端搜索的ID
 let currentClientSearchId = null;
-// 客户端分页状态
-let clientsNextCursor = null;
-let clientsHasMore = false;
 let clientsLoading = false;
-// 只看我的筛选
-let clientsOnlyMine = false;
 // 心跳记录缓存
 let heartbeatMap = {};
 
@@ -423,7 +320,6 @@ function initClientSearch() {
     const searchInput = document.getElementById('client-search-input');
     const searchBtn = document.getElementById('client-search-btn');
     const clearBtn = document.getElementById('client-search-clear-btn');
-    const onlyMineCheckbox = document.getElementById('client-only-mine');
 
     if (searchBtn) {
         searchBtn.addEventListener('click', () => {
@@ -458,36 +354,6 @@ function initClientSearch() {
         });
     }
 
-    // 只看我的筛选
-    if (onlyMineCheckbox) {
-        onlyMineCheckbox.addEventListener('change', () => {
-            clientsOnlyMine = onlyMineCheckbox.checked;
-            // 重新加载客户端列表
-            resetAndLoadClients();
-        });
-    }
-
-    // 初始化无限滚动
-    initClientsInfiniteScroll();
-}
-
-// 初始化客户端列表无限滚动
-function initClientsInfiniteScroll() {
-    const tableContainer = document.querySelector('#clients-view .table-container');
-    if (!tableContainer) return;
-
-    tableContainer.addEventListener('scroll', () => {
-        if (clientsLoading || !clientsHasMore) return;
-        
-        // 当滚动到底部附近时加载更多
-        const scrollTop = tableContainer.scrollTop;
-        const scrollHeight = tableContainer.scrollHeight;
-        const clientHeight = tableContainer.clientHeight;
-        
-        if (scrollTop + clientHeight >= scrollHeight - 100) {
-            loadMoreClients();
-        }
-    });
 }
 
 // 根据搜索ID过滤客户端列表
@@ -501,8 +367,6 @@ function filterClientsBySearch(clients) {
 // 重置并加载客户端列表
 async function resetAndLoadClients() {
     clientsCache = [];
-    clientsNextCursor = null;
-    clientsHasMore = false;
     currentClientSearchId = null;
     const searchInput = document.getElementById('client-search-input');
     if (searchInput) searchInput.value = '';
@@ -516,106 +380,21 @@ async function loadClients() {
     clientsLoading = true;
 
     try {
-        const [clientsResult, heartbeatsResult] = await Promise.all([
-            clientAPI.list({ limit: 20, only_mine: clientsOnlyMine }),
-            clientAPI.getHeartbeats()
-        ]);
-        
-        const data = clientsResult.data || {};
-        clientsCache = data.items || [];
-        clientsNextCursor = data.next_cursor;
-        clientsHasMore = data.has_more || false;
-        
-        const heartbeats = heartbeatsResult.data || [];
+        const clientsResult = await clientAPI.list();
 
-        // 创建心跳记录的映射 (client_id -> last_sync_at)
+        clientsCache = clientsResult.data || [];
         heartbeatMap = {};
-        heartbeats.forEach(hb => {
-            heartbeatMap[hb.client_id] = hb.last_sync_at;
-        });
-
-        // 合并心跳时间到客户端数据
         clientsCache.forEach(client => {
-            if (heartbeatMap[client.id]) {
-                client.last_sync_at = heartbeatMap[client.id];
+            if (client.last_sync_at) {
+                heartbeatMap[client.id] = client.last_sync_at;
             }
         });
 
         renderClients(clientsCache);
-        updateLoadMoreIndicator();
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
         clientsLoading = false;
-    }
-}
-
-// 加载更多客户端
-async function loadMoreClients() {
-    if (clientsLoading || !clientsHasMore || !clientsNextCursor) return;
-    clientsLoading = true;
-    
-    updateLoadMoreIndicator(true);
-
-    try {
-        const result = await clientAPI.list({
-            cursor: clientsNextCursor,
-            limit: 20,
-            only_mine: clientsOnlyMine
-        });
-        
-        const data = result.data || {};
-        const newItems = data.items || [];
-        clientsNextCursor = data.next_cursor;
-        clientsHasMore = data.has_more || false;
-
-        // 合并心跳时间
-        newItems.forEach(client => {
-            if (heartbeatMap[client.id]) {
-                client.last_sync_at = heartbeatMap[client.id];
-            }
-        });
-
-        // 追加到缓存
-        clientsCache = clientsCache.concat(newItems);
-        
-        // 追加渲染
-        appendClients(newItems);
-        updateLoadMoreIndicator();
-    } catch (error) {
-        showToast(error.message, 'error');
-    } finally {
-        clientsLoading = false;
-    }
-}
-
-// 更新加载更多指示器
-function updateLoadMoreIndicator(loading = false) {
-    let indicator = document.getElementById('clients-load-more');
-    if (!indicator) {
-        // 创建指示器
-        const tableContainer = document.querySelector('#clients-view .table-container');
-        if (tableContainer) {
-            indicator = document.createElement('div');
-            indicator.id = 'clients-load-more';
-            indicator.className = 'load-more-indicator';
-            tableContainer.appendChild(indicator);
-        }
-    }
-    
-    if (indicator) {
-        if (loading) {
-            indicator.innerHTML = '<span class="loading-spinner"></span> 加载中...';
-            indicator.style.display = 'block';
-        } else if (clientsHasMore) {
-            indicator.innerHTML = '向下滚动加载更多';
-            indicator.style.display = 'block';
-        } else if (clientsCache.length > 0) {
-            indicator.innerHTML = '已加载全部';
-            indicator.style.display = 'block';
-        } else {
-            indicator.style.display = 'none';
-        }
     }
 }
 
@@ -634,17 +413,6 @@ function renderClients(clients) {
     tbody.innerHTML = clients.map(client => renderClientRow(client)).join('');
 }
 
-// 追加渲染客户端行
-function appendClients(clients) {
-    const tbody = document.getElementById('clients-table-body');
-    const emptyState = document.getElementById('clients-empty');
-    
-    if (clients.length === 0) return;
-    
-    emptyState.classList.remove('show');
-    tbody.innerHTML += clients.map(client => renderClientRow(client)).join('');
-}
-
 // 渲染单个客户端行
 function renderClientRow(client) {
     let actionsHtml = '';
@@ -652,8 +420,6 @@ function renderClientRow(client) {
         actionsHtml = `<button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
             <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>`;
-    } else if (client.is_public) {
-        actionsHtml = `<button class="btn-action btn-info" onclick="openClientConfig(${client.id}, 'view')">查看</button>`;
     } else {
         actionsHtml = '<span class="text-muted">只读</span>';
     }
@@ -663,7 +429,6 @@ function renderClientRow(client) {
         <td><strong>${escapeHtml(client.name)}</strong></td>
         <td>${client.version ?? '-'}</td>
         <td>${escapeHtml(client.creator_name || '-')}</td>
-        <td>${client.is_public ? '<span class="status-tag status-running">是</span>' : '<span class="status-tag status-pending">否</span>'}</td>
         <td class="time-display ${getHeartbeatClass(client.last_sync_at)}">${formatRelativeTime(client.last_sync_at)}</td>
         <td class="time-display">${formatDateTime(client.created_at)}</td>
         <td>${actionsHtml}</td>
@@ -754,20 +519,12 @@ async function openClientConfig(id, mode) {
     // 返回按钮
     document.getElementById('client-config-back-btn').onclick = backToClients;
 
-    // 新建模式下，环境变量和仓库 tab 不可用（需先保存基本信息）
     const envTab = document.getElementById('tab-btn-env-vars');
     const reposTab = document.getElementById('tab-btn-repos');
-    if (mode === 'add') {
-        envTab.disabled = true;
-        reposTab.disabled = true;
-        envTab.title = '请先保存基本信息';
-        reposTab.title = '请先保存基本信息';
-    } else {
-        envTab.disabled = false;
-        reposTab.disabled = false;
-        envTab.title = '';
-        reposTab.title = '';
-    }
+    envTab.disabled = false;
+    reposTab.disabled = false;
+    envTab.title = '';
+    reposTab.title = '';
 
     // 加载 Agent 列表
     let agentOptions = ['claude sdk', 'claude cli'];
@@ -782,21 +539,15 @@ async function openClientConfig(id, mode) {
         `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`
     ).join('');
 
-    // 如果是编辑/查看模式，加载现有数据
+    // 编辑/查看：一次 GET 拉取基本信息、仓库、环境变量
     if (id !== null) {
         try {
-            const [clientResult, reposResult, envVarsResult] = await Promise.all([
-                clientAPI.get(id),
-                clientAPI.getRepos(id),
-                clientAPI.getEnvVars(id)
-            ]);
+            const clientResult = await clientAPI.get(id);
             const clientData = clientResult.data;
-            cfgReposList = (reposResult.data || []).map(r => ({...r}));
-            cfgEnvVarsData = (envVarsResult.data || []).map(ev => ({...ev, _editing: false}));
+            cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
+            cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev, _editing: false }));
 
-            // 填充基本信息
             document.getElementById('cfg-client-name').value = clientData.name;
-            document.getElementById('cfg-client-is-public').value = clientData.is_public ? 'true' : 'false';
             agentSelect.value = clientData.agent || 'claude sdk';
             officialCloudDeploySelect.value = String(clientData.official_cloud_deploy ?? 0);
         } catch (error) {
@@ -805,83 +556,160 @@ async function openClientConfig(id, mode) {
         }
     } else {
         document.getElementById('cfg-client-name').value = '';
-        document.getElementById('cfg-client-is-public').value = 'false';
         agentSelect.value = agentOptions[0] || 'claude sdk';
         officialCloudDeploySelect.value = '0';
     }
 
-    // 只读模式下禁用基本信息表单字段
-    const basicInputs = document.querySelectorAll('#client-tab-basic input, #client-tab-basic select');
-    basicInputs.forEach(el => { el.disabled = (mode === 'view'); });
+    cfgApplyBasicFormMode();
+    cfgBindClientConfigHeader();
 
-    // 渲染/绑定基本信息表单
-    cfgInitBasicForm();
-
-    // 渲染环境变量 tab（提示 + 列表）
     cfgRenderEnvVarsTab();
-
-    // 渲染仓库配置 tab
     cfgRenderReposTab();
 }
 
-// ---- 基本信息表单 ----
-
-function cfgInitBasicForm() {
+function cfgApplyBasicFormMode() {
     const form = document.getElementById('client-basic-form');
-    const submitBtn = document.getElementById('cfg-basic-submit-btn');
+    if (form) {
+        form.onsubmit = (e) => e.preventDefault();
+    }
+    const basicInputs = document.querySelectorAll('#client-tab-basic input, #client-tab-basic select');
+    basicInputs.forEach(el => { el.disabled = (cfgClientMode === 'view'); });
 
-    if (cfgClientMode === 'view') {
-        submitBtn.style.display = 'none';
-        form.onsubmit = null;
+    const headerActions = document.getElementById('client-config-header-actions');
+    if (headerActions) {
+        headerActions.style.display = (cfgClientMode === 'view') ? 'none' : 'flex';
+    }
+}
+
+function cfgBindClientConfigHeader() {
+    const saveBtn = document.getElementById('client-config-save-btn');
+    const cancelBtn = document.getElementById('client-config-cancel-btn');
+    if (saveBtn) saveBtn.onclick = () => cfgUnifiedSaveClient();
+    if (cancelBtn) cancelBtn.onclick = () => cfgCancelClientConfig();
+}
+
+function cfgCancelClientConfig() {
+    if (cfgClientMode !== 'view') {
+        if (!confirm('确定放弃未保存的修改并返回？')) return;
+    }
+    backToClients();
+}
+
+function cfgCollectBasicFields() {
+    const name = document.getElementById('cfg-client-name').value.trim();
+    const agent = document.getElementById('cfg-client-agent').value;
+    const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
+    return { name, agent, officialCloudDeploy };
+}
+
+function cfgBuildReposPayload() {
+    return cfgReposList.map(r => ({
+        desc: (r.desc || '').trim(),
+        url: (r.url || '').trim(),
+        token: r.token,
+        default_branch: r.default_branch || '',
+        branch_prefix: r.branch_prefix || 'ai_',
+        docs_repo: !!r.docs_repo
+    }));
+}
+
+function cfgValidateReposForSave() {
+    if (!cfgReposList.length) {
+        return '请至少添加一个代码仓库';
+    }
+    let docs = 0;
+    for (let i = 0; i < cfgReposList.length; i++) {
+        const r = cfgReposList[i];
+        const n = i + 1;
+        if (!(r.url || '').trim()) return `仓库 #${n} 的 URL 不能为空`;
+        if (!(r.desc || '').trim()) return `仓库 #${n} 的简介不能为空`;
+        if (String(r.url).trim().startsWith('http') && !(r.token || '').trim()) {
+            return `仓库 #${n} 使用 HTTP 地址时必须填写 Token`;
+        }
+        if (r.docs_repo) docs++;
+    }
+    if (docs === 0) return '请指定一个文档仓库（单选）';
+    if (docs > 1) return '只能指定一个文档仓库';
+    return null;
+}
+
+function cfgBuildEnvVarsPayload() {
+    return cfgEnvVarsData.map(ev => ({
+        key: (ev.key || '').trim(),
+        value: ev.value == null ? '' : String(ev.value)
+    }));
+}
+
+async function cfgUnifiedSaveClient() {
+    if (cfgClientMode === 'view') return;
+
+    const { name, agent, officialCloudDeploy } = cfgCollectBasicFields();
+    if (!name) {
+        showToast('客户端名称不能为空', 'error');
+        return;
+    }
+    if (cfgEnvVarsData.some(ev => ev._isNew || ev._editing)) {
+        showToast('请先完成环境变量的「确定」或取消未填完的变量行', 'error');
+        return;
+    }
+    if (cfgEnvVarsData.some(ev => !(ev.key || '').trim())) {
+        showToast('环境变量名称不能为空', 'error');
+        return;
+    }
+    const keys = cfgEnvVarsData.map(ev => (ev.key || '').trim()).filter(Boolean);
+    if (new Set(keys).size !== keys.length) {
+        showToast('环境变量名称不能重复', 'error');
         return;
     }
 
-    submitBtn.style.display = '';
-    submitBtn.textContent = cfgClientId === null ? '创建' : '保存';
+    const repoErr = cfgValidateReposForSave();
+    if (repoErr) {
+        showToast(repoErr, 'error');
+        return;
+    }
 
-    form.onsubmit = async (e) => {
-        e.preventDefault();
-        const name = document.getElementById('cfg-client-name').value.trim();
-        const isPublic = document.getElementById('cfg-client-is-public').value === 'true';
-        const agent = document.getElementById('cfg-client-agent').value;
-        const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
+    const repos = cfgBuildReposPayload();
+    const env_vars = cfgBuildEnvVarsPayload();
 
-        if (!name) { showToast('客户端名称不能为空', 'error'); return; }
-
-        try {
-            if (cfgClientId === null) {
-                // 新建
-                const result = await clientAPI.create(name, [], {
-                    is_public: isPublic,
-                    agent,
-                    official_cloud_deploy: officialCloudDeploy
-                });
-                cfgClientId = result.data.id;
-                cfgClientMode = 'edit';
-                showToast('客户端创建成功，请继续配置环境变量和仓库', 'success');
-                // 解锁其他 tab
-                document.getElementById('tab-btn-env-vars').disabled = false;
-                document.getElementById('tab-btn-repos').disabled = false;
-                document.getElementById('tab-btn-env-vars').title = '';
-                document.getElementById('tab-btn-repos').title = '';
-                document.getElementById('cfg-basic-submit-btn').textContent = '保存';
-                loadClients();
-            } else {
-                // 更新
-                await clientAPI.update(cfgClientId, name, [], {
-                    is_public: isPublic,
-                    agent,
-                    official_cloud_deploy: officialCloudDeploy
-                });
-                showToast('基本信息保存成功', 'success');
-                loadClients();
+    try {
+        if (cfgClientId === null) {
+            const result = await clientAPI.create(name, {
+                agent,
+                official_cloud_deploy: officialCloudDeploy,
+                repos,
+                env_vars
+            });
+            cfgClientId = result.data.id;
+            cfgClientMode = 'edit';
+            document.getElementById('client-config-title').textContent = '编辑客户端';
+            if (result.data.repos) {
+                cfgReposList = result.data.repos.map(r => ({ ...r }));
             }
-            // 刷新环境变量 tab
-            cfgRenderEnvVarsTab();
-        } catch (error) {
-            showToast(error.message, 'error');
+            if (result.data.env_vars) {
+                cfgEnvVarsData = result.data.env_vars.map(ev => ({ ...ev, _editing: false }));
+            }
+            showToast('客户端创建成功', 'success');
+        } else {
+            const result = await clientAPI.update(cfgClientId, name, {
+                agent,
+                official_cloud_deploy: officialCloudDeploy,
+                repos,
+                env_vars
+            });
+            if (result.data && result.data.repos) {
+                cfgReposList = result.data.repos.map(r => ({ ...r }));
+            }
+            if (result.data && result.data.env_vars) {
+                cfgEnvVarsData = result.data.env_vars.map(ev => ({ ...ev, _editing: false }));
+            }
+            showToast('保存成功', 'success');
         }
-    };
+        cfgRenderEnvVarsTab();
+        cfgRenderReposTab();
+        loadClients();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
 }
 
 // ---- 环境变量管理 ----
@@ -891,13 +719,12 @@ function cfgRenderEnvVarsTab() {
     const addBtn = document.getElementById('add-env-var-btn');
 
     if (tipEl) {
-        tipEl.textContent = '注意：仅在docker方式启动客户端或者使用cloud客户端时，环境变量才有效';
+        tipEl.textContent = '注意：仅在 docker / cloud 客户端场景下环境变量生效。编辑后请点页面右上角「保存」统一提交。';
         tipEl.className = 'config-section-tip tip-warn';
     }
 
-    // 只读或无 id 时隐藏添加按钮
     if (addBtn) {
-        addBtn.style.display = (cfgClientMode === 'view' || cfgClientId === null) ? 'none' : '';
+        addBtn.style.display = (cfgClientMode === 'view') ? 'none' : '';
         addBtn.onclick = cfgAddEnvVar;
     }
 
@@ -925,7 +752,7 @@ function cfgRenderEnvVarsList() {
                 <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}">
                 <span class="env-var-eq">=</span>
                 <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}">
-                <button class="btn-action btn-save-sm" onclick="cfgSaveEnvVar(${idx})">保存</button>
+                <button type="button" class="btn-action btn-save-sm" onclick="cfgConfirmEnvVarRow(${idx})">确定</button>
                 <button class="btn-action btn-cancel-sm" onclick="cfgCancelEnvVar(${idx})">取消</button>
             </div>`;
         }
@@ -961,51 +788,34 @@ function cfgCancelEnvVar(idx) {
     cfgRenderEnvVarsList();
 }
 
-async function cfgSaveEnvVar(idx) {
+function cfgConfirmEnvVarRow(idx) {
     const row = document.querySelector(`.env-var-row[data-idx="${idx}"]`);
+    if (!row) return;
     const key = row.querySelector('.env-var-key-input').value.trim();
     const value = row.querySelector('.env-var-val-input').value;
     if (!key) { showToast('变量名不能为空', 'error'); return; }
 
-    try {
-        const ev = cfgEnvVarsData[idx];
-        if (ev._isNew) {
-            const result = await clientAPI.createEnvVar(cfgClientId, key, value);
-            ev.id = result.data.id;
-            ev._isNew = false;
-        } else {
-            await clientAPI.updateEnvVar(cfgClientId, ev.id, key, value);
-        }
-        ev.key = key;
-        ev.value = value;
-        ev._editing = false;
-        cfgRenderEnvVarsList();
-        showToast('环境变量保存成功', 'success');
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
+    const dup = cfgEnvVarsData.some((ev, i) => i !== idx && (ev.key || '').trim() === key);
+    if (dup) { showToast('已存在相同变量名', 'error'); return; }
+
+    const ev = cfgEnvVarsData[idx];
+    ev.key = key;
+    ev.value = value;
+    ev._editing = false;
+    ev._isNew = false;
+    cfgRenderEnvVarsList();
 }
 
-async function cfgDeleteEnvVar(idx) {
-    if (!confirm('确定删除该环境变量？')) return;
-    try {
-        const ev = cfgEnvVarsData[idx];
-        if (ev.id) {
-            await clientAPI.deleteEnvVar(cfgClientId, ev.id);
-        }
-        cfgEnvVarsData.splice(idx, 1);
-        cfgRenderEnvVarsList();
-        showToast('环境变量已删除', 'success');
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
+function cfgDeleteEnvVar(idx) {
+    if (!confirm('确定删除该环境变量？（需点击右上角保存后生效）')) return;
+    cfgEnvVarsData.splice(idx, 1);
+    cfgRenderEnvVarsList();
 }
 
 // ---- 代码仓库管理 ----
 
 function cfgRenderReposTab() {
     const addBtn = document.getElementById('cfg-add-repo-btn');
-    const saveBtn = document.getElementById('cfg-repos-save-btn');
     const isView = (cfgClientMode === 'view');
 
     if (addBtn) {
@@ -1015,10 +825,6 @@ function cfgRenderReposTab() {
             cfgReposList.push({ desc: '', url: '', token: '', default_branch: '', branch_prefix: 'ai_', docs_repo: isFirst });
             cfgRenderReposWaterfall();
         };
-    }
-    if (saveBtn) {
-        saveBtn.style.display = (isView || cfgClientId === null) ? 'none' : '';
-        saveBtn.onclick = cfgSaveRepos;
     }
 
     cfgRenderReposWaterfall();
@@ -1104,16 +910,6 @@ function cfgRemoveRepo(index) {
     cfgRenderReposWaterfall();
 }
 
-async function cfgSaveRepos() {
-    if (!cfgClientId) { showToast('请先保存基本信息', 'error'); return; }
-    try {
-        await clientAPI.updateRepos(cfgClientId, cfgReposList);
-        showToast('仓库配置保存成功', 'success');
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
-}
-
 // ===== 任务管理 =====
 
 // 初始化任务筛选控件
@@ -1140,33 +936,11 @@ function initTaskFilter() {
     });
 }
 
-// 启动任务列表自动刷新
-function startTasksAutoRefresh() {
-    // 清除已存在的定时器
-    stopTasksAutoRefresh();
-    
-    // 每10秒刷新一次
-    tasksRefreshTimer = setInterval(() => {
-        loadTasks();
-    }, 10000);
-}
-
-// 停止任务列表自动刷新
-function stopTasksAutoRefresh() {
-    if (tasksRefreshTimer) {
-        clearInterval(tasksRefreshTimer);
-        tasksRefreshTimer = null;
-    }
-}
-
 async function loadTasks() {
     try {
         const result = await taskAPI.list();
         let allTasks = result.data || [];
-        
-        // 检测 flow_status 变化并发送通知（使用全部任务，不受筛选影响）
-        checkFlowStatusChanges(allTasks);
-        
+
         // 根据状态筛选（仅用于显示）
         let tasks = allTasks;
         if (currentStatusFilter.length > 0) {
@@ -1240,27 +1014,10 @@ function renderTasks(tasks) {
     `}).join('');
 }
 
-// 解析任务desc为结构化数据（兼容历史数据）
-function parseTaskDesc(desc) {
-    if (!desc) return { links: [], desc: '' };
-    try {
-        const parsed = JSON.parse(desc);
-        return {
-            links: Array.isArray(parsed.links) ? parsed.links : [],
-            desc: typeof parsed.desc === 'string' ? parsed.desc : ''
-        };
-    } catch (e) {
-        // JSON解析失败，作为纯文本处理
-        return { links: [], desc: desc };
-    }
-}
-
 // 统一的任务编辑弹窗状态
 let taskEditCurrentId = null;  // null 表示新建模式
 let taskEditMode = false;      // false 表示查看模式，true 表示编辑模式
-let taskEditLinks = [];
-let taskEditDesc = '';
-let usableClientsCache = [];   // 可用于创建任务的客户端列表
+let usableClientsCache = [];   // 客户端列表（用于任务创建/编辑）
 
 // 显示统一的任务编辑弹窗（创建或编辑）
 async function showTaskEditModal(taskId = null, startInEditMode = false) {
@@ -1274,24 +1031,19 @@ async function showTaskEditModal(taskId = null, startInEditMode = false) {
             return;
         }
         
-        const parsedDesc = parseTaskDesc(task.desc);
-        taskEditLinks = [...parsedDesc.links];
-        taskEditDesc = parsedDesc.desc;
         taskEditMode = startInEditMode;  // 默认查看模式
         
         renderTaskEditModal(task);
     } else {
         // 创建模式 - 初始化空数据并获取可用客户端列表
-        taskEditLinks = [];
-        taskEditDesc = '';
         taskEditMode = true;  // 创建模式始终是编辑模式
         
-        // 获取可用客户端列表
+        // 获取客户端列表
         try {
-            const result = await clientAPI.listUsable();
+            const result = await clientAPI.list();
             usableClientsCache = result.data || [];
         } catch (error) {
-            console.warn('获取可用客户端列表失败:', error);
+            console.warn('获取客户端列表失败:', error);
             usableClientsCache = [];
         }
         
@@ -1309,12 +1061,12 @@ async function enterTaskEditMode() {
     taskEditMode = true;
     const task = taskEditCurrentId ? (window.tasksCache && window.tasksCache[taskEditCurrentId]) : null;
     if (task) {
-        // 获取可用客户端列表（编辑模式下需要选择客户端）
+        // 获取客户端列表（编辑模式下需要选择客户端）
         try {
-            const result = await clientAPI.listUsable();
+            const result = await clientAPI.list();
             usableClientsCache = result.data || [];
         } catch (error) {
-            console.warn('获取可用客户端列表失败:', error);
+            console.warn('获取客户端列表失败:', error);
             usableClientsCache = [];
         }
         renderTaskEditModal(task);
@@ -1327,9 +1079,6 @@ function cancelTaskEdit() {
         // 编辑模式 - 重置数据并返回查看模式
         const task = window.tasksCache && window.tasksCache[taskEditCurrentId];
         if (task) {
-            const parsedDesc = parseTaskDesc(task.desc);
-            taskEditLinks = [...parsedDesc.links];
-            taskEditDesc = parsedDesc.desc;
             taskEditMode = false;
             renderTaskEditModal(task);
         }
@@ -1354,7 +1103,7 @@ function renderTaskEditModal(task) {
     if (isCreateMode) {
         // 创建模式 - 可编辑的标题和选择框
         const clientOptions = usableClientsCache.map(c =>
-            `<option value="${c.id}" data-types='${JSON.stringify(c.types || [])}'>${escapeHtml(c.name)}</option>`
+            `<option value="${c.id}">${escapeHtml(c.name)}</option>`
         ).join('');
 
         titleInputHtml = `
@@ -1462,76 +1211,6 @@ function renderTaskEditModal(task) {
         `;
     }
     
-    // 链接区域
-    let linksHtml = '';
-    if (isEditing) {
-        // 编辑模式 - 可编辑链接
-        linksHtml = `
-            <div class="form-group">
-                <label>相关链接 <span class="text-muted">(agent执行不会使用)</span></label>
-                <div class="links-editor">
-                    <table class="types-table" id="links-table">
-                        <thead>
-                            <tr>
-                                <th>标题</th>
-                                <th>链接</th>
-                                <th style="width: 80px;">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="links-tbody">
-                            ${taskEditLinks.map((link, index) => `
-                                <tr>
-                                    <td><input type="text" class="link-title-input" data-index="${index}" value="${escapeHtml(link.title || '')}" placeholder="链接标题"></td>
-                                    <td><input type="text" class="link-url-input" data-index="${index}" value="${escapeHtml(link.url || '')}" placeholder="链接地址"></td>
-                                    <td><button type="button" class="btn-small btn-delete" onclick="removeTaskEditLink(${index})">删除</button></td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                    <button type="button" class="btn-small btn-add" onclick="addTaskEditLink()" style="margin-top: 8px;">+ 添加链接</button>
-                </div>
-            </div>
-        `;
-    } else {
-        // 查看模式 - 只读链接
-        const linksContent = taskEditLinks.length > 0
-            ? `<div class="task-links-list">${taskEditLinks.map(link => 
-                `<a href="${escapeHtml(link.url || '#')}" target="_blank" class="task-link-item">${escapeHtml(link.title || link.url || '未命名链接')}</a>`
-            ).join('')}</div>`
-            : '<span class="text-muted">暂无相关链接</span>';
-        
-        linksHtml = `
-            <div class="form-group">
-                <label>相关链接</label>
-                ${linksContent}
-            </div>
-        `;
-    }
-    
-    // 描述区域
-    let descHtml = '';
-    if (isCreateMode || isEditing) {
-        // 创建/编辑模式 - 可编辑描述
-        descHtml = `
-            <div class="form-group">
-                <label>任务描述 <span class="required">*</span></label>
-                <textarea id="task-edit-desc" placeholder="请输入任务描述" required>${escapeHtml(taskEditDesc)}</textarea>
-            </div>
-        `;
-    } else {
-        // 查看模式 - 描述只读
-        const descContent = taskEditDesc 
-            ? `<div class="task-desc-text">${escapeHtml(taskEditDesc)}</div>`
-            : '<span class="text-muted">暂无任务描述</span>';
-        
-        descHtml = `
-            <div class="form-group">
-                <label>任务描述</label>
-                ${descContent}
-            </div>
-        `;
-    }
-    
     // 底部按钮
     let actionsHtml = '';
     if (isCreateMode) {
@@ -1562,8 +1241,6 @@ function renderTaskEditModal(task) {
             <div class="task-edit-scroll">
                 ${titleInputHtml}
                 ${headerInfoHtml}
-                ${isCreateMode ? '' : linksHtml}
-                ${isCreateMode ? '' : descHtml}
             </div>
             ${actionsHtml}
         </div>
@@ -1571,80 +1248,16 @@ function renderTaskEditModal(task) {
     
     openModal(modalTitle, content, 'modal-task-edit');
     
-    // 绑定事件
-    if (isEditing) {
-        bindTaskEditEvents(isCreateMode);
-    }
-}
-
-// 绑定任务编辑弹窗事件
-function bindTaskEditEvents(isCreateMode) {
-    // 绑定链接输入事件
-    document.querySelectorAll('.link-title-input').forEach(input => {
-        input.addEventListener('input', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            if (taskEditLinks[index]) {
-                taskEditLinks[index].title = e.target.value;
-            }
-        });
-    });
-    
-    document.querySelectorAll('.link-url-input').forEach(input => {
-        input.addEventListener('input', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            if (taskEditLinks[index]) {
-                taskEditLinks[index].url = e.target.value;
-            }
-        });
-    });
-    
-    // 创建模式不再需要客户端选择事件，因为任务类型已改为手动输入
-}
-
-// 添加链接
-function addTaskEditLink() {
-    taskEditLinks.push({ title: '', url: '' });
-    const task = taskEditCurrentId ? (window.tasksCache && window.tasksCache[taskEditCurrentId]) : null;
-    renderTaskEditModal(task);
-}
-
-// 删除链接
-function removeTaskEditLink(index) {
-    taskEditLinks.splice(index, 1);
-    const task = taskEditCurrentId ? (window.tasksCache && window.tasksCache[taskEditCurrentId]) : null;
-    renderTaskEditModal(task);
 }
 
 // 保存任务编辑
 async function saveTaskEdit() {
     const isCreateMode = taskEditCurrentId === null;
     
-    // 获取描述内容
-    const descTextarea = document.getElementById('task-edit-desc');
-    if (descTextarea) {
-        taskEditDesc = descTextarea.value;
-    }
-
-    taskEditDesc = (taskEditDesc ?? '').trim();
-    if (!isCreateMode && !taskEditDesc) {
-        showToast('请输入任务描述', 'error');
-        return;
-    }
-
-    // 过滤掉空的链接
-    const validLinks = taskEditLinks.filter(link => link.title || link.url);
-    
-    // 构建desc JSON
-    const descJson = JSON.stringify({
-        links: validLinks,
-        desc: taskEditDesc
-    });
-    
     if (isCreateMode) {
         // 创建模式 - 验证并创建
         const title = document.getElementById('task-edit-title')?.value.trim();
         const clientId = document.getElementById('task-edit-client')?.value;
-        const type = document.getElementById('task-edit-type')?.value.trim();
         
         if (!title) {
             showToast('请输入任务标题', 'error');
@@ -1659,7 +1272,7 @@ async function saveTaskEdit() {
         try {
             const selectedStatus = document.getElementById('task-edit-status')?.value || 'running';
             const parsedClientId = parseInt(clientId);
-            await taskAPI.create(title, type, parsedClientId, descJson, selectedStatus);
+            await taskAPI.create(title, parsedClientId, selectedStatus);
             showToast('任务创建成功', 'success');
             closeModal();
             loadTasks();
@@ -1667,17 +1280,9 @@ async function saveTaskEdit() {
             showToast(error.message, 'error');
         }
     } else {
-        // 编辑模式 - 更新客户端/状态/描述（标题不可编辑）
+        // 编辑模式 - 仅更新状态（标题不可编辑）
         try {
             const newStatus = document.getElementById('task-edit-status')?.value;
-            const newClientId = document.getElementById('task-edit-client')?.value;
-            const parsedClientId = newClientId ? parseInt(newClientId) : 0;
-            
-            // 更新描述（包含相关链接）
-            await taskAPI.updateDesc(taskEditCurrentId, descJson);
-
-            // 更新客户端
-            await taskAPI.updateClient(taskEditCurrentId, parsedClientId);
             
             // 更新状态
             if (newStatus) {
@@ -1688,8 +1293,6 @@ async function saveTaskEdit() {
 
             // 更新缓存
             if (window.tasksCache && window.tasksCache[taskEditCurrentId]) {
-                window.tasksCache[taskEditCurrentId].client_id = parsedClientId;
-                window.tasksCache[taskEditCurrentId].desc = descJson;
                 if (newStatus) {
                     window.tasksCache[taskEditCurrentId].status = newStatus;
                 }
@@ -1732,22 +1335,14 @@ async function resetTask(id) {
     }
 
     try {
-        // 1. 创建新任务（使用原任务的标题、描述、客户端、任务类型）
-        const createResult = await taskAPI.create(
+        // 1. 创建新任务（使用原任务的标题、客户端和状态）
+        await taskAPI.create(
             task.title,
-            task.type,
             task.client_id,
-            task.desc || null
+            task.status || 'pending'
         );
         
-        const newTaskId = createResult.data.id;
-        
-        // 2. 如果原任务状态不是默认的 pending，更新新任务的状态
-        if (task.status && task.status !== 'pending') {
-            await taskAPI.updateStatus(newTaskId, task.status);
-        }
-        
-        // 3. 删除旧任务
+        // 2. 删除旧任务
         await taskAPI.delete(id);
         
         showToast('任务重置成功', 'success');
@@ -1755,68 +1350,6 @@ async function resetTask(id) {
     } catch (error) {
         showToast('任务重置失败：' + error.message, 'error');
         loadTasks(); // 重新加载以刷新列表状态
-    }
-}
-
-// 重试任务：将 flow_status 改为 pending
-async function retryTask(taskId) {
-    try {
-        await taskAPI.updateFlow(taskId, null, 'pending');
-        showToast('任务已重新加入队列', 'success');
-        loadTasks();
-    } catch (error) {
-        showToast('重试失败：' + error.message, 'error');
-    }
-}
-
-// 审核通过任务
-async function approveTask(taskId) {
-    if (!confirm('确定要通过审核吗？')) {
-        return;
-    }
-    
-    try {
-        await taskAPI.review(taskId, 'approve');
-        showToast('审核通过成功', 'success');
-        loadTasks();
-    } catch (error) {
-        showToast('审核通过失败：' + error.message, 'error');
-    }
-}
-
-// 显示修订反馈弹窗
-let reviseTaskId = null;
-
-function showReviseModal(taskId) {
-    reviseTaskId = taskId;
-    const modal = document.getElementById('revise-modal');
-    const textarea = document.getElementById('revise-feedback');
-    textarea.value = '';
-    modal.classList.add('show');
-    textarea.focus();
-}
-
-function hideReviseModal() {
-    const modal = document.getElementById('revise-modal');
-    modal.classList.remove('show');
-    reviseTaskId = null;
-}
-
-async function submitRevise() {
-    const feedback = document.getElementById('revise-feedback').value.trim();
-    
-    if (!feedback) {
-        showToast('请填写反馈内容', 'error');
-        return;
-    }
-    
-    try {
-        await taskAPI.review(reviseTaskId, 'revise', feedback);
-        showToast('已提交修订反馈', 'success');
-        hideReviseModal();
-        loadTasks();
-    } catch (error) {
-        showToast('提交修订失败：' + error.message, 'error');
     }
 }
 
@@ -2362,11 +1895,4 @@ function openTaskChat(taskId) {
 }
 
 // ===== 工具函数 =====
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
 

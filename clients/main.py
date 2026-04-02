@@ -24,6 +24,15 @@ from worker.task_worker import TaskWorker
 from config.config_model import ClientConfig
 
 
+def _configure_log_level(log_level: str) -> None:
+    level_name = (log_level or "INFO").upper()
+    level = getattr(logging, level_name, None)
+    if not isinstance(level, int):
+        raise ValueError(f"Invalid log level: {log_level}")
+    logging.getLogger().setLevel(level)
+    logger.setLevel(level)
+
+
 class ClientRunner:
     """客户端运行器"""
     
@@ -116,7 +125,10 @@ def main():
                         help='Client ID for authentication')
     parser.add_argument('--workspace', '-w', type=str, required=False, default="/workspace",
                         help='工作目录路径，保存客户端执行过程中的缓存数据等文件，必须保证用户对该目录有写权限')
+    parser.add_argument('--log-level', '-l', type=str, required=False, default='INFO',
+                        help='日志等级，例如 DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
+    _configure_log_level(args.log_level)
 
     # 从云端加载客户端配置
     config = ClientConfig(apiserver_url=args.apiserver, client_id=args.client_id, secret=args.secret, workspace=args.workspace)

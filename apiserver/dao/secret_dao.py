@@ -16,36 +16,29 @@ CLOUD_SECRET_NAME = '官方客户端cloud专用'
 
 def get_user_secrets(user_id: int) -> List[UserSecret]:
     """
-    获取用户的有效秘钥列表（deleted=0）。
-    若无任何有效秘钥，则检查用户是否完全没有秘钥记录（含已删除）；
-    如果为空则自动为用户创建 type=cloud 的秘钥。
+    获取用户的有效秘钥列表（deleted_at 为空）。
+    若有效秘钥中不存在 type=cloud，则自动补建一条 cloud 秘钥并返回。
     """
     with get_db_session() as session:
         active_secrets = session.query(UserSecret).filter(
             UserSecret.user_id == user_id,
-            UserSecret.deleted == 0
+            UserSecret.deleted_at.is_(None)
         ).order_by(UserSecret.created_at.asc()).all()
 
-        if active_secrets:
-            return active_secrets
-
-        total_count = session.query(UserSecret).filter(
-            UserSecret.user_id == user_id
-        ).count()
-
-        if total_count == 0:
+        has_cloud_secret = any(secret.type == UserSecret.TYPE_CLOUD for secret in active_secrets)
+        if not has_cloud_secret:
             cloud_secret = UserSecret(
                 user_id=user_id,
                 name=CLOUD_SECRET_NAME,
                 secret=secrets_module.token_hex(32),
                 type=UserSecret.TYPE_CLOUD,
-                deleted=0
+                deleted_at=None
             )
             session.add(cloud_secret)
             session.flush()
-            return [cloud_secret]
+            active_secrets.append(cloud_secret)
 
-        return []
+        return active_secrets
 
 
 def create_user_secret(user_id: int, name: str, secret_type: str = 'personal') -> UserSecret:
@@ -56,28 +49,28 @@ def create_user_secret(user_id: int, name: str, secret_type: str = 'personal') -
             name=name,
             secret=secrets_module.token_hex(32),
             type=secret_type,
-            deleted=0
+            deleted_at=None
         )
         session.add(user_secret)
         session.flush()
         return user_secret
 
 def delete_user_secret(secret_id: int, user_id: int) -> bool:
-    """软删除秘钥（将 deleted 置为 1）"""
+    """软删除秘钥（设置 deleted_at）"""
     with get_db_session() as session:
         affected = session.query(UserSecret).filter(
             UserSecret.id == secret_id,
             UserSecret.user_id == user_id,
-            UserSecret.deleted == 0
-        ).update({UserSecret.deleted: 1})
+            UserSecret.deleted_at.is_(None)
+        ).update({UserSecret.deleted_at: datetime.now(timezone.utc)})
         return affected > 0
 
 def get_user_id_by_secret(secret: str) -> Optional[int]:
-    """通过秘钥查询对应的 user_id（仅查询有效秘钥，deleted=0）"""
+    """通过秘钥查询对应的 user_id（仅查询有效秘钥，deleted_at 为空）"""
     with get_db_session() as session:
         user_secret = session.query(UserSecret).filter(
             UserSecret.secret == secret,
-            UserSecret.deleted == 0
+            UserSecret.deleted_at.is_(None)
         ).first()
         return user_secret.user_id if user_secret else None
 
@@ -87,7 +80,7 @@ def update_secret_last_used_at(secret: str) -> bool:
     with get_db_session() as session:
         affected = session.query(UserSecret).filter(
             UserSecret.secret == secret,
-            UserSecret.deleted == 0
+            UserSecret.deleted_at.is_(None)
         ).update({
             UserSecret.last_used_at: datetime.now(timezone.utc)
         })

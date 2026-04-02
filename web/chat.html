@@ -111,24 +111,6 @@
             background: var(--accent-primary);
         }
 
-        .sidebar-client-types {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            flex-wrap: wrap;
-            margin-bottom: 8px;
-        }
-
-        .sidebar-client-type-tag {
-            font-size: 10px;
-            padding: 2px 7px;
-            border-radius: 4px;
-            background: rgba(163, 113, 247, 0.12);
-            color: var(--accent-purple);
-            border: 1px solid rgba(163, 113, 247, 0.2);
-            font-weight: 500;
-        }
-
         /* New chat btn */
         .new-chat-btn {
             width: 100%;
@@ -1174,7 +1156,6 @@
                 <span class="client-dot"></span>
                 <span id="sidebar-client-name"></span>
             </a>
-            <div class="sidebar-client-types" id="sidebar-client-types" style="display:none;"></div>
             <button class="new-chat-btn" onclick="showNewChatModal()">＋ 新建 Chat</button>
         </div>
 
@@ -1301,6 +1282,6 @@
 
 <script src="js/utils.js?v=3"></script>
 <script src="js/api.js?v=9"></script>
-<script src="js/chat.js?v=5"></script>
+<script src="js/chat.js?v=6"></script>
 </body>
 </html>

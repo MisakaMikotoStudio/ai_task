@@ -192,11 +192,6 @@
                         <h2>客户端</h2>
                         <div class="view-header-right">
                             <div class="filter-group">
-                                <label class="filter-btn">
-                                    <input type="checkbox" id="client-only-mine"> 只看我的
-                                </label>
-                            </div>
-                            <div class="filter-group">
                                 <input type="text" id="client-search-input" placeholder="输入客户端ID搜索" class="search-input">
                                 <button id="client-search-btn" class="btn-secondary btn-small">搜索</button>
                                 <button id="client-search-clear-btn" class="btn-secondary btn-small">清除</button>
@@ -213,8 +208,7 @@
                                     <th>ID</th>
                                     <th>名称</th>
                                     <th>版本号</th>
-                                    <th>创始人</th>
-                                    <th>公开</th>
+                                    <th>创建人</th>
                                     <th>最后心跳</th>
                                     <th>创建时间</th>
                                     <th>操作</th>
@@ -238,6 +232,10 @@
                             <button class="btn-back" id="client-config-back-btn">← 返回</button>
                             <h2 id="client-config-title">客户端配置</h2>
                         </div>
+                        <div class="view-header-right" id="client-config-header-actions" style="display: none;">
+                            <button type="button" class="btn-secondary" id="client-config-cancel-btn">取消</button>
+                            <button type="button" class="btn-primary" id="client-config-save-btn">保存</button>
+                        </div>
                     </div>
                     <div class="config-tabs-nav">
                         <button class="config-tab-btn active" data-config-tab="basic">基本信息</button>
@@ -255,13 +253,6 @@
                                             <input type="text" id="cfg-client-name" placeholder="请输入名称（最多16个字符）" maxlength="16">
                                         </div>
                                         <div class="form-group form-group-quarter">
-                                            <label>是否公开</label>
-                                            <select id="cfg-client-is-public" class="status-select">
-                                                <option value="false">否</option>
-                                                <option value="true">是</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group form-group-quarter">
                                             <label>Agent 类型</label>
                                             <select id="cfg-client-agent" class="status-select"></select>
                                         </div>
@@ -274,9 +265,6 @@
                                                 <option value="1">是</option>
                                             </select>
                                         </div>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button type="submit" class="btn-primary" id="cfg-basic-submit-btn">保存</button>
                                     </div>
                                 </form>
                             </div>
@@ -300,13 +288,10 @@
                         <div id="client-tab-repos" class="config-tab-panel">
                             <div class="config-section">
                                 <div class="config-section-header">
-                                    <label class="text-muted">必须指定一个文档仓库</label>
+                                    <label class="text-muted">须指定唯一文档仓库；完成后点右上角「保存」提交</label>
                                     <button class="btn-primary btn-small" id="cfg-add-repo-btn">+ 添加仓库</button>
                                 </div>
                                 <div class="repos-waterfall" id="cfg-repos-waterfall"></div>
-                                <div class="form-actions" style="margin-top:16px;">
-                                    <button class="btn-primary" id="cfg-repos-save-btn">保存仓库配置</button>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -375,32 +360,14 @@
         </div>
     </div>
     
-    <!-- 修订反馈弹窗 -->
-    <div id="revise-modal" class="revise-modal-overlay">
-        <div class="revise-modal">
-            <div class="revise-modal-header">
-                <h3>提交修订反馈</h3>
-                <button class="modal-close" onclick="hideReviseModal()">&times;</button>
-            </div>
-            <div class="revise-modal-content">
-                <label for="revise-feedback">请输入您的反馈意见：</label>
-                <textarea id="revise-feedback" class="revise-textarea" placeholder="请详细描述需要修订的内容..."></textarea>
-            </div>
-            <div class="revise-modal-footer">
-                <button class="btn-secondary" onclick="hideReviseModal()">取消</button>
-                <button class="btn-primary" onclick="submitRevise()">确认提交</button>
-            </div>
-        </div>
-    </div>
-    
     <!-- Toast通知 -->
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=9"></script>
+    <script src="js/api.js?v=10"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=18"></script>
+    <script src="js/app.js?v=19"></script>
 </body>
 </html>
 
