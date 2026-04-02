@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import or_
 
 from .connection import get_db_session
-from .models import Client, ClientRepo, ClientEnvVar
+from .models import Client, ClientRepo, ClientEnvVar, User
 
 
 def create_client(
@@ -55,15 +55,22 @@ def get_clients_by_user(user_id: int) -> List[dict]:
         客户端字典列表（包含editable）
     """
     with get_db_session() as session:
-        clients = session.query(Client).filter(
+        clients = session.query(
+            Client,
+            User.name.label('creator_name'),
+        ).outerjoin(
+            User,
+            User.id == Client.user_id,
+        ).filter(
             Client.deleted_at.is_(None),
             Client.user_id == user_id,
         ).order_by(Client.created_at.desc()).all()
 
         result = []
-        for client in clients:
+        for client, creator_name in clients:
             data = client.to_dict()
             data['editable'] = (client.user_id == user_id)
+            data['creator_name'] = creator_name
             result.append(data)
         return result
 

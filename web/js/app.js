@@ -419,23 +419,48 @@ function renderClients(clients) {
 
 // 渲染单个客户端行
 function renderClientRow(client) {
+    const isCloudDeploy = Number(client.official_cloud_deploy) === 1;
+    const creatorName = client.creator_name || getCurrentUser()?.name || '-';
+    const heartbeatClass = getHeartbeatClass(client.last_sync_at);
+    const heartbeatText = formatRelativeTime(client.last_sync_at);
     let actionsHtml = '';
     if (client.editable) {
-        actionsHtml = `<button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
+        actionsHtml = `<div class="client-actions">
+            <button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
             <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
-            <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>`;
+            <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>
+        </div>`;
     } else {
         actionsHtml = '<span class="text-muted">只读</span>';
     }
     return `
-    <tr>
-        <td>${client.id}</td>
-        <td><strong>${escapeHtml(client.name)}</strong></td>
-        <td>${client.version ?? '-'}</td>
-        <td>${escapeHtml(client.creator_name || '-')}</td>
-        <td class="time-display ${getHeartbeatClass(client.last_sync_at)}">${formatRelativeTime(client.last_sync_at)}</td>
-        <td class="time-display">${formatDateTime(client.created_at)}</td>
-        <td>${actionsHtml}</td>
+    <tr class="client-row">
+        <td data-label="ID">#${client.id}</td>
+        <td data-label="名称">
+            <div class="client-name-cell">
+                <strong class="client-name-text">${escapeHtml(client.name)}</strong>
+            </div>
+        </td>
+        <td data-label="云部署">
+            <span class="deployment-badge ${isCloudDeploy ? 'cloud' : 'local'}">
+                ${isCloudDeploy ? '官方云' : '自部署'}
+            </span>
+        </td>
+        <td data-label="Agent类型">
+            <span class="agent-badge">${escapeHtml(client.agent || 'claude sdk')}</span>
+        </td>
+        <td data-label="版本号">${client.version ?? '-'}</td>
+        <td data-label="创建人">
+            <span class="client-creator">${escapeHtml(creatorName)}</span>
+        </td>
+        <td data-label="最后心跳">
+            <div class="client-heartbeat ${heartbeatClass}">
+                <span class="client-heartbeat-dot ${heartbeatClass}"></span>
+                <span class="time-display ${heartbeatClass}">${heartbeatText}</span>
+            </div>
+        </td>
+        <td data-label="创建时间" class="time-display">${formatDateTime(client.created_at)}</td>
+        <td data-label="操作">${actionsHtml}</td>
     </tr>
 `;
 }
@@ -476,7 +501,14 @@ async function copyClient(id) {
 let cfgClientId = null;      // null = 新建模式
 let cfgClientMode = 'add';   // 'add' | 'edit' | 'view'
 let cfgReposList = [];
-let cfgEnvVarsData = [];     // 已加载的环境变量列表（含 _editing/_new 标记）
+let cfgEnvVarsData = [];
+
+function cfgResetClientConfigState() {
+    cfgClientId = null;
+    cfgClientMode = 'add';
+    cfgReposList = [];
+    cfgEnvVarsData = [];
+}
 
 function backToClients() {
     switchToView('clients');
@@ -486,10 +518,9 @@ function backToClients() {
 
 // 打开客户端配置页（替代弹窗）
 async function openClientConfig(id, mode) {
+    cfgResetClientConfigState();
     cfgClientId = id;
     cfgClientMode = mode;
-    cfgReposList = [];
-    cfgEnvVarsData = [];
 
     // 切换到 client-config-view
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -521,7 +552,7 @@ async function openClientConfig(id, mode) {
     document.getElementById('client-tab-basic').classList.add('active');
 
     // 返回按钮
-    document.getElementById('client-config-back-btn').onclick = backToClients;
+    document.getElementById('client-config-back-btn').onclick = cfgCancelClientConfig;
 
     const envTab = document.getElementById('tab-btn-env-vars');
     const reposTab = document.getElementById('tab-btn-repos');
@@ -549,7 +580,7 @@ async function openClientConfig(id, mode) {
             const clientResult = await clientAPI.get(id);
             const clientData = clientResult.data;
             cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
-            cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev, _editing: false }));
+            cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev }));
 
             document.getElementById('cfg-client-name').value = clientData.name;
             agentSelect.value = clientData.agent || 'claude sdk';
@@ -593,9 +624,7 @@ function cfgBindClientConfigHeader() {
 }
 
 function cfgCancelClientConfig() {
-    if (cfgClientMode !== 'view') {
-        if (!confirm('确定放弃未保存的修改并返回？')) return;
-    }
+    cfgResetClientConfigState();
     backToClients();
 }
 
@@ -652,8 +681,8 @@ async function cfgUnifiedSaveClient() {
         showToast('客户端名称不能为空', 'error');
         return;
     }
-    if (cfgEnvVarsData.some(ev => ev._isNew || ev._editing)) {
-        showToast('请先完成环境变量的「确定」或取消未填完的变量行', 'error');
+    if (name.length > 16) {
+        showToast('客户端名称最多 16 个字符', 'error');
         return;
     }
     if (cfgEnvVarsData.some(ev => !(ev.key || '').trim())) {
@@ -677,40 +706,24 @@ async function cfgUnifiedSaveClient() {
 
     try {
         if (cfgClientId === null) {
-            const result = await clientAPI.create(name, {
+            await clientAPI.create(name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
                 env_vars
             });
-            cfgClientId = result.data.id;
-            cfgClientMode = 'edit';
-            document.getElementById('client-config-title').textContent = '编辑客户端';
-            if (result.data.repos) {
-                cfgReposList = result.data.repos.map(r => ({ ...r }));
-            }
-            if (result.data.env_vars) {
-                cfgEnvVarsData = result.data.env_vars.map(ev => ({ ...ev, _editing: false }));
-            }
             showToast('客户端创建成功', 'success');
         } else {
-            const result = await clientAPI.update(cfgClientId, name, {
+            await clientAPI.update(cfgClientId, name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
                 env_vars
             });
-            if (result.data && result.data.repos) {
-                cfgReposList = result.data.repos.map(r => ({ ...r }));
-            }
-            if (result.data && result.data.env_vars) {
-                cfgEnvVarsData = result.data.env_vars.map(ev => ({ ...ev, _editing: false }));
-            }
             showToast('保存成功', 'success');
         }
-        cfgRenderEnvVarsTab();
-        cfgRenderReposTab();
-        loadClients();
+        cfgResetClientConfigState();
+        backToClients();
     } catch (error) {
         showToast(error.message, 'error');
     }
@@ -723,7 +736,7 @@ function cfgRenderEnvVarsTab() {
     const addBtn = document.getElementById('add-env-var-btn');
 
     if (tipEl) {
-        tipEl.textContent = '注意：仅在 docker / cloud 客户端场景下环境变量生效。编辑后请点页面右上角「保存」统一提交。';
+        tipEl.textContent = '注意：仅在 docker私有化部署、官方云部署场景下环境变量才会生效。';
         tipEl.className = 'config-section-tip tip-warn';
     }
 
@@ -740,78 +753,43 @@ function cfgRenderEnvVarsList() {
     const empty = document.getElementById('env-vars-empty');
     if (!list) return;
 
-    const activeVars = cfgEnvVarsData.filter(ev => !ev._deleted);
-
-    if (activeVars.length === 0) {
+    if (cfgEnvVarsData.length === 0) {
         list.innerHTML = '';
         empty.style.display = '';
         return;
     }
     empty.style.display = 'none';
 
-    list.innerHTML = activeVars.map((ev, idx) => {
-        if (ev._editing || ev._isNew) {
-            return `
-            <div class="env-var-row env-var-row-editing" data-idx="${idx}">
-                <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}">
-                <span class="env-var-eq">=</span>
-                <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}">
-                <button type="button" class="btn-action btn-save-sm" onclick="cfgConfirmEnvVarRow(${idx})">确定</button>
-                <button class="btn-action btn-cancel-sm" onclick="cfgCancelEnvVar(${idx})">取消</button>
-            </div>`;
-        }
-        const actions = cfgClientMode !== 'view' ? `
-            <button class="btn-action btn-edit" onclick="cfgEditEnvVar(${idx})">编辑</button>
-            <button class="btn-action btn-delete" onclick="cfgDeleteEnvVar(${idx})">删除</button>` : '';
+    list.innerHTML = cfgEnvVarsData.map((ev, idx) => {
+        const disabledAttr = cfgClientMode === 'view' ? 'disabled' : '';
+        const actions = cfgClientMode !== 'view'
+            ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteEnvVar(${idx})">删除</button>`
+            : '';
         return `
-        <div class="env-var-row" data-idx="${idx}">
-            <span class="env-var-key">${escapeHtml(ev.key)}</span>
+        <div class="env-var-row env-var-row-editing" data-idx="${idx}">
+            <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}" ${disabledAttr}
+                oninput="cfgUpdateEnvVarField(${idx}, 'key', this.value)">
             <span class="env-var-eq">=</span>
-            <span class="env-var-val">${escapeHtml(ev.value || '')}</span>
+            <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}" ${disabledAttr}
+                oninput="cfgUpdateEnvVarField(${idx}, 'value', this.value)">
             <div class="env-var-actions">${actions}</div>
         </div>`;
     }).join('');
 }
 
 function cfgAddEnvVar() {
-    cfgEnvVarsData.push({ id: null, key: '', value: '', _editing: false, _isNew: true });
+    cfgEnvVarsData.push({ id: null, key: '', value: '' });
     cfgRenderEnvVarsList();
 }
 
-function cfgEditEnvVar(idx) {
-    cfgEnvVarsData[idx]._editing = true;
-    cfgRenderEnvVarsList();
-}
-
-function cfgCancelEnvVar(idx) {
-    if (cfgEnvVarsData[idx]._isNew) {
-        cfgEnvVarsData.splice(idx, 1);
-    } else {
-        cfgEnvVarsData[idx]._editing = false;
+function cfgUpdateEnvVarField(idx, field, value) {
+    if (!cfgEnvVarsData[idx]) {
+        return;
     }
-    cfgRenderEnvVarsList();
-}
-
-function cfgConfirmEnvVarRow(idx) {
-    const row = document.querySelector(`.env-var-row[data-idx="${idx}"]`);
-    if (!row) return;
-    const key = row.querySelector('.env-var-key-input').value.trim();
-    const value = row.querySelector('.env-var-val-input').value;
-    if (!key) { showToast('变量名不能为空', 'error'); return; }
-
-    const dup = cfgEnvVarsData.some((ev, i) => i !== idx && (ev.key || '').trim() === key);
-    if (dup) { showToast('已存在相同变量名', 'error'); return; }
-
-    const ev = cfgEnvVarsData[idx];
-    ev.key = key;
-    ev.value = value;
-    ev._editing = false;
-    ev._isNew = false;
-    cfgRenderEnvVarsList();
+    cfgEnvVarsData[idx][field] = value;
 }
 
 function cfgDeleteEnvVar(idx) {
-    if (!confirm('确定删除该环境变量？（需点击右上角保存后生效）')) return;
     cfgEnvVarsData.splice(idx, 1);
     cfgRenderEnvVarsList();
 }
