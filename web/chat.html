@@ -460,19 +460,33 @@
             border: 1px solid rgba(248, 81, 73, 0.2);
         }
 
-        /* Empty / no-select */
-        .chat-no-selection {
+        /* ===== Welcome / New Chat View ===== */
+        .chat-welcome-view {
             flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            padding: 0 24px 80px;
+            gap: 32px;
         }
 
-        .chat-no-selection-icon { font-size: 48px; opacity: 0.2; }
-        .chat-no-selection-text { font-size: 15px; color: var(--text-secondary); font-weight: 500; }
-        .chat-no-selection-sub { font-size: 13px; color: var(--text-muted); }
+        .welcome-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            text-align: center;
+        }
+
+        .welcome-icon { font-size: 40px; opacity: 0.25; }
+        .welcome-title { font-size: 22px; font-weight: 600; color: var(--text-primary); }
+        .welcome-sub { font-size: 14px; color: var(--text-muted); }
+
+        .welcome-composer {
+            width: 100%;
+            max-width: 700px;
+        }
 
         /* Active chat container */
         .chat-active-view {
@@ -1248,11 +1262,31 @@
     <!-- ===== Main ===== -->
     <main class="chat-main">
 
-        <!-- No selection -->
-        <div class="chat-no-selection" id="no-selection-view">
-            <div class="chat-no-selection-icon">💬</div>
-            <div class="chat-no-selection-text">选择或新建一个 Chat</div>
-            <div class="chat-no-selection-sub">在左侧列表点击，或点击「新建 Chat」</div>
+        <!-- Welcome / New Chat view -->
+        <div class="chat-welcome-view" id="welcome-view">
+            <div class="welcome-center">
+                <div class="welcome-icon">✨</div>
+                <div class="welcome-title">有什么可以帮你的？</div>
+                <div class="welcome-sub">在下方输入框输入您的问题</div>
+            </div>
+            <div class="welcome-composer">
+                <div class="composer-box" id="welcome-composer-box">
+                    <textarea
+                        class="composer-textarea"
+                        id="welcome-input"
+                        placeholder="输入消息，发送后自动创建 Chat..."
+                        rows="1"
+                        onkeydown="handleWelcomeInputKeydown(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <div class="composer-footer">
+                        <span class="composer-hint-inline">Ctrl+Enter 发送</span>
+                        <button class="send-btn" id="welcome-send-btn" onclick="sendNewChatMessage()">
+                            <span>↑</span> 发送
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Active chat -->
@@ -1303,26 +1337,6 @@
     </main>
 </div>
 
-<!-- New Chat Modal -->
-<div class="modal-overlay" id="new-chat-modal">
-    <div class="modal-card">
-        <div class="modal-head">
-            <h3>新建 Chat</h3>
-            <button class="modal-close" onclick="closeNewChatModal()">×</button>
-        </div>
-        <form id="new-chat-form" onsubmit="submitNewChat(event)">
-            <div class="modal-form-group">
-                <label>Chat 标题 <span style="color:var(--text-muted)">(最多 32 字符)</span></label>
-                <input type="text" id="new-chat-title" placeholder="请输入 Chat 标题" maxlength="32" required>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-secondary" onclick="closeNewChatModal()">取消</button>
-                <button type="submit" class="btn-primary">创建</button>
-            </div>
-        </form>
-    </div>
-</div>
-
 <!-- Merge Request Detail Modal -->
 <div class="modal-overlay" id="merge-request-modal">
     <div class="mr-modal-card">
@@ -1339,7 +1353,7 @@
 <div class="chat-toast" id="chat-toast"></div>
 
 <script src="js/utils.js?v=3"></script>
-<script src="js/api.js?v=9"></script>
-<script src="js/chat.js?v=6"></script>
+<script src="js/api.js?v=10"></script>
+<script src="js/chat.js?v=7"></script>
 </body>
 </html>
