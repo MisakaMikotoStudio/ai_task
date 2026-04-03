@@ -403,7 +403,7 @@ class Chat(Base):
     updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
 
     __table_args__ = (
-        Index('uk_chat_task_title', 'user_id', 'task_id', 'title', unique=True),
+        Index('idx_chat_task', 'user_id', 'task_id'),
     )
 
     STATUS_PENDING = 'pending'
