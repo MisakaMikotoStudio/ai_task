@@ -6,7 +6,7 @@ ClaudeCodeAgent - 基于 claude-agent-sdk 的 Agent 封装
 
 import json
 import logging
-from typing import Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import anyio
 
@@ -39,7 +39,12 @@ class ClaudeAgentSdkAgent(BaseAgent):
         prompt: str,
         timeout: Optional[int] = 1800,
         session_id: Optional[str] = None,
+        popen_factory: Optional[Callable[..., Any]] = None,
+        process_cleanup: Optional[Callable[[Any], None]] = None,
+        stop_event: Optional[Any] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError(f"[{trace_id}] [{self.name}] 收到停止信号，取消执行")
         return anyio.run(self._async_execute, trace_id, cwd, prompt, timeout, session_id)
 
     async def _async_execute(

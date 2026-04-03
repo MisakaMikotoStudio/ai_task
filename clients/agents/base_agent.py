@@ -4,11 +4,9 @@
 BaseAgent - 所有 Agent 的基类
 """
 
-import json
-import logging
-import os
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
+import logging
+from typing import Any, Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +31,9 @@ class BaseAgent(ABC):
         prompt: str, 
         session_id: Optional[str] = None,
         timeout: Optional[int] = 1800,
+        popen_factory: Optional[Callable[..., Any]] = None,
+        process_cleanup: Optional[Callable[[Any], None]] = None,
+        stop_event: Optional[Any] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         实际执行 prompt 的抽象方法，子类需实现
@@ -43,6 +44,9 @@ class BaseAgent(ABC):
             prompt: 要执行的 prompt
             timeout: 超时时间（秒）
             session_id: 可选会话 ID，用于续接上下文
+            popen_factory: 可选的子进程创建工厂，供 worker 统一托管 subprocess.Popen
+            process_cleanup: 可选的子进程清理回调，在 agent 结束时移除托管记录
+            stop_event: 可选的停止信号，agent 可据此提前终止执行
             
         Returns:
             Tuple[Optional[str], Optional[str]]: 

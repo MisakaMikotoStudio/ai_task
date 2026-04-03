@@ -12,7 +12,7 @@ import json
 import logging
 import subprocess
 import threading
-from typing import Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 from .base_agent import BaseAgent
 
@@ -43,7 +43,58 @@ class ClaudeCodeCliAgent(BaseAgent):
         prompt: str,
         timeout: Optional[int] = 1800,
         session_id: Optional[str] = None,
+        popen_factory: Optional[Callable[..., Any]] = None,
+        process_cleanup: Optional[Callable[[Any], None]] = None,
+        stop_event: Optional[Any] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError(f"[{trace_id}] [{self.name}] 收到停止信号，取消执行")
+        if session_id:
+            reply, result_session_id, error_msg = self._run_once(
+                trace_id=trace_id,
+                cwd=cwd,
+                prompt=prompt,
+                timeout=timeout,
+                session_id=session_id,
+                popen_factory=popen_factory,
+                process_cleanup=process_cleanup,
+                stop_event=stop_event,
+            )
+            if not error_msg:
+                return reply, result_session_id
+
+            logger.warning(
+                f"[{trace_id}] [{self.name}] resume={session_id} 执行失败，"
+                f"将忽略旧会话重试一次。错误详情:\n{error_msg}"
+            )
+
+        reply, result_session_id, error_msg = self._run_once(
+            trace_id=trace_id,
+            cwd=cwd,
+            prompt=prompt,
+            timeout=timeout,
+            session_id=None,
+            popen_factory=popen_factory,
+            process_cleanup=process_cleanup,
+            stop_event=stop_event,
+        )
+        if error_msg:
+            return error_msg, result_session_id
+        return reply, result_session_id
+
+    def _run_once(
+        self,
+        trace_id: str,
+        cwd: str,
+        prompt: str,
+        timeout: Optional[int],
+        session_id: Optional[str],
+        popen_factory: Optional[Callable[..., Any]],
+        process_cleanup: Optional[Callable[[Any], None]],
+        stop_event: Optional[Any],
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError(f"[{trace_id}] [{self.name}] 收到停止信号，取消执行")
         cmd = [
             "claude", "-p",
             "--output-format", "stream-json",
@@ -58,8 +109,7 @@ class ClaudeCodeCliAgent(BaseAgent):
             + (f" --resume {session_id}" if session_id else "")
         )
 
-        process = subprocess.Popen(
-            cmd,
+        popen_kwargs = dict(
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -68,6 +118,14 @@ class ClaudeCodeCliAgent(BaseAgent):
             encoding="utf-8",
             errors="replace",
         )
+        if popen_factory is None:
+            process = subprocess.Popen(cmd, **popen_kwargs)
+        else:
+            process = popen_factory(
+                cmd,
+                process_name=f"{self.name}:{trace_id}",
+                **popen_kwargs,
+            )
 
         # prompt 通过 stdin 传入，避免命令行长度限制
         logger.info(f"[{trace_id}] [{self.name}] 发送 prompt: {prompt}")
@@ -78,6 +136,8 @@ class ClaudeCodeCliAgent(BaseAgent):
             logger.error(f"[{trace_id}] [{self.name}] 发送 prompt 失败: {e}")
             process.kill()
             process.wait()
+            if process_cleanup is not None:
+                process_cleanup(process)
             raise e
 
         # 后台线程读取 stderr，防止管道缓冲区满导致死锁
@@ -101,6 +161,8 @@ class ClaudeCodeCliAgent(BaseAgent):
         result_session_id: Optional[str] = None
         result_text: Optional[str] = None
         is_error = False
+        result_subtype: Optional[str] = None
+        stop_reason: Optional[str] = None
         turn_count = 0
 
         try:
@@ -118,7 +180,9 @@ class ClaudeCodeCliAgent(BaseAgent):
 
                 if event_type == "result":
                     result_session_id = event.get("session_id")
-                    is_error = event.get("is_error", False) or event.get("subtype") != "success"
+                    result_subtype = event.get("subtype")
+                    stop_reason = event.get("stop_reason")
+                    is_error = event.get("is_error", False) or result_subtype != "success"
                     result_text = event.get("result")
                     self._log_result(trace_id, event)
 
@@ -143,11 +207,13 @@ class ClaudeCodeCliAgent(BaseAgent):
             if process.poll() is None:
                 process.kill()
             process.wait()
+            if process_cleanup is not None:
+                process_cleanup(process)
 
         if timed_out.is_set():
             error_msg = f"[{trace_id}] [{self.name}] Agent 执行超时 (timeout={timeout}s)"
             logger.error(error_msg)
-            return error_msg, result_session_id
+            return None, result_session_id, error_msg
 
         if process.returncode != 0 and not result_session_id:
             stderr_output = "".join(stderr_lines).strip()
@@ -155,12 +221,27 @@ class ClaudeCodeCliAgent(BaseAgent):
             if stderr_output:
                 error_msg += f"\nstderr: {stderr_output}"
             logger.error(error_msg)
-            return error_msg, None
+            return None, None, error_msg
 
         final_output = (result_text or "").strip()
+
+        if is_error:
+            stderr_output = "".join(stderr_lines).strip()
+            error_msg = (
+                f"[{trace_id}] [{self.name}] CLI 返回失败结果 "
+                f"(subtype={result_subtype or 'unknown'}, stop_reason={stop_reason or 'N/A'}, "
+                f"session_id={result_session_id or 'N/A'}, returncode={process.returncode})"
+            )
+            if final_output:
+                error_msg += f"\nresult: {final_output}"
+            if stderr_output:
+                error_msg += f"\nstderr: {stderr_output}"
+            logger.error(error_msg)
+            return None, result_session_id, error_msg
+
         logger.info(f"[{trace_id}] [{self.name}] 调用完毕, session_id: {result_session_id},"
                     f"reply:\n***************\n{final_output}\n***************\n")
-        return final_output, result_session_id
+        return final_output, result_session_id, None
 
     # ==================== 日志方法 ====================
 

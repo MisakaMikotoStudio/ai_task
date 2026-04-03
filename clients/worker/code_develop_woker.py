@@ -262,8 +262,7 @@ class CodeDevelopWorker(BaseWorker):
         """执行节点逻辑 - 待处理"""
         prompt = self._build_development_prompt()
         session_id = self.task.get("session_id") or ""
-        reply, session_id = self.agent.run_prompt(
-            trace_id=self.trace_id,
+        reply, session_id = self.run_agent_prompt(
             cwd=self.work_dir,
             prompt=prompt,
             session_id=session_id,
@@ -340,8 +339,7 @@ class CodeDevelopWorker(BaseWorker):
 - 如果冲突无法解决，执行 `git rebase --abort` 回退
 - rebase --continue 时必须使用 `GIT_EDITOR=true` 前缀，避免打开交互式编辑器"""
 
-        _reply, _session_id = self.client_config.agent.run_prompt(
-            trace_id=self.trace_id,
+        _reply, _session_id = self.run_agent_prompt(
             cwd=work_repo_dir,
             prompt=prompt,
         )

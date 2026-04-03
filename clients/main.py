@@ -70,6 +70,10 @@ class ClientRunner:
                 # 任务不在 running tasks 中，停止线程并清理
                 logger.info(f"任务 {task_key} 已不在运行列表中，停止线程")
                 thread.stop()
+                thread.join(timeout=10)
+                if thread.is_alive():
+                    logger.warning(f"任务线程 {task_key} 停止超时，暂不移除，等待下轮清理")
+                    continue
                 keys_to_remove.append(task_key)
         
         for key in keys_to_remove:
@@ -89,7 +93,7 @@ class ClientRunner:
                     if not item.get('chat_messages'):
                         logger.error(f"任务 task_id={item.get('task_id')} 的 chat_id={item.get('chat_id')} 没有消息，跳过处理")
                         continue
-                    item["key"] = f"task_{item.get('task_id')}_chat_{item.get('chat_id')}_msg_{item.get('chat_messages')[-1]['id']}"
+                    item["key"] = f"task_{item.get('task_id')}_chat_{item.get('chat_id')}"
                 running_task_keys = {task['key'] for task in running_chat_messages}
                 # 清理已结束的线程，以及不在 running tasks 中的任务
                 self.cleanup_finished_threads(running_task_keys)
@@ -113,6 +117,7 @@ class ClientRunner:
         for task_key, thread in self.task_threads.items():
             logger.info(f"停止任务线程: {task_key}")
             thread.stop()
+            thread.join(timeout=5)
 
 
 def main():

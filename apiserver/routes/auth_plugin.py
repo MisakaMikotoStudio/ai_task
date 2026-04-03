@@ -7,6 +7,8 @@
 2. Secret认证（X-Client-Secret）- 用于客户端
 """
 
+import json
+
 from flask import request, jsonify, current_app
 
 from dao import session_dao, user_dao
@@ -32,10 +34,53 @@ def _is_skip_auth_endpoint() -> bool:
     return bool(view_func and getattr(view_func, '_skip_auth', False))
 
 
+def _request_body_for_log():
+    """提取用于日志的请求体/参数摘要（不记录文件内容）。"""
+    if request.method in ('GET', 'HEAD', 'OPTIONS', 'TRACE'):
+        args = dict(request.args)
+        return args if args else None
+    ct = (request.content_type or '') or ''
+    if 'multipart/form-data' in ct:
+        fields = request.form.to_dict()
+        return {'_multipart': True, 'fields': fields} if fields else {'_multipart': True}
+    if request.is_json:
+        return request.get_json(silent=True)
+    if request.form:
+        return request.form.to_dict()
+    raw = request.get_data(cache=True)
+    if not raw:
+        return None
+    try:
+        text = raw.decode('utf-8', errors='replace')
+    except Exception:
+        return f'<binary {len(raw)} bytes>'
+    if len(text) > 4096:
+        return text[:4096] + '...(truncated)'
+    try:
+        return json.loads(text)
+    except Exception:
+        return text
+
+
 def _do_auth_check():
     """执行鉴权逻辑（支持 Token 和 Secret 两种方式）"""
     trace_id = get_trace_id()
     request.trace_id = trace_id
+
+    try:
+        body = _request_body_for_log()
+        body_repr = json.dumps(body, ensure_ascii=False, default=str) if body is not None else ''
+    except Exception as e:
+        body_repr = f'<body_log_error: {e}>'
+    if len(body_repr) > 8192:
+        body_repr = body_repr[:8192] + '...(truncated)'
+    logger.info(
+        '需要登录验证的请求 method=%s path=%s body=%s',
+        request.method,
+        request.path,
+        body_repr,
+        extra={'trace_id': trace_id},
+    )
 
     # 优先检查 Secret 认证
     secret = request.headers.get('X-Client-Secret')
