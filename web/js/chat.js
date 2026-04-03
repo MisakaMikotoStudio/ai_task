@@ -112,7 +112,11 @@ async function loadChats() {
         chatsCache = res.data || [];
         renderChatList();
 
-        if (chatsCache.length === 0) return;
+        if (chatsCache.length === 0) {
+            document.getElementById('welcome-view').style.display = 'flex';
+            document.getElementById('active-view').style.display = 'none';
+            return;
+        }
 
         const hasCurrentChat = currentChatId && chatsCache.some(chat => chat.id === currentChatId);
         const targetChatId = hasCurrentChat ? currentChatId : chatsCache[0].id;
@@ -154,7 +158,7 @@ async function selectChat(chatId) {
     currentChatId = chatId;
     stopPolling();
 
-    document.getElementById('no-selection-view').style.display = 'none';
+    document.getElementById('welcome-view').style.display = 'none';
     document.getElementById('active-view').style.display = 'flex';
 
     const chat = chatsCache.find(c => c.id === chatId);
@@ -543,32 +547,42 @@ async function terminateMessage() {
     }
 }
 
-// ===== New Chat modal =====
+// ===== New Chat (show welcome view) =====
 function showNewChatModal() {
-    document.getElementById('new-chat-modal').classList.add('show');
-    setTimeout(() => document.getElementById('new-chat-title').focus(), 80);
+    stopPolling();
+    currentChatId = null;
+    document.getElementById('welcome-view').style.display = 'flex';
+    document.getElementById('active-view').style.display = 'none';
+    renderChatList();
+    setTimeout(() => {
+        const input = document.getElementById('welcome-input');
+        if (input) input.focus();
+    }, 80);
 }
 
-function closeNewChatModal() {
-    document.getElementById('new-chat-modal').classList.remove('show');
-    document.getElementById('new-chat-title').value = '';
-}
+// ===== Send from welcome view (auto-create chat + message) =====
+async function sendNewChatMessage() {
+    const input = document.getElementById('welcome-input');
+    const text = input.value.trim();
+    if (!text) return;
 
-async function submitNewChat(e) {
-    e.preventDefault();
-    const title = document.getElementById('new-chat-title').value.trim();
-    if (!title) return;
+    const btn = document.getElementById('welcome-send-btn');
+    btn.disabled = true;
+
     try {
-        const res = await chatAPI.createChat(taskId, title);
-        closeNewChatModal();
+        const res = await chatAPI.createChatWithMessage(taskId, text);
+        input.value = '';
+        autoResize(input);
+        const chatId = res.data.chat.id;
         await loadChats();
-        await selectChat(res.data.id);
-        showToast('Chat 创建成功', 'success');
-    } catch (err) {
-        showToast(err.message, 'error');
+        await selectChat(chatId);
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
     }
 }
 
-document.getElementById('new-chat-modal').addEventListener('click', function (e) {
-    if (e.target === this) closeNewChatModal();
-});
+function handleWelcomeInputKeydown(e) {
+    if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendNewChatMessage(); }
+}

@@ -368,6 +368,14 @@ const chatAPI = {
         return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, {
             method: 'DELETE'
         });
+    },
+
+    // 自动创建Chat并发送消息（Chat标题取输入内容前32字符）
+    async createChatWithMessage(taskId, input, extra = {}) {
+        return request(`/chat/task/${taskId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ input, extra })
+        });
     }
 };
 

@@ -77,6 +77,43 @@ def delete_chat_api(task_id, chat_id):
     return jsonify({'code': 200, 'message': '删除成功'})
 
 
+@chat_bp.route('/task/<int:task_id>/messages', methods=['POST'])
+def create_chat_and_message_api(task_id):
+    """自动创建Chat并发送消息（Chat标题取输入内容前32字符）"""
+    if not get_task_by_id(task_id=task_id, user_id=request.user_info.id):
+        return jsonify({'code': 400, 'message': '任务不存在'}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    input_text = data.get('input', '').strip()
+    if not input_text:
+        return jsonify({'code': 400, 'message': '输入内容不能为空'}), 400
+
+    title = input_text[:32]
+    extra = data.get('extra', {})
+
+    chat = create_chat(user_id=request.user_info.id, task_id=task_id, title=title)
+    msg = create_chat_message(
+        user_id=request.user_info.id,
+        task_id=task_id,
+        chat_id=chat.id,
+        input_text=input_text,
+        extra=extra,
+    )
+    update_chat_status(user_id=request.user_info.id, chat_id=chat.id, task_id=task_id, status='pending')
+
+    return jsonify({
+        'code': 201,
+        'message': '创建成功',
+        'data': {
+            'chat': chat.to_dict(),
+            'message': msg.to_dict()
+        }
+    }), 201
+
+
 @chat_bp.route('/task/<int:task_id>/chats/<int:chat_id>/messages', methods=['GET'])
 def list_messages(task_id, chat_id):
     """获取Chat的消息列表"""
