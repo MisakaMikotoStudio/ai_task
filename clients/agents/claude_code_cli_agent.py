@@ -44,6 +44,31 @@ class ClaudeCodeCliAgent(BaseAgent):
         timeout: Optional[int] = 1800,
         session_id: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
+        original_session_id = session_id
+        result_text, result_session_id = self._run_once(trace_id, cwd, prompt, timeout, session_id)
+
+        # 如果携带 session_id 执行失败（0 轮次，空回复），说明 session 已失效，自动重试
+        if original_session_id and not result_text:
+            logger.warning(
+                f"[{trace_id}] [{self.name}] resume={original_session_id} 执行失败（空回复），"
+                f"自动重试（不带 session_id）..."
+            )
+            result_text, result_session_id = self._run_once(trace_id, cwd, prompt, timeout, session_id=None)
+
+        final_output = (result_text or "").strip()
+        logger.info(f"[{trace_id}] [{self.name}] 调用完毕, session_id: {result_session_id},"
+                    f"reply:\n***************\n{final_output}\n***************\n")
+        return final_output, result_session_id
+
+    def _run_once(
+        self,
+        trace_id: str,
+        cwd: str,
+        prompt: str,
+        timeout: Optional[int],
+        session_id: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """执行一次 Claude CLI 调用，返回 (result_text, result_session_id)。"""
         cmd = [
             "claude", "-p",
             "--output-format", "stream-json",
@@ -157,10 +182,7 @@ class ClaudeCodeCliAgent(BaseAgent):
             logger.error(error_msg)
             return error_msg, None
 
-        final_output = (result_text or "").strip()
-        logger.info(f"[{trace_id}] [{self.name}] 调用完毕, session_id: {result_session_id},"
-                    f"reply:\n***************\n{final_output}\n***************\n")
-        return final_output, result_session_id
+        return result_text, result_session_id
 
     # ==================== 日志方法 ====================
 
