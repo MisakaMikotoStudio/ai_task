@@ -338,6 +338,7 @@ function scheduleAutoSave(id, type, field, value) {
 
 // 自动保存目标
 async function autoSaveObjective(id, field, value) {
+    if (typeof value === 'string' && value.trim() === '') return;
     try {
         const data = {};
         data[field] = value;
@@ -350,6 +351,7 @@ async function autoSaveObjective(id, field, value) {
 
 // 自动保存KR
 async function autoSaveKeyResult(id, field, value) {
+    if (typeof value === 'string' && value.trim() === '') return;
     try {
         const data = {};
         data[field] = value;
