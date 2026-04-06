@@ -83,7 +83,7 @@
                     </a>
                     <a href="#" class="nav-item" data-view="clients">
                         <span class="nav-icon">🖥️</span>
-                        <span>客户端</span>
+                        <span>应用</span>
                     </a>
                     <a href="#" class="nav-item" data-view="secrets">
                         <span class="nav-icon">🔑</span>
@@ -188,7 +188,7 @@
                                     <th>任务id</th>
                                     <th>标题</th>
                                     <th>状态</th>
-                                    <th>客户端</th>
+                                    <th>应用</th>
                                     <th>创建时间</th>
                                     <th>操作</th>
                                 </tr>
@@ -212,18 +212,18 @@
                     </div>
                 </div>
 
-                <!-- 客户端视图 -->
+                <!-- 应用视图 -->
                 <div id="clients-view" class="view">
                     <div class="view-header">
-                        <h2>客户端</h2>
+                        <h2>应用</h2>
                         <div class="view-header-right">
                             <div class="filter-group">
-                                <input type="text" id="client-search-input" placeholder="输入客户端ID搜索" class="search-input">
+                                <input type="text" id="client-search-input" placeholder="输入应用ID搜索" class="search-input">
                                 <button id="client-search-btn" class="btn-secondary btn-small">搜索</button>
                                 <button id="client-search-clear-btn" class="btn-secondary btn-small">清除</button>
                             </div>
                             <button id="add-client-btn" class="btn-primary">
-                                <span>+</span> 添加客户端
+                                <span>+</span> 添加应用
                             </button>
                         </div>
                     </div>
@@ -259,17 +259,17 @@
                         </table>
                         <div id="clients-empty" class="empty-state">
                             <span class="empty-icon">🖥️</span>
-                            <p>暂无客户端</p>
+                            <p>暂无应用</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- 客户端配置页面 -->
+                <!-- 应用配置页面 -->
                 <div id="client-config-view" class="view">
                     <div class="view-header">
                         <div class="view-header-left">
                             <button class="btn-back" id="client-config-back-btn">← 返回</button>
-                            <h2 id="client-config-title">客户端配置</h2>
+                            <h2 id="client-config-title">应用配置</h2>
                         </div>
                         <div class="view-header-right" id="client-config-header-actions" style="display: none;">
                             <button type="button" class="btn-secondary" id="client-config-cancel-btn">取消</button>
@@ -288,7 +288,7 @@
                                 <form id="client-basic-form">
                                     <div class="client-basic-grid">
                                         <div class="form-group client-basic-name">
-                                            <label>客户端名称</label>
+                                            <label>应用名称</label>
                                             <input type="text" id="cfg-client-name" placeholder="请输入名称（最多16个字符）" maxlength="16">
                                         </div>
                                         <div class="form-group client-basic-agent">
