@@ -74,6 +74,11 @@ class CodeDevelopWorker(BaseWorker):
         return os.path.join(self.work_dir, "claude.md")
 
     @property
+    def develop_guidance_file_path(self) -> str:
+        """开发规范文件路径"""
+        return os.path.join(self.work_dir, "develop_guidance.md")
+
+    @property
     def develop_plan_example_file_path(self) -> str:
         """开发计划示例文件路径"""
         return os.path.join(self.work_dir, "develop_plan_example.md")
@@ -355,6 +360,7 @@ class CodeDevelopWorker(BaseWorker):
         """构建跨多项目开发 prompt"""
         develop_file_exists = os.path.exists(self.develop_file_path)
         knowledge_file_exists = os.path.exists(self.knowledge_file_path)
+        guidance_file_exists = os.path.exists(self.develop_guidance_file_path)
         has_chat_history = len(self.task.get("chat_messages", [])) > 1
 
         sections = []
@@ -369,26 +375,29 @@ class CodeDevelopWorker(BaseWorker):
         # ===== 2. 工作环境 =====
         sections.append(
             f"## 工作环境\n\n"
-            f"- **工作目录**: `{self.work_dir}`\n"
+            f"- **工作目录**: `{self.work_dir}`（非 git 仓库，下面的子文件夹才是独立 git 仓库）\n"
             f"- **文档目录**: `{self.docs_dir}`\n"
-            f"- 工作目录下每个子文件夹是一个独立 git 仓库，所有仓库已切换到正确的开发分支\n\n"
+            f"- 所有仓库已切换到正确的开发分支，禁止切换或新建分支\n\n"
             f"### 项目仓库\n\n"
             f"{self._build_repo_info_table_for_prompt()}"
         )
 
-        # ===== 3. 对话历史（存在时强制最先阅读，避免模型直接扫仓库/文档目录）=====
+        # ===== 3. 对话历史（存在时强制最先阅读）=====
         if has_chat_history:
             sections.append(
                 "## 对话历史（必须最先完成）\n\n"
-                f"除当前这条「用户需求」外，先前轮次的对话已写入 `{self.chat_history_file_path}`（JSON 数组，"
+                f"先前轮次的对话已写入 `{self.chat_history_file_path}`（JSON 数组，"
                 f"每项含 `user_input`、`assistant_output`，按时间顺序）。\n\n"
                 "**在你用工具读取任何其它文件、列举目录、搜索或浏览任一仓库代码之前**，必须先读取该文件全文，"
-                "理清历史语境（例如用户说「重试」「改一下」时具体所指），再结合本轮用户需求理解任务；"
-                "完成后再读下方「前置阅读」中的其余材料并执行后续步骤。"
+                "理清历史语境（例如用户说「重试」「改一下」时具体所指），再结合本轮用户需求理解任务。"
             )
 
-        # ===== 4. 前置阅读（对话历史条目与上一节呼应，便于扫清单时不遗漏）=====
+        # ===== 4. 前置阅读 =====
         read_items = []
+        if guidance_file_exists:
+            read_items.append(
+                f"- **开发规范** `{self.develop_guidance_file_path}` — 编码必须遵守的统一规范（数据库设计、日志、接口、安全等），**编码前必须先读取**"
+            )
         if knowledge_file_exists:
             read_items.append(
                 f"- **知识库** `{self.knowledge_file_path}` — 项目背景、架构设计、已有约定"
@@ -398,42 +407,42 @@ class CodeDevelopWorker(BaseWorker):
                 f"- **开发文档** `{self.develop_file_path}` — 已有的需求描述和技术方案"
             )
         if read_items:
-            preface = (
-                "## 前置阅读（编码前须完成）\n\n"
+            sections.append(
+                "## 前置阅读（编码前须完成）\n\n" + "\n".join(read_items)
             )
-            sections.append(preface + "\n".join(read_items))
 
         # ===== 5. 强制约束 =====
-        sections.append(
-            "## 强制约束\n\n"
-            "1. **禁止切换或新建 git 分支** — 所有仓库已在正确的开发分支，直接在当前分支开发\n"
-            "2. **禁止在主分支（main/master）上提交任何变更**\n"
-            "3. **需求累积记录** — 更新开发文档「需求内容」章节时追加新内容，不得覆盖或删除已有需求\n"
-            f"4. **强制产出开发文档** — 无论用户需求是否涉及实际代码改动（例如咨询、介绍、分析类问题），都必须创建或更新 `{self.develop_file_path}`，并将本次需求、分析过程、执行结论完整记录到文档中"
+        constraints = [
+            "**禁止切换或新建 git 分支** — 所有仓库已在正确的开发分支，直接在当前分支开发",
+            "**禁止在主分支（main/master）上提交任何变更**",
+            "**需求累积记录** — 更新开发文档「需求内容」章节时追加新内容，不得覆盖或删除已有需求",
+            f"**强制产出开发文档** — 无论用户需求是否涉及实际代码改动（例如咨询、介绍、分析类问题），都必须创建或更新 `{self.develop_file_path}`，并将本次需求、分析过程、执行结论完整记录到文档中",
+        ]
+        if guidance_file_exists:
+            constraints.append(
+                f"**遵守开发规范** — 所有代码必须符合 `{self.develop_guidance_file_path}` 中的规范要求，如当前任务与规范冲突需在开发文档中说明原因"
+            )
+        constraints.append(
+            "**待确认事项必须返回** — 如果需求信息不足需要用户补充，除了在开发文档「待确认事项」章节记录外，"
+            "还必须在你的最终回复中明确列出所有待确认问题，确保调用方第一时间看到"
         )
+        numbered_constraints = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(constraints))
+        sections.append(f"## 强制约束\n\n{numbered_constraints}")
 
-        # ===== 6. 执行步骤（先拼步骤列表再统一编号，避免 develop_file × chat_history 四分支重复）=====
-        commit_step = (
-            "**提交并推送变更** — 开发完成后，对每个有改动的仓库执行 `git add -A && git commit && git push`，"
-            "commit message 用英文简要概括本次改动内容（不要使用固定模板，根据实际修改编写），"
-            "格式示例：`feat: add email verification for user registration`"
-        )
-        sync_doc_step = (
-            f"**同步文档** — 开发或分析过程中如有调整，同步更新 `{self.develop_file_path}`；"
-            f"对照模板 `{self.develop_plan_example_file_path}` 检查章节与结构，缺失则补齐、明显偏离则酌情调整，"
-            f"确保最终文档完整反映本次执行过程与结果"
-        )
-        exec_step = (
-            f"**执行开发或分析** — 按 `{self.develop_file_path}` 中的技术方案进行编码；"
-            f"若无需编码，则完成必要的项目分析并形成结论"
-        )
-
+        # ===== 6. 执行步骤 =====
         step_bodies: List[str] = []
+
         if has_chat_history:
             step_bodies.append(
                 f"**读取对话历史** — 打开并阅读 `{self.chat_history_file_path}` 全文，结合上文「用户需求」理解任务；"
-                f"未完成前不得浏览各仓库或读取知识库/开发文档。"
+                f"未完成前不得浏览各仓库或读取其他文档"
             )
+
+        if guidance_file_exists:
+            step_bodies.append(
+                f"**读取开发规范** — 阅读 `{self.develop_guidance_file_path}`，理解项目的编码标准和约定，后续编码严格遵守"
+            )
+
         if develop_file_exists:
             step_bodies.append(
                 f"**更新需求文档** — 在 `{self.develop_file_path}` 的「需求内容」章节追加本次用户需求（即使是咨询/介绍类需求也必须记录）"
@@ -446,12 +455,24 @@ class CodeDevelopWorker(BaseWorker):
                 f"**创建开发文档** — 参照模板 `{self.develop_plan_example_file_path}`，"
                 f"创建 `{self.develop_file_path}`，完整记录用户需求和技术方案"
             )
-        step_bodies.append(exec_step)
-        step_bodies.append(sync_doc_step)
-        step_bodies.append(commit_step)
 
-        numbered = "\n".join(f"{i + 1}. {body}" for i, body in enumerate(step_bodies))
-        sections.append(f"## 执行步骤\n\n{numbered}")
+        step_bodies.append(
+            f"**执行开发或分析** — 按 `{self.develop_file_path}` 中的技术方案进行编码；"
+            f"若无需编码，则完成必要的项目分析并形成结论"
+        )
+        step_bodies.append(
+            f"**同步文档与进度** — 开发过程中持续更新 `{self.develop_file_path}`："
+            f"对照模板 `{self.develop_plan_example_file_path}` 检查章节完整性，"
+            f"缺失则补齐；每完成一个步骤更新「开发进度」章节的状态"
+        )
+        step_bodies.append(
+            "**提交并推送变更** — 开发完成后，对每个有改动的仓库执行 `git add -A && git commit && git push`，"
+            "commit message 用英文简要概括本次改动内容（不要使用固定模板，根据实际修改编写），"
+            "格式示例：`feat: add email verification for user registration`"
+        )
+
+        numbered_steps = "\n".join(f"{i + 1}. {body}" for i, body in enumerate(step_bodies))
+        sections.append(f"## 执行步骤\n\n{numbered_steps}")
 
         return "\n\n---\n\n".join(sections) + "\n"
 
