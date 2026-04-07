@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商城 - AI Task Manager</title>
+    <link rel="stylesheet" href="css/style.css?v=1">
+    <style>
+        /* ── 商城专用样式 ─────────────────────────────────────── */
+        .shop-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 24px;
+            background: var(--bg-card, #fff);
+            border-bottom: 1px solid var(--border-color, #e5e7eb);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .shop-nav .nav-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--primary, #4f46e5);
+            text-decoration: none;
+        }
+        .shop-nav .nav-links a {
+            margin-left: 16px;
+            color: var(--text-secondary, #6b7280);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .shop-nav .nav-links a:hover { color: var(--primary, #4f46e5); }
+        .shop-nav .nav-right { display: flex; align-items: center; gap: 8px; }
+
+        /* ── 商品网格 ─────────────────────────────────────────── */
+        .products-section { padding: 32px 24px; max-width: 1100px; margin: 0 auto; }
+        .products-section h2 { margin-bottom: 20px; font-size: 22px; }
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 20px;
+        }
+        .product-card {
+            background: var(--bg-card, #fff);
+            border: 1px solid var(--border-color, #e5e7eb);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            transition: box-shadow .2s;
+        }
+        .product-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+        .product-icon { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; }
+        .product-icon-placeholder { width: 100%; height: 140px; background: #f3f4f6; border-radius: 8px; }
+        .product-title { font-size: 16px; font-weight: 600; margin: 0; }
+        .product-desc { font-size: 13px; color: var(--text-secondary, #6b7280); flex: 1; }
+        .product-meta { display: flex; justify-content: space-between; align-items: center; }
+        .product-price { font-size: 20px; font-weight: 700; color: var(--primary, #4f46e5); }
+        .product-expire { font-size: 12px; color: var(--text-secondary, #6b7280); }
+        .product-actions { display: flex; gap: 8px; }
+        .product-actions button { flex: 1; padding: 8px; border-radius: 8px; font-size: 14px; cursor: pointer; border: none; }
+        .buy-btn { background: var(--primary, #4f46e5); color: #fff; }
+        .buy-btn:hover { opacity: .9; }
+        .renew-btn { background: var(--bg-secondary, #f3f4f6); color: var(--text, #111); }
+        .renew-btn:hover { background: #e5e7eb; }
+        .loading-tip, .empty-tip, .error-tip { text-align: center; padding: 40px; color: var(--text-secondary, #6b7280); }
+
+        /* ── 管理面板 ─────────────────────────────────────────── */
+        .admin-section { padding: 24px; max-width: 1100px; margin: 0 auto; }
+        .admin-section h2 { font-size: 18px; margin-bottom: 12px; }
+        #admin-panel { margin-top: 12px; }
+        .admin-block {
+            background: var(--bg-card, #fff);
+            border: 1px solid var(--border-color, #e5e7eb);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .admin-block h3 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+        .admin-form-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+        .admin-form-row label { font-size: 13px; color: var(--text-secondary, #6b7280); margin-bottom: 4px; display: block; }
+        .admin-form-row input, .admin-form-row textarea, .admin-form-row select {
+            padding: 7px 10px;
+            border: 1px solid var(--border-color, #e5e7eb);
+            border-radius: 6px;
+            font-size: 13px;
+            width: 100%;
+        }
+        .admin-form-col { flex: 1; min-width: 160px; }
+        .form-full { width: 100%; }
+        .admin-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+        }
+        .admin-btn-primary { background: var(--primary, #4f46e5); color: #fff; }
+        .admin-btn-secondary { background: var(--bg-secondary, #f3f4f6); color: var(--text, #111); }
+
+        /* ── 订单表格 ─────────────────────────────────────────── */
+        .orders-table-wrap { overflow-x: auto; }
+        #orders-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        #orders-table th, #orders-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color, #e5e7eb);
+        }
+        #orders-table th { background: var(--bg-secondary, #f9fafb); font-weight: 600; }
+        .status-badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-paid { background: #d1fae5; color: #065f46; }
+        .status-failed { background: #fee2e2; color: #991b1b; }
+        .status-refunded { background: #e5e7eb; color: #374151; }
+        .pagination { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; }
+        .pagination button { padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border-color, #e5e7eb); cursor: pointer; background: #fff; }
+        .pagination button:disabled { opacity: .4; cursor: default; }
+
+        /* ── Toast ───────────────────────────────────────────── */
+        .toast {
+            position: fixed; bottom: 24px; right: 24px;
+            padding: 12px 20px; border-radius: 8px;
+            font-size: 14px; color: #fff; z-index: 9999;
+            animation: fadeIn .2s;
+        }
+        .toast-success { background: #10b981; }
+        .toast-error   { background: #ef4444; }
+        .toast-warn    { background: #f59e0b; }
+        .toast-info    { background: #6366f1; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        @media (max-width: 600px) {
+            .products-grid { grid-template-columns: 1fr; }
+            .admin-form-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="shop-nav">
+        <a href="index.html" class="nav-title">AI Task Manager</a>
+        <div class="nav-links">
+            <a href="index.html">任务管理</a>
+            <a href="shop.html" style="color: var(--primary, #4f46e5); font-weight: 600;">商城</a>
+        </div>
+        <div class="nav-right">
+            <span id="shop-nav-user" style="display:none; font-size:13px; color: var(--text-secondary, #6b7280);">已登录</span>
+            <button id="shop-logout-btn" style="display:none;" class="admin-btn admin-btn-secondary">退出</button>
+            <a id="shop-nav-login" href="index.html" style="font-size:13px;">登录</a>
+        </div>
+    </nav>
+
+    <!-- 商城主内容 -->
+    <div id="shop-content" style="display:none;">
+
+        <!-- 商品列表 -->
+        <section class="products-section">
+            <h2>商品列表</h2>
+            <div id="products-grid" class="products-grid">
+                <p class="loading-tip">加载中…</p>
+            </div>
+        </section>
+
+    </div><!-- /#shop-content -->
+
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/shop.js"></script>
+</body>
+</html>

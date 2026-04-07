@@ -43,23 +43,27 @@ from routes.task import task_bp
 from routes.okr import okr_bp
 from routes.todo import todo_bp
 from routes.chat import chat_bp
+from routes.commercial import commercial_bp
+from routes.admin import admin_bp
 from routes.auth_plugin import register_global_auth, skip_auth
 
 
 def create_app(config: AppConfig) -> Flask:
     """创建Flask应用"""
     app = Flask(__name__, static_folder='../web', static_url_path='')
-    
+
+    # 存储完整配置，供路由层通过 current_app.config['APP_CONFIG'] 访问
+    app.config['APP_CONFIG'] = config
     # 配置 - 直接访问对象属性
     app.config['HEARTBEAT_TIMEOUT_SECONDS'] = config.heartbeat.timeout_seconds
     app.json.ensure_ascii = False  # JSON响应中文不转义
-    
+
     # 启用CORS
     CORS(app, supports_credentials=True)
-    
+
     # 构建 URL 前缀（处理空前缀情况）
     prefix = config.server.url_prefix.rstrip('/') if config.server.url_prefix else ''
-    
+
     # 注册蓝图
     app.register_blueprint(user_bp, url_prefix=f'{prefix}/api/user')
     app.register_blueprint(client_bp, url_prefix=f'{prefix}/api/client')
@@ -67,6 +71,8 @@ def create_app(config: AppConfig) -> Flask:
     app.register_blueprint(okr_bp, url_prefix=f'{prefix}/api/okr')
     app.register_blueprint(todo_bp, url_prefix=f'{prefix}/api/todo')
     app.register_blueprint(chat_bp, url_prefix=f'{prefix}/api/chat')
+    app.register_blueprint(commercial_bp, url_prefix=f'{prefix}/api/commercial')
+    app.register_blueprint(admin_bp, url_prefix=f'{prefix}/api/admin')
     register_global_auth(app, api_prefix=f'{prefix}/api')
 
     api_prefix = f'{prefix}/api'

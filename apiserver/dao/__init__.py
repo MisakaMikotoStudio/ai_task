@@ -7,7 +7,8 @@ DAO (Data Access Object) 模块
 
 from .connection import get_db_session, init_connection, remove_session
 from .init_db import init_database
-from .models import User, Client, Task
+from .models import User, Client, Task, Product, Order
+from . import product_dao, order_dao
 
 __all__ = [
     'get_db_session',
@@ -16,5 +17,9 @@ __all__ = [
     'init_database',
     'User',
     'Client',
-    'Task'
+    'Task',
+    'Product',
+    'Order',
+    'product_dao',
+    'order_dao',
 ]
