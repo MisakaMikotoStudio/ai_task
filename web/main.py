@@ -10,6 +10,7 @@ import os
 import sys
 
 from flask import Flask, send_from_directory, jsonify, Blueprint
+from werkzeug.exceptions import NotFound
 
 # 配置日志格式
 logging.basicConfig(
@@ -43,21 +44,28 @@ def create_app(config: WebConfig) -> Flask:
             'apiserver': {
                 'host': config.apiserver.host,
                 'path_prefix': config.apiserver.path_prefix
-            }
+            },
         })
     
     # 静态文件路由
     @web_bp.route('/')
     def index():
         return send_from_directory(static_folder, 'index.html')
-    
+
+    @web_bp.route('/admin')
+    def admin():
+        return send_from_directory(static_folder, 'admin.html')
+
     @web_bp.route('/<path:path>')
     def static_files(path):
-        return send_from_directory(static_folder, path)
+        try:
+            return send_from_directory(static_folder, path)
+        except NotFound:
+            return send_from_directory(static_folder, 'index.html')
     
     # 注册蓝图（带或不带前缀）
     app.register_blueprint(web_bp, url_prefix=url_prefix if url_prefix else None)
-    
+
     return app
 
 

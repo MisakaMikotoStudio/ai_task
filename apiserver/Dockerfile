@@ -20,5 +20,6 @@ RUN pip install  --retries 10 "werkzeug>=2.0.0"
 RUN pip install  --retries 10 "pymysql>=1.0.0"
 RUN pip install  --retries 10 "sqlalchemy>=2.0.0"
 RUN pip install  --retries 10 "tomli>=2.0.0"
+RUN pip install  --retries 10 "cryptography>=42.0.0"
 
 COPY . /app

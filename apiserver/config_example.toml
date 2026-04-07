@@ -21,3 +21,40 @@ username = "xxx"
 password = "xxxx"
 # 数据库名
 database = "xxx"
+
+# 管理员静态 Token（用于 /api/admin 路由鉴权，通过 X-Admin-Token 请求头传递）
+admin_token = "your-admin-token-here"
+
+[alipay]
+# 支付宝应用 ID
+app_id = "your-alipay-app-id"
+# 应用 RSA2 私钥（PKCS8 格式，不含 -----BEGIN/END PRIVATE KEY----- 头尾，无换行）
+app_private_key = "your-app-private-key"
+# 支付宝公钥（不含头尾，无换行）
+alipay_public_key = "your-alipay-public-key"
+# 支付宝异步通知回调 URL（必须公网可访问）
+notify_url = "https://your-domain.com/api/commercial/alipay/notify"
+# 支付完成后同步跳转 URL
+return_url = "https://your-domain.com/pay/result"
+# 支付宝网关（生产环境）
+gateway = "https://openapi.alipay.com/gateway.do"
+# 是否使用沙箱环境
+sandbox = false
+# 接口内容 AES 加密密钥（Base64 格式，在支付宝开放平台"开发设置-接口加签方式"中获取）
+# 选填。配置后，接口请求/响应的 biz_content 将使用 AES-128-CBC 加密，提升传输安全性。
+# 使用"获取会员手机号"等敏感能力时必填。
+app_encrypt_key = ""
+
+[oss]
+# 是否启用 OSS（腾讯云 COS）
+enabled = false
+# 腾讯云 SecretId
+secret_id = "your-secret-id"
+# 腾讯云 SecretKey
+secret_key = "your-secret-key"
+# 地域
+region = "ap-guangzhou"
+# Bucket 名称（含 AppId 后缀，如 mybucket-1234567890）
+bucket = "your-bucket-1234567890"
+# 公开访问域名前缀
+base_url = "https://your-bucket-1234567890.cos.ap-guangzhou.myqcloud.com"

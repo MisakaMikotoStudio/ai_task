@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台管理 - AI Task</title>
+    <style>
+        :root { --bg:#f3f4f6; --card:#fff; --border:#e5e7eb; --text:#111827; --muted:#6b7280; --primary:#4f46e5; --danger:#dc2626; }
+        * { box-sizing: border-box; }
+        body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+        .hide { display:none !important; }
+        .header { background:var(--card); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
+        .header h1 { margin:0; font-size:18px; }
+        .header a { text-decoration:none; color:var(--primary); font-size:13px; }
+        .auth-wrap { max-width:720px; margin:40px auto; padding:0 16px; }
+        .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+        .row { display:flex; gap:8px; flex-wrap:wrap; }
+        .col { flex:1; min-width:160px; }
+        input, textarea, select, button { font-size:14px; }
+        input, textarea, select { width:100%; border:1px solid var(--border); border-radius:6px; padding:8px; }
+        button { border:0; border-radius:6px; padding:8px 14px; cursor:pointer; }
+        .btn-primary { background:var(--primary); color:#fff; }
+        .btn-secondary { background:#f3f4f6; color:#111827; border:1px solid var(--border); }
+        .btn-danger { background:var(--danger); color:#fff; }
+        .msg { margin-top:10px; color:var(--muted); font-size:13px; }
+        .msg.error { color:var(--danger); }
+
+        .admin-layout { display:grid; grid-template-columns:220px 1fr; min-height:calc(100vh - 57px); }
+        .sidebar { background:var(--card); border-right:1px solid var(--border); padding:12px; }
+        .tab-btn { width:100%; text-align:left; border:1px solid var(--border); border-radius:8px; background:#fff; padding:10px 12px; margin-bottom:8px; cursor:pointer; }
+        .tab-btn.active { border-color:var(--primary); color:var(--primary); background:#eef2ff; font-weight:600; }
+        .content { padding:12px; }
+        .section-title { margin:0 0 10px 0; font-size:16px; }
+        .table-wrap { overflow:auto; margin-top:10px; }
+        table { width:100%; border-collapse:collapse; font-size:13px; background:#fff; }
+        th, td { padding:8px 10px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+        .pagination { margin-top:10px; display:flex; align-items:center; gap:8px; }
+        @media (max-width: 860px) { .admin-layout { grid-template-columns:1fr; } .sidebar { border-right:0; border-bottom:1px solid var(--border); } }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>后台管理</h1>
+        <a href="/index.html">返回任务系统</a>
+    </header>
+
+    <div id="auth-view" class="auth-wrap">
+        <div class="card">
+            <h3 style="margin-top:0;">管理员验证</h3>
+            <p style="margin-top:0;color:#6b7280;font-size:13px;">请输入 admin_token，验证通过后进入后台管理系统</p>
+            <div class="row">
+                <div class="col" style="flex:3;">
+                    <input type="password" id="admin-token-input" placeholder="输入 admin token">
+                </div>
+                <div><button id="admin-login-btn" class="btn-primary">验证并进入</button></div>
+            </div>
+            <p id="auth-msg" class="msg"></p>
+        </div>
+    </div>
+
+    <div id="admin-view" class="admin-layout hide">
+        <aside class="sidebar">
+            <button class="tab-btn active" data-tab="products">商品管理</button>
+            <button class="tab-btn" data-tab="orders">订单管理</button>
+        </aside>
+        <main class="content">
+            <section id="tab-products">
+                <div class="card">
+                    <h3 class="section-title">新增商品</h3>
+                    <form id="create-product-form">
+                        <div class="row">
+                            <div class="col"><input type="text" name="key" required placeholder="商品 Key（唯一）"></div>
+                            <div class="col"><input type="text" name="title" required placeholder="商品名称"></div>
+                            <div class="col"><input type="number" name="price" min="0.01" step="0.01" required placeholder="价格"></div>
+                        </div>
+                        <div class="row" style="margin-top:8px;">
+                            <div class="col"><input type="number" name="expire_time" min="1" placeholder="有效期秒（空=永久）"></div>
+                            <div class="col"><input type="text" name="icon" placeholder="封面图 URL"></div>
+                            <div class="col"><input type="text" name="desc" placeholder="商品描述"></div>
+                        </div>
+                        <div style="margin-top:8px;"><label><input type="checkbox" name="support_continue"> 支持续费</label></div>
+                        <div style="margin-top:10px;"><button type="submit" class="btn-primary">添加商品</button></div>
+                    </form>
+                </div>
+                <div class="card" style="margin-top:12px;">
+                    <h3 class="section-title">商品列表</h3>
+                    <div class="table-wrap">
+                        <table id="products-table">
+                            <thead><tr><th>ID</th><th>Key</th><th>名称</th><th>价格</th><th>有效期</th><th>续费</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-orders" class="hide">
+                <div class="card">
+                    <h3 class="section-title">订单管理</h3>
+                    <div class="row">
+                        <div class="col"><input type="number" id="order-user-filter" placeholder="用户 ID（可选）"></div>
+                        <div class="col">
+                            <select id="order-status-filter">
+                                <option value="">全部状态</option>
+                                <option value="pending">pending</option>
+                                <option value="paid">paid</option>
+                                <option value="failed">failed</option>
+                                <option value="refunded">refunded</option>
+                            </select>
+                        </div>
+                        <div><button id="load-orders-btn" class="btn-primary">查询</button></div>
+                    </div>
+                    <div class="table-wrap">
+                        <table id="orders-table">
+                            <thead><tr><th>ID</th><th>用户ID</th><th>商品Key</th><th>金额</th><th>状态</th><th>交易号</th><th>创建时间</th><th>操作</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination">
+                        <button id="orders-prev-btn" class="btn-secondary" disabled>上一页</button>
+                        <span id="orders-page-info">-</span>
+                        <button id="orders-next-btn" class="btn-secondary" disabled>下一页</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/admin.js"></script>
+</body>
+</html>

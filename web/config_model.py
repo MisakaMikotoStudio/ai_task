@@ -31,16 +31,16 @@ class WebConfig:
     """Web 前端总配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
     apiserver: ApiServerConfig = field(default_factory=ApiServerConfig)
-    
+
     @classmethod
     def from_toml(cls, path: str) -> "WebConfig":
         """从 TOML 文件加载配置"""
         with open(path, "rb") as f:
             data = tomllib.load(f)
-        
+
         return cls(
             server=ServerConfig(**data.get("server", {})),
-            apiserver=ApiServerConfig(**data.get("apiserver", {}))
+            apiserver=ApiServerConfig(**data.get("apiserver", {})),
         )
 
 
