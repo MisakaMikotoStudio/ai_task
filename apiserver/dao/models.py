@@ -6,7 +6,8 @@ SQLAlchemy ORM 模型定义
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Index, func, BigInteger, Text, Date, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Index, func, BigInteger, Text, Date, Boolean, Numeric
+from decimal import Decimal
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -428,6 +429,88 @@ class Chat(Base):
             'sessionid': self.sessionid or '',
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class Product(Base):
+    """商品表"""
+    __tablename__ = 'ai_task_shop_products'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    key = Column(String(64), nullable=False, comment='商品唯一 key')
+    title = Column(String(128), nullable=False, comment='商品名称')
+    desc = Column(Text, nullable=True, comment='商品描述（富文本 HTML）')
+    price = Column(Numeric(10, 2), nullable=False, comment='价格（元）')
+    expire_time = Column(Integer, nullable=True, comment='购买后有效时长（秒），NULL 表示永久')
+    support_continue = Column(Boolean, nullable=False, default=False, comment='是否支持续费')
+    icon = Column(String(512), nullable=True, comment='商品封面图 URL')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
+                        onupdate=func.utc_timestamp(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间（软删除）')
+
+    __table_args__ = (
+        Index('uk_shop_products_key', 'key', unique=True),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'title': self.title,
+            'desc': self.desc or '',
+            'price': float(self.price) if self.price is not None else 0.0,
+            'expire_time': self.expire_time,
+            'support_continue': bool(self.support_continue),
+            'icon': self.icon or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
+class Order(Base):
+    """订单表"""
+    __tablename__ = 'ai_task_shop_orders'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, comment='用户ID')
+    product_id = Column(BigInteger, nullable=False, comment='商品ID')
+    product_key = Column(String(64), nullable=False, comment='商品 key（冗余）')
+    out_trade_no = Column(String(64), nullable=False, comment='商户订单号（唯一）')
+    trade_no = Column(String(64), nullable=True, comment='第三方平台交易号')
+    status = Column(String(20), nullable=False, default='pending', comment='订单状态')
+    amount = Column(Numeric(10, 2), nullable=False, comment='实付金额（元）')
+    order_type = Column(String(16), nullable=False, default='purchase', comment='purchase/renew')
+    expire_at = Column(DateTime, nullable=True, comment='权益到期时间')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
+                        onupdate=func.utc_timestamp(), comment='更新时间')
+
+    STATUS_PENDING = 'pending'
+    STATUS_PAID = 'paid'
+    STATUS_FAILED = 'failed'
+    STATUS_REFUNDED = 'refunded'
+
+    __table_args__ = (
+        Index('uk_shop_orders_out_trade_no', 'out_trade_no', unique=True),
+        Index('idx_shop_orders_user_id', 'user_id'),
+        Index('idx_shop_orders_status', 'status'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'product_id': self.product_id,
+            'product_key': self.product_key,
+            'out_trade_no': self.out_trade_no,
+            'trade_no': self.trade_no or '',
+            'status': self.status,
+            'amount': float(self.amount) if self.amount is not None else 0.0,
+            'order_type': self.order_type,
+            'expire_at': to_iso_utc(self.expire_at),
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
         }
 
 

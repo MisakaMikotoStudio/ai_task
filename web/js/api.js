@@ -379,6 +379,94 @@ const chatAPI = {
     }
 };
 
+// 商业化 API（商品列表、购买）
+const commercialAPI = {
+    // 获取商品列表（公开，无需登录）
+    async getProducts() {
+        return request('/commercial/products');
+    },
+
+    // 生成支付链接
+    async buy(productId, orderType = 'purchase', device = null) {
+        const body = { product_id: productId, order_type: orderType };
+        if (device) body.device = device;
+        return request('/commercial/buy', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    }
+};
+
+// 管理后台 API（需要 X-Admin-Token）
+const shopAdminAPI = {
+    // 创建商品
+    async createProduct(adminToken, productData) {
+        return request('/admin/product', {
+            method: 'POST',
+            headers: { 'X-Admin-Token': adminToken },
+            body: JSON.stringify(productData)
+        });
+    },
+
+    // 管理端商品列表（含已下架）
+    async getAdminProducts(adminToken) {
+        return request('/admin/products', {
+            method: 'GET',
+            headers: { 'X-Admin-Token': adminToken }
+        });
+    },
+
+    // 商品下架
+    async offlineProduct(adminToken, productId) {
+        return request(`/admin/product/${productId}/offline`, {
+            method: 'POST',
+            headers: { 'X-Admin-Token': adminToken }
+        });
+    },
+
+    // 查询订单列表
+    async getOrders(adminToken, params = {}) {
+        const query = new URLSearchParams();
+        if (params.page) query.set('page', String(params.page));
+        if (params.page_size) query.set('page_size', String(params.page_size));
+        if (params.user_id) query.set('user_id', String(params.user_id));
+        if (params.status) query.set('status', params.status);
+        const qs = query.toString() ? `?${query.toString()}` : '';
+        return request(`/admin/orders${qs}`, {
+            headers: { 'X-Admin-Token': adminToken }
+        });
+    },
+
+    // 订单退款
+    async refundOrder(adminToken, orderId) {
+        return request(`/admin/orders/${orderId}/refund`, {
+            method: 'POST',
+            headers: { 'X-Admin-Token': adminToken }
+        });
+    },
+
+    // 上传商品封面图
+    async uploadIcon(adminToken, file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = getToken();
+        const headers = {
+            'Appid': 'ai_task',
+            'traceId': generateUUID(),
+            'X-Admin-Token': adminToken
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const response = await fetch(`${API_BASE}/admin/upload/icon`, {
+            method: 'POST',
+            headers,
+            body: formData
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || '上传失败');
+        return data;
+    }
+};
+
 // 待办API
 const todoAPI = {
     // 获取列表

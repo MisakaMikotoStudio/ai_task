@@ -143,8 +143,31 @@ def _do_auth_check():
     return None
 
 
+def _do_admin_token_check(admin_prefix: str) -> object:
+    """
+    检查管理员 Token（X-Admin-Token 请求头）。
+    仅用于 admin 路由，返回 None 表示验证通过，否则返回错误响应。
+    """
+    from flask import current_app
+    admin_token = current_app.config.get('APP_CONFIG') and current_app.config['APP_CONFIG'].admin_token
+    if not admin_token:
+        logger.error("admin_token 未配置，拒绝访问 admin 路由: %s", request.path)
+        return jsonify({"code": 401, "message": "服务端未配置 admin_token"}), 401
+
+    provided = request.headers.get('X-Admin-Token', '')
+    if provided != admin_token:
+        logger.warning("Admin Token 验证失败，路径: %s", request.path)
+        return jsonify({"code": 401, "message": "无效的 Admin Token"}), 401
+
+    return None
+
+
 def register_global_auth(app, api_prefix: str = '/api'):
-    """注册全局鉴权：默认所有 API 接口需要登录，可通过 @skip_auth 放行。"""
+    """注册全局鉴权：默认所有 API 接口需要登录，可通过 @skip_auth 放行。
+    /api/admin 路径额外支持 X-Admin-Token 鉴权。
+    """
+    admin_prefix = f'{api_prefix}/admin'
+
     @app.before_request
     def _global_auth_guard():
         # CORS 预检请求放行
@@ -158,6 +181,10 @@ def register_global_auth(app, api_prefix: str = '/api'):
         # 标记了跳过鉴权的 endpoint 放行
         if _is_skip_auth_endpoint():
             return None
+
+        # admin 路由：使用 X-Admin-Token 鉴权
+        if request.path.startswith(admin_prefix):
+            return _do_admin_token_check(admin_prefix=admin_prefix)
 
         return _do_auth_check()
 
