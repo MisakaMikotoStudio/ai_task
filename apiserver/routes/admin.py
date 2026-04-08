@@ -16,7 +16,9 @@
 """
 
 import logging
-
+import os
+import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, current_app
@@ -32,6 +34,12 @@ from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_cli
 
 logger = logging.getLogger(__name__)
 admin_bp = Blueprint('admin', __name__)
+
+MAX_PRODUCT_EXPIRE_SECONDS = 10 ** 8
+MAX_PRODUCT_DESC_LEN = 10000
+MAX_PRODUCT_TITLE_LEN = 128
+MAX_PRODUCT_KEY_LEN = 64
+MAX_PRODUCT_ICON_BYTES = 10 * 1024 * 1024  # 与 Flask MAX_CONTENT_LENGTH、前端一致
 
 
 def require_admin(f):
@@ -55,29 +63,58 @@ def create_product():
 
     key = (data.get('key') or '').strip()
     title = (data.get('title') or '').strip()
-    desc = data.get('desc') or ''
+    desc = data.get('desc')
+    if desc is None:
+        desc = ''
+    elif not isinstance(desc, str):
+        return jsonify({'code': 400, 'message': 'desc 须为字符串', 'data': None}), 400
     price = data.get('price')
     expire_time = data.get('expire_time')   # 秒，可为 null（永久）
     support_continue = bool(data.get('support_continue', False))
-    icon = (data.get('icon') or '').strip() or None
+    icon_raw = data.get('icon')
+    if icon_raw is not None and not isinstance(icon_raw, str):
+        return jsonify({'code': 400, 'message': 'icon 须为字符串 URL', 'data': None}), 400
+    icon = (icon_raw or '').strip() or None
 
     if not key or not title or price is None:
         return jsonify({'code': 400, 'message': 'key、title、price 为必填项', 'data': None}), 400
 
+    if len(key) > MAX_PRODUCT_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', key):
+        return jsonify({'code': 400, 'message': 'key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if len(title) > MAX_PRODUCT_TITLE_LEN:
+        return jsonify({'code': 400, 'message': f'title 长度不能超过 {MAX_PRODUCT_TITLE_LEN}', 'data': None}), 400
+
+    if len(desc) > MAX_PRODUCT_DESC_LEN:
+        return jsonify({'code': 400, 'message': f'描述长度不能超过 {MAX_PRODUCT_DESC_LEN}', 'data': None}), 400
+
     try:
-        price = float(price)
-        if price <= 0:
-            raise ValueError()
-    except (TypeError, ValueError):
-        return jsonify({'code': 400, 'message': 'price 必须是正数', 'data': None}), 400
+        price_dec = Decimal(str(price)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return jsonify({'code': 400, 'message': 'price 须为数字，且最多保留两位小数', 'data': None}), 400
+
+    if price_dec <= 0:
+        return jsonify({'code': 400, 'message': 'price 必须大于 0', 'data': None}), 400
+
+    price = float(price_dec)
 
     if expire_time is not None:
         try:
             expire_time = int(expire_time)
-            if expire_time <= 0:
+            if expire_time <= 0 or expire_time > MAX_PRODUCT_EXPIRE_SECONDS:
                 raise ValueError()
         except (TypeError, ValueError):
-            return jsonify({'code': 400, 'message': 'expire_time 必须是正整数（秒）', 'data': None}), 400
+            return jsonify({
+                'code': 400,
+                'message': f'expire_time 须为 1～{MAX_PRODUCT_EXPIRE_SECONDS} 的正整数（秒）',
+                'data': None,
+            }), 400
+
+    if icon:
+        if len(icon) > 512:
+            return jsonify({'code': 400, 'message': '封面链接过长', 'data': None}), 400
+        if not (icon.startswith('https://') or icon.startswith('http://')):
+            return jsonify({'code': 400, 'message': '封面须为 http(s) 链接', 'data': None}), 400
 
     # 检查 key 唯一
     existing = product_dao.get_product_by_key(key=key)
@@ -131,7 +168,12 @@ def list_orders():
     user_id_str = request.args.get('user_id')
     status = request.args.get('status')
 
-    user_id = int(user_id_str) if user_id_str else None
+    user_id = None
+    if user_id_str is not None and str(user_id_str).strip() != '':
+        s = str(user_id_str).strip()
+        if not s.isdigit() or len(s) != 6 or s[0] == '0':
+            return jsonify({'code': 400, 'message': 'user_id 须为 6 位数字且首位不能为 0', 'data': None}), 400
+        user_id = int(s)
 
     orders, total = order_dao.list_orders(
         page=page,
@@ -187,9 +229,6 @@ def upload_icon():
     """上传商品封面图到 OSS，返回公开访问链接"""
     config = current_app.config['APP_CONFIG']
 
-    if not config.oss.enabled:
-        return jsonify({'code': 400, 'message': 'OSS 未启用，请先在配置中开启', 'data': None}), 400
-
     file = request.files.get('file')
     if not file:
         return jsonify({'code': 400, 'message': '缺少 file 字段', 'data': None}), 400
@@ -197,6 +236,15 @@ def upload_icon():
     allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
     if file.content_type not in allowed_types:
         return jsonify({'code': 400, 'message': '仅支持 jpg/png/gif/webp 格式', 'data': None}), 400
+
+    try:
+        file.seek(0, os.SEEK_END)
+        icon_size = file.tell()
+        file.seek(0)
+    except OSError:
+        icon_size = None
+    if icon_size is not None and icon_size > MAX_PRODUCT_ICON_BYTES:
+        return jsonify({'code': 400, 'message': '图片大小不能超过 10MB', 'data': None}), 400
 
     try:
         url = oss_service.upload_image(config=config.oss, file_storage=file)
@@ -213,7 +261,7 @@ def upload_icon():
 @admin_bp.route('/secrets', methods=['GET'])
 @require_admin
 def admin_list_secrets():
-    secrets_list = get_user_secrets(user_id=request.user_info.id)
+    secrets_list = get_user_secrets(user_id=request.user_info.user_id)
     return jsonify({
         'code': 200,
         'data': [s.to_dict() for s in secrets_list]
@@ -231,7 +279,7 @@ def admin_create_secret():
     if len(name) > 64:
         return jsonify({'code': 400, 'message': '秘钥名称长度不能超过64个字符', 'data': None}), 400
 
-    user_secret = create_user_secret(user_id=request.user_info.id, name=name)
+    user_secret = create_user_secret(user_id=request.user_info.user_id, name=name)
     return jsonify({
         'code': 201,
         'message': '秘钥创建成功',
@@ -242,7 +290,7 @@ def admin_create_secret():
 @admin_bp.route('/secrets/<int:secret_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_secret(secret_id: int):
-    if not delete_user_secret(secret_id=secret_id, user_id=request.user_info.id):
+    if not delete_user_secret(secret_id=secret_id, user_id=request.user_info.user_id):
         return jsonify({'code': 404, 'message': '秘钥不存在', 'data': None}), 404
 
     return jsonify({'code': 200, 'message': '秘钥删除成功', 'data': None})
@@ -263,10 +311,10 @@ def admin_get_available_agents():
 @admin_bp.route('/clients', methods=['GET'])
 @require_admin
 def admin_list_clients():
-    result = get_clients_by_user(user_id=request.user_info.id)
+    result = get_clients_by_user(user_id=request.user_info.user_id)
 
     # 合并心跳时间（与 /api/client 一致，避免前端二次请求）
-    heartbeats = get_heartbeats_by_user(user_id=request.user_info.id)
+    heartbeats = get_heartbeats_by_user(user_id=request.user_info.user_id)
     heartbeat_map = {hb.get('client_id'): hb.get('last_sync_at') for hb in heartbeats}
     for client in result:
         if client.get('id') in heartbeat_map:
@@ -288,11 +336,11 @@ def admin_create_client():
 
     try:
         client_id = save_client(
-            user_id=request.user_info.id,
+            user_id=request.user_info.user_id,
             data=data,
             client_id=None,
         )
-        response_data = get_client_detail(client_id=client_id, user_id=request.user_info.id)
+        response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
         if not response_data:
             return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败', 'data': None}), 500
         return jsonify({
@@ -310,7 +358,7 @@ def admin_create_client():
 @admin_bp.route('/clients/<int:client_id>', methods=['GET'])
 @require_admin
 def admin_get_client_detail(client_id: int):
-    payload = get_client_detail(client_id=client_id, user_id=request.user_info.id)
+    payload = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not payload:
         return jsonify({'code': 400, 'message': '客户端不存在', 'data': None}), 400
     return jsonify({
@@ -329,7 +377,7 @@ def admin_update_client(client_id: int):
 
     try:
         save_client(
-            user_id=request.user_info.id,
+            user_id=request.user_info.user_id,
             data=data,
             client_id=client_id,
         )
@@ -339,7 +387,7 @@ def admin_update_client(client_id: int):
         logger.exception('admin_update_client failed')
         return jsonify({'code': 500, 'message': str(e), 'data': None}), 500
 
-    response_data = get_client_detail(client_id=client_id, user_id=request.user_info.id)
+    response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端更新成功但读取详情失败', 'data': None}), 500
 
@@ -353,7 +401,7 @@ def admin_update_client(client_id: int):
 @admin_bp.route('/clients/<int:client_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_client(client_id: int):
-    if not delete_client(client_id, request.user_info.id):
+    if not delete_client(client_id, request.user_info.user_id):
         return jsonify({'code': 404, 'message': '客户端不存在', 'data': None}), 404
 
     return jsonify({'code': 200, 'message': '客户端删除成功', 'data': None})
@@ -363,7 +411,7 @@ def admin_delete_client(client_id: int):
 @require_admin
 def admin_copy_client(client_id: int):
     """复制客户端（admin 专用）"""
-    source_detail = get_client_detail(client_id=client_id, user_id=request.user_info.id)
+    source_detail = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not source_detail:
         return jsonify({'code': 400, 'message': '客户端不存在', 'data': None}), 400
 
@@ -375,7 +423,7 @@ def admin_copy_client(client_id: int):
     import string as _string
 
     retries = 0
-    while check_client_name_exists(request.user_info.id, copy_name):
+    while check_client_name_exists(request.user_info.user_id, copy_name):
         if retries >= 3:
             return jsonify({'code': 400, 'message': '副本名称生成失败，请手动重命名后重试', 'data': None}), 400
         rand = ''.join(_secrets.choice(_string.ascii_letters + _string.digits) for _ in range(4))
@@ -384,8 +432,8 @@ def admin_copy_client(client_id: int):
         retries += 1
 
     source_detail.pop('id', None)
-    cid = save_client(user_id=request.user_info.id, data=source_detail, client_id=None)
-    payload = get_client_detail(client_id=cid, user_id=request.user_info.id)
+    cid = save_client(user_id=request.user_info.user_id, data=source_detail, client_id=None)
+    payload = get_client_detail(client_id=cid, user_id=request.user_info.user_id)
 
     return jsonify({
         'code': 201,

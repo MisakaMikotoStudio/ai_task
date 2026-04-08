@@ -6,8 +6,8 @@ AI任务需求管理系统 - Client 客户端
 
 import argparse
 import logging
-from math import log
 import os
+import shutil
 import time
 from typing import Dict
 from worker.code_develop_woker import CodeDevelopWorker
@@ -49,7 +49,7 @@ class ClientRunner:
         self.task_threads: Dict[str, TaskWorker] = {}
         self.running = True
         # 轮询间隔（秒）
-        self.poll_interval = 1  # 心跳间隔1秒
+        self.poll_interval = 15
     
     @property
     def client_id(self) -> int:
@@ -58,6 +58,43 @@ class ClientRunner:
     @property
     def instance_uuid(self) -> str:
         return self.client_config.instance_uuid
+
+    def _code_develop_work_root(self) -> str:
+        """与 CodeDevelopWorker.work_dir 一致：workspace / worker_key"""
+        return os.path.join(self.client_config.workspace, CodeDevelopWorker.worker_key)
+
+    def _remove_task_work_dir(self, task_key: str) -> None:
+        """删除单个任务的工作目录（释放磁盘，避免堆积）。"""
+        path = os.path.join(self._code_develop_work_root(), task_key)
+        if not os.path.isdir(path):
+            return
+        try:
+            shutil.rmtree(path)
+            logger.info(f"已删除任务工作目录: {path}")
+        except OSError as e:
+            logger.warning(f"删除任务工作目录失败 {path}: {e}")
+
+    def _cleanup_orphan_code_develop_dirs(self, running_task_keys: set) -> None:
+        """删除磁盘上遗留目录：既不在服务端运行列表、也无对应活动线程。"""
+        base = self._code_develop_work_root()
+        if not os.path.isdir(base):
+            return
+        try:
+            names = os.listdir(base)
+        except OSError as e:
+            logger.warning(f"列出代码开发工作目录失败 {base}: {e}")
+            return
+        for name in names:
+            path = os.path.join(base, name)
+            if not os.path.isdir(path):
+                continue
+            if name in running_task_keys or name in self.task_threads:
+                continue
+            try:
+                shutil.rmtree(path)
+                logger.info(f"已删除孤立任务工作目录: {path}")
+            except OSError as e:
+                logger.warning(f"删除孤立任务工作目录失败 {path}: {e}")
     
     def cleanup_finished_threads(self, running_task_keys: set):
         """清理已结束的线程，以及不在 running tasks 中的任务"""
@@ -77,8 +114,10 @@ class ClientRunner:
                 keys_to_remove.append(task_key)
         
         for key in keys_to_remove:
+            self._remove_task_work_dir(key)
             del self.task_threads[key]
             logger.info(f"清理任务线程: {key}")
+        self._cleanup_orphan_code_develop_dirs(running_task_keys)
     
     def run(self):
         while self.running:
@@ -102,7 +141,7 @@ class ClientRunner:
                     if task['key'] in self.task_threads:
                         continue
                     worker = CodeDevelopWorker(task=task, client_config=self.client_config)
-                    self.task_threads[item['key']] = worker
+                    self.task_threads[task['key']] = worker
                     worker.start()
                     logger.info(f"创建任务处理线程: {task['key']}")
             except Exception as e:

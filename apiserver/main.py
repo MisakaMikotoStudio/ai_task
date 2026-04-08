@@ -56,6 +56,8 @@ def create_app(config: AppConfig) -> Flask:
     app.config['APP_CONFIG'] = config
     # 配置 - 直接访问对象属性
     app.config['HEARTBEAT_TIMEOUT_SECONDS'] = config.heartbeat.timeout_seconds
+    # 含 multipart 上传（如商品封面），限制整体请求体约 10MB
+    app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
     app.json.ensure_ascii = False  # JSON响应中文不转义
 
     # 启用CORS

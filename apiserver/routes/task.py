@@ -24,7 +24,7 @@ def create_task_api():
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
     task = create_task(
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         title=data.get('title', ''),
         client_id=data.get('client_id'),
         status=data.get('status')
@@ -46,7 +46,7 @@ def list_tasks():
     page = int(request.args.get('page', 1))
     page_num = int(request.args.get('pageNum', 20))
     tasks = get_tasks(
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         statuses=statuses,
         page=page,
         page_num=page_num
@@ -61,7 +61,7 @@ def list_tasks():
 @task_bp.route('/<int:task_id>', methods=['GET'])
 def get_task_info(task_id):
     """获取任务详情"""
-    task = get_task(task_id=task_id, user_id=request.user_info.id)
+    task = get_task(task_id=task_id, user_id=request.user_info.user_id)
     
     return jsonify({
         'code': 200,
@@ -80,7 +80,7 @@ def update_task_status_api(task_id):
     
     result = update_status(
         task_id=task_id,
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         status=data.get('status', '')
     )
     
@@ -96,7 +96,7 @@ def delete_task_api(task_id):
     """删除任务"""
     result = delete_task(
         task_id=task_id,
-        user_id=request.user_info.id
+        user_id=request.user_info.user_id
     )
 
     return jsonify({
@@ -123,7 +123,7 @@ def sync_execute_api():
 
     result = sync_execute(
         task_id=int(task_id),
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         develop_doc=develop_doc,
         merge_request=merge_request
     )

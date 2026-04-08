@@ -237,7 +237,36 @@ const adminClientAPI = {
     }
 };
 
+const MAX_PRODUCT_ICON_BYTES = 10 * 1024 * 1024;
+
 const adminCommerceAPI = {
+    async uploadProductIcon(file) {
+        if (file && file.size > MAX_PRODUCT_ICON_BYTES) {
+            throw new Error('图片大小不能超过 10MB');
+        }
+        const fd = new FormData();
+        fd.append('file', file);
+        const token = getToken();
+        const headers = {
+            'Appid': 'ai_task',
+            'traceId': generateUUID(),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+        const response = await fetch(`${API_BASE}/admin/upload/icon`, {
+            method: 'POST',
+            headers,
+            body: fd,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            if (response.status === 401) {
+                clearAuth();
+                window.location.reload();
+            }
+            throw new Error(data.message || data.error || '上传失败');
+        }
+        return data;
+    },
     async createProduct(productData) {
         return request('/admin/product', {
             method: 'POST',

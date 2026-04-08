@@ -76,7 +76,7 @@
 <div class="product-card">
   ${iconHtml}
   <h3 class="product-title">${escapeHtml(product.title)}</h3>
-  <div class="product-desc">${product.desc || ''}</div>
+  <div class="product-desc">${formatShopDesc(product.desc)}</div>
   <div class="product-meta">
     <span class="product-price">¥${product.price.toFixed(2)}</span>
     <span class="product-expire">${expireText}</span>
@@ -117,6 +117,11 @@
     }
 
     // ─── 工具函数 ─────────────────────────────────────────────────────
+    function formatShopDesc(text) {
+        if (!text) return '';
+        return escapeHtml(text).replace(/\n/g, '<br>');
+    }
+
     function escapeHtml(str) {
         return String(str)
             .replace(/&/g, '&amp;')

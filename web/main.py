@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 
-from flask import Flask, send_from_directory, jsonify, Blueprint
+from flask import Flask, send_from_directory, jsonify, Blueprint, redirect, url_for
 from werkzeug.exceptions import NotFound
 
 # 配置日志格式
@@ -54,12 +54,14 @@ def create_app(config: WebConfig) -> Flask:
 
     @web_bp.route('/admin')
     def admin():
-        # 复用主页面，通过前端根据 pathname 判断并仅展示管理员所需内容
+        # 与 / 相同：返回 index.html；前端用 pathname === /admin 识别管理后台，
+        # 侧边栏仅展示 应用 / 秘钥 / 商品管理 / 订单管理，并走 /api/admin/... 接口。
         return send_from_directory(static_folder, 'index.html')
 
     @web_bp.route('/admin/commerce')
-    def admin_commerce():
-        return send_from_directory(static_folder, 'admin.html')
+    def admin_commerce_redirect():
+        # 旧版独立 commerce 页已并入 /admin（hash 路由 #/products、#/orders），避免旧书签落到错误 pathname
+        return redirect(url_for('web.admin'), code=302)
 
     @web_bp.route('/<path:path>')
     def static_files(path):
