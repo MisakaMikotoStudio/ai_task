@@ -84,11 +84,11 @@ def create_client_api():
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
     client_id = save_client(
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         data=data,
         client_id=None,
     )
-    response_data = get_client_detail(client_id=client_id, user_id=request.user_info.id)
+    response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
 
@@ -127,7 +127,7 @@ def list_clients():
         未认证 (401):
             {"code": 401, "message": "缺少认证token"}
     """
-    user_id = request.user_info.id
+    user_id = request.user_info.user_id
     result = get_clients_by_user(user_id)
 
     # 将 heartbeat 表中的最新心跳时间合并到客户端列表，避免前端二次请求
@@ -153,7 +153,7 @@ def get_client_detail_api(client_id):
     Response data 在 client.to_dict() 基础上包含：
         editable, repos, env_vars；last_sync_at 与列表接口一致会合并心跳表中的最新时间。
     """
-    user_id = request.user_info.id
+    user_id = request.user_info.user_id
     payload = get_client_detail(client_id, user_id)
     if not payload:
         return jsonify({'code': 400, 'message': '客户端不存在'}), 400
@@ -207,8 +207,8 @@ def update_client_api(client_id):
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    save_client(user_id=request.user_info.id, data=data, client_id=client_id)
-    response_data = get_client_detail(client_id=client_id, user_id=request.user_info.id)
+    save_client(user_id=request.user_info.user_id, data=data, client_id=client_id)
+    response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
 
@@ -239,7 +239,7 @@ def delete_client_api(client_id):
         未认证 (401):
             {"code": 401, "message": "缺少认证token"}
     """
-    if not delete_client(client_id, request.user_info.id):
+    if not delete_client(client_id, request.user_info.user_id):
         return jsonify({'code': 404, 'message': '客户端不存在'}), 400
     
     return jsonify({'code': 200, 'message': '客户端删除成功'})
@@ -273,7 +273,7 @@ def heartbeat(client_id):
             {"code": 401, "message": "缺少认证token"}
     """
     # 检查客户端是否存在
-    client = get_client_by_id(client_id=client_id, user_id=request.user_info.id)
+    client = get_client_by_id(client_id=client_id, user_id=request.user_info.user_id)
     if not client:
         return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
 
@@ -284,7 +284,7 @@ def heartbeat(client_id):
 
     # 更新心跳记录（使用新的心跳表）
     success, error_msg = update_client_heartbeat(
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         client_id=client_id,
         instance_uuid=instance_uuid
     )
@@ -296,9 +296,9 @@ def heartbeat(client_id):
 @client_bp.route('/<int:client_id>/running_chat_message', methods=['GET'])
 def get_running_chat_message_api(client_id):
     """获取指定客户端下需要处理的对话任务消息（供客户端轮询）"""
-    if not get_client_by_id(client_id=client_id, user_id=request.user_info.id):
+    if not get_client_by_id(client_id=client_id, user_id=request.user_info.user_id):
         return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
-    data = get_running_chat_messages_by_client(user_id=request.user_info.id, client_id=client_id)
+    data = get_running_chat_messages_by_client(user_id=request.user_info.user_id, client_id=client_id)
     return jsonify({
         'code': 200,
         'message': '获取运行中Chat消息成功',
@@ -320,7 +320,7 @@ def copy_client_api(client_id):
         未找到:
             {"code": 400, "message": "客户端不存在"}
     """
-    user_id = request.user_info.id
+    user_id = request.user_info.user_id
     source_detail = get_client_detail(client_id=client_id, user_id=user_id)
     if not source_detail:
         return jsonify({'code': 400, 'message': '客户端不存在'}), 400
@@ -375,12 +375,12 @@ def update_repo_default_branch_api(client_id, repo_id):
             {"code": 404, "message": "仓库配置不存在或无权限"}
     """
     # 获取client配置（需校验权限：创建者）
-    client = get_client_by_id(client_id=client_id, user_id=request.user_info.id)
+    client = get_client_by_id(client_id=client_id, user_id=request.user_info.user_id)
     if not client:
         return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
 
     # 获取仓库配置
-    repo = get_repo_by_id(repo_id=repo_id, client_id=client_id, user_id=request.user_info.id)
+    repo = get_repo_by_id(repo_id=repo_id, client_id=client_id, user_id=request.user_info.user_id)
     if not repo:
         return jsonify({'code': 400, 'message': '仓库配置不存在'}), 400
 
@@ -396,7 +396,7 @@ def update_repo_default_branch_api(client_id, repo_id):
     # 更新默认分支
     if update_repo_default_branch(
         repo_id=repo_id,
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         default_branch=default_branch,
     ):
         return jsonify({'code': 200, 'message': '默认分支更新成功'})
@@ -417,14 +417,14 @@ def get_client_config_api(client_id):
         未找到 (404): 客户端不存在或无权限
     """
     # 获取client配置（需校验权限：创建者）
-    client = get_client_by_id(client_id, request.user_info.id)
+    client = get_client_by_id(client_id, request.user_info.user_id)
     if not client:
         return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
 
     # 获取仓库配置
-    repos = get_client_repos(client_id, request.user_info.id)
+    repos = get_client_repos(client_id, request.user_info.user_id)
     # 获取环境变量（官方云部署/容器启动场景有效）
-    env_vars = get_client_env_vars(client_id, request.user_info.id)
+    env_vars = get_client_env_vars(client_id, request.user_info.user_id)
 
     return jsonify({
         'code': 200,
@@ -495,16 +495,17 @@ def get_client_startup_config():
 
     # admin：查询所有官方云部署客户端
     # 非 admin：查询当前用户下官方云部署客户端
-    if user.name == 'admin':
+    is_admin = user.name == 'admin'
+    if is_admin:
         result = get_clients_for_startup()
     else:
-        result = get_clients_for_startup(user_id=user.id)
+        result = get_clients_for_startup(user_id=user.user_id)
         # 非admin用户，直接使用请求头的秘钥
         for item in result:
             item['secret'] = request.headers.get('X-Client-Secret')
 
     permitted_config_client_ids = [item["client_id"] for item in result]
-    invalid_ids = get_cannot_run_client_ids_by_user(user.id, client_ids)
+    invalid_ids = get_cannot_run_client_ids_by_user(user.user_id, client_ids, is_admin=is_admin)
 
     env_vars_map = get_client_env_vars_by_client_ids(permitted_config_client_ids)
     for item in result:

@@ -32,6 +32,7 @@ class User(Base):
     __tablename__ = 'ai_task_users'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, unique=True, comment='对外用户编号（6位整数，首位非0），业务表 user_id 均引用此列')
     name = Column(String(64), nullable=False, comment='用户名')
     password_hash = Column(String(256), nullable=False, comment='密码哈希')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
@@ -41,7 +42,7 @@ class User(Base):
 
     def to_dict(self):
         return {
-            'id': self.id,
+            'user_id': self.user_id,
             'name': self.name,
             'created_at': to_iso_utc(self.created_at),
             'last_access_at': to_iso_utc(self.last_access_at)
@@ -50,6 +51,7 @@ class User(Base):
 
     __table_args__ = (
         Index('uk_users_name', 'name', unique=True),
+        Index('uk_users_user_id', 'user_id', unique=True),
     )
 
 
@@ -439,7 +441,7 @@ class Product(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     key = Column(String(64), nullable=False, comment='商品唯一 key')
     title = Column(String(128), nullable=False, comment='商品名称')
-    desc = Column(Text, nullable=True, comment='商品描述（富文本 HTML）')
+    desc = Column(Text, nullable=True, comment='商品描述（纯文本，支持换行）')
     price = Column(Numeric(10, 2), nullable=False, comment='价格（元）')
     expire_time = Column(Integer, nullable=True, comment='购买后有效时长（秒），NULL 表示永久')
     support_continue = Column(Boolean, nullable=False, default=False, comment='是否支持续费')

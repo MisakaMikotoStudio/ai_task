@@ -56,7 +56,7 @@ def buy():
 
     with get_db_session():
         order = order_service.create_order(
-            user_id=user.id,
+            user_id=user.user_id,
             product=product,
             order_type=order_type,
         )

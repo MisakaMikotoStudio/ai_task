@@ -154,7 +154,6 @@ deleted_at TIMESTAMP NULL DEFAULT NULL
 - 使用 RESTful 风格：GET 查询、POST 创建、PUT 更新、DELETE 删除
 - 路径使用小写加连字符：`/api/user-profiles`，不使用驼峰或下划线
 - 列表接口必须支持分页，返回总数和分页信息
-- 接口版本管理：通过 URL 前缀区分版本（如 `/api/v1/`）
 
 ### 3.3 请求参数校验
 

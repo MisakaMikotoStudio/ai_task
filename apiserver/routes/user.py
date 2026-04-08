@@ -29,7 +29,7 @@ def register():
         
     Response:
         成功 (201):
-            {"code": 201, "message": "注册成功", "data": {"id": int, "name": str, "token": str}}
+            {"code": 201, "message": "注册成功", "data": {"user_id": int, "name": str, "token": str}}
         失败 (400):
             {"code": 400, "message": "错误信息"}
     """
@@ -56,7 +56,7 @@ def login():
         
     Response:
         成功 (200):
-            {"code": 200, "message": "登录成功", "data": {"id": int, "name": str, "token": str}}
+            {"code": 200, "message": "登录成功", "data": {"user_id": int, "name": str, "token": str}}
         失败 (400):
             {"code": 400, "message": "错误信息"}
     """
@@ -84,7 +84,7 @@ def get_current_user():
         
     Response:
         成功 (200):
-            {"code": 200, "message": "获取当前用户信息成功", "data": {"id": int, "name": str, "created_at": str, "last_access_at": str}}
+            {"code": 200, "message": "获取当前用户信息成功", "data": {"user_id": int, "name": str, "created_at": str, "last_access_at": str}}
         失败 (400):
             {"code": 400, "message": "错误信息"}
         未认证 (401):
@@ -98,7 +98,7 @@ def get_current_user():
 @user_bp.route('/secrets', methods=['GET'])
 def list_secrets():
     """获取当前用户秘钥列表"""
-    secrets_list = get_user_secrets(user_id=request.user_info.id)
+    secrets_list = get_user_secrets(user_id=request.user_info.user_id)
     return jsonify({
         'code': 200,
         'data': [s.to_dict() for s in secrets_list]
@@ -117,7 +117,7 @@ def create_secret():
     if len(name) > 64:
         return jsonify({'code': 400, 'message': '秘钥名称长度不能超过64个字符'}), 400
 
-    user_secret = create_user_secret(user_id=request.user_info.id, name=name)
+    user_secret = create_user_secret(user_id=request.user_info.user_id, name=name)
     return jsonify({
         'code': 201,
         'message': '秘钥创建成功',
@@ -128,7 +128,7 @@ def create_secret():
 @user_bp.route('/secrets/<int:secret_id>', methods=['DELETE'])
 def delete_secret(secret_id):
     """删除秘钥"""
-    if not delete_user_secret(secret_id=secret_id, user_id=request.user_info.id):
+    if not delete_user_secret(secret_id=secret_id, user_id=request.user_info.user_id):
         return jsonify({'code': 404, 'message': '秘钥不存在'}), 404
 
     return jsonify({'code': 200, 'message': '秘钥删除成功'})

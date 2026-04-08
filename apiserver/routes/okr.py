@@ -25,7 +25,7 @@ def create_objective_api():
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
     result = create_objective(
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         title=data.get('title', ''),
         description=data.get('description'),
         cycle_type=data.get('cycle_type', 'quarter'),
@@ -49,7 +49,7 @@ def list_objectives():
     cycle_start = request.args.get('cycle_start')
     cycle_end = request.args.get('cycle_end')
 
-    objectives = get_objectives(request.user_info.id, cycle_type, status, cycle_start, cycle_end)
+    objectives = get_objectives(request.user_info.user_id, cycle_type, status, cycle_start, cycle_end)
 
     return jsonify({'code': 200, 'message': '获取目标列表成功', 'data': objectives})
 
@@ -57,7 +57,7 @@ def list_objectives():
 @okr_bp.route('/objectives/<int:objective_id>', methods=['GET'])
 def get_objective_api(objective_id):
     """获取目标详情"""
-    objective = get_objective(objective_id, request.user_info.id)
+    objective = get_objective(objective_id, request.user_info.user_id)
 
     return jsonify({'code': 200, 'message': '获取目标成功', 'data': objective})
 
@@ -69,7 +69,7 @@ def update_objective_api(objective_id):
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    result = update_objective(objective_id, request.user_info.id, **data)
+    result = update_objective(objective_id, request.user_info.user_id, **data)
 
     return jsonify({'code': 200, 'message': '目标更新成功', 'data': result})
 
@@ -77,7 +77,7 @@ def update_objective_api(objective_id):
 @okr_bp.route('/objectives/<int:objective_id>', methods=['DELETE'])
 def delete_objective_api(objective_id):
     """删除目标"""
-    result = delete_objective(objective_id, request.user_info.id)
+    result = delete_objective(objective_id, request.user_info.user_id)
 
     return jsonify({'code': 200, 'message': '目标删除成功', 'data': result})
 
@@ -93,7 +93,7 @@ def create_key_result_api(objective_id):
 
     result = create_key_result(
         objective_id=objective_id,
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         title=data.get('title', ''),
         description=data.get('description')
     )
@@ -108,7 +108,7 @@ def update_key_result_api(kr_id):
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    result = update_key_result(kr_id, request.user_info.id, **data)
+    result = update_key_result(kr_id, request.user_info.user_id, **data)
 
     return jsonify({'code': 200, 'message': 'KR更新成功', 'data': result})
 
@@ -116,7 +116,7 @@ def update_key_result_api(kr_id):
 @okr_bp.route('/key-results/<int:kr_id>', methods=['DELETE'])
 def delete_key_result_api(kr_id):
     """删除KR"""
-    result = delete_key_result(kr_id, request.user_info.id)
+    result = delete_key_result(kr_id, request.user_info.user_id)
 
     return jsonify({'code': 200, 'message': 'KR删除成功', 'data': result})
 
@@ -130,7 +130,7 @@ def reorder_objectives_api():
     if not data or 'objective_ids' not in data:
         return jsonify({'code': 400, 'message': '请提供 objective_ids 列表'}), 400
 
-    result = reorder_objectives(request.user_info.id, data['objective_ids'])
+    result = reorder_objectives(request.user_info.user_id, data['objective_ids'])
 
     return jsonify({'code': 200, 'message': '排序更新成功', 'data': result})
 
@@ -142,6 +142,6 @@ def reorder_key_results_api(objective_id):
     if not data or 'kr_ids' not in data:
         return jsonify({'code': 400, 'message': '请提供 kr_ids 列表'}), 400
 
-    result = reorder_key_results(objective_id, request.user_info.id, data['kr_ids'])
+    result = reorder_key_results(objective_id, request.user_info.user_id, data['kr_ids'])
 
     return jsonify({'code': 200, 'message': 'KR排序更新成功', 'data': result})

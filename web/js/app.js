@@ -11,7 +11,7 @@ const authMessage = document.getElementById('auth-message');
 const logoutBtn = document.getElementById('logout-btn');
 const currentUsername = document.getElementById('current-username');
 
-// Admin 页面复用 index.html：通过 pathname 判断是否处于 /admin
+// 管理后台与主应用共用 index.html：pathname 以 /admin 结尾时为管理后台（与后端 Flask 路由 /admin 一致）
 const ADMIN_PAGE = /\/admin\/?$/.test(window.location.pathname);
 const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders']);
 
@@ -84,7 +84,7 @@ async function initAuth() {
         const userData = resp && resp.data;
         if (userData) {
             // 同步到 localStorage，保证后续 loadUserInfo 能拿到 name
-            setCurrentUser({ id: userData.id, name: userData.name });
+            setCurrentUser({ user_id: userData.user_id, name: userData.name });
         }
 
         const isAdmin = (userData && userData.name === 'admin');
@@ -119,9 +119,8 @@ function showMainPage() {
     loginPage.classList.remove('active');
     mainPage.classList.add('active');
 
-    // Admin 页面只保留“应用/秘钥”
+    // 管理后台：仅 应用 / 秘钥 / 商品管理 / 订单管理（由 initNavigation 隐藏其余 nav）
     if (ADMIN_PAGE) {
-        // 显示 admin 专属导航项
         document.querySelectorAll('.nav-item[data-view="products"], .nav-item[data-view="orders"]').forEach((el) => {
             el.style.display = '';
         });
@@ -158,6 +157,27 @@ async function loadUserInfo() {
     const user = getCurrentUser();
     if (user) {
         currentUsername.textContent = user.name;
+    }
+    const idWrap = document.getElementById('current-user-id-wrap');
+    const idEl = document.getElementById('current-user-id');
+    if (!idWrap || !idEl) return;
+    try {
+        const resp = await userAPI.me();
+        const u = resp && resp.data;
+        if (u && u.user_id != null) {
+            idEl.textContent = String(u.user_id);
+            idWrap.removeAttribute('hidden');
+            if (u.name) setCurrentUser({ user_id: u.user_id, name: u.name });
+        } else {
+            idWrap.setAttribute('hidden', '');
+        }
+    } catch {
+        if (user && user.user_id != null) {
+            idEl.textContent = String(user.user_id);
+            idWrap.removeAttribute('hidden');
+        } else {
+            idWrap.setAttribute('hidden', '');
+        }
     }
 }
 
@@ -197,7 +217,6 @@ function initTabs() {
 function initNavigation() {
     const navItems = document.querySelectorAll('.nav-item');
 
-    // Admin 页面只展示“应用/秘钥”
     if (ADMIN_PAGE) {
         navItems.forEach((item) => {
             const view = item.dataset.view;
@@ -301,7 +320,7 @@ function initForms() {
             // 后端返回格式: {code, message, data: {id, name, token}}
             const userData = result.data;
             setToken(userData.token);
-            setCurrentUser({id: userData.id, name: userData.name});
+            setCurrentUser({ user_id: userData.user_id, name: userData.name });
 
             showToast('登录成功', 'success');
 
@@ -404,7 +423,7 @@ function openModal(title, content, modalClass = '') {
     
     // 移除之前可能添加的自定义类
     const modal = document.querySelector('.modal');
-    modal.classList.remove('modal-lg', 'modal-flow', 'modal-task-detail');
+    modal.classList.remove('modal-lg', 'modal-flow', 'modal-task-detail', 'modal-commerce-product');
     
     // 添加新的自定义类
     if (modalClass) {
@@ -2067,14 +2086,26 @@ function initSecrets() {
     }
 }
 
-// ===== Admin 商品/订单 =====
+// ===== Admin 商品/订单（/admin 下嵌入 index.html，样式见 style.css .commerce-*）=====
 let adminOrderPage = 1;
 
+const ORDER_STATUS_LABELS = {
+    pending: '待支付',
+    paid: '已支付',
+    failed: '失败',
+    refunded: '已退款'
+};
+
+function commerceOrderStatusKey(status) {
+    const allowed = ['pending', 'paid', 'failed', 'refunded'];
+    return allowed.includes(status) ? status : 'unknown';
+}
+
 function initAdminCommerce() {
-    const createForm = document.getElementById('create-product-form');
-    if (createForm && createForm.dataset.bound !== 'true') {
-        createForm.addEventListener('submit', handleAdminCreateProduct);
-        createForm.dataset.bound = 'true';
+    const openBtn = document.getElementById('open-create-product-btn');
+    if (openBtn && openBtn.dataset.bound !== 'true') {
+        openBtn.addEventListener('click', showAdminCreateProductModal);
+        openBtn.dataset.bound = 'true';
     }
 
     const loadOrdersBtn = document.getElementById('load-orders-btn');
@@ -2084,38 +2115,227 @@ function initAdminCommerce() {
     }
 }
 
+const COMMERCE_MAX_EXPIRE_SECONDS = 1e8;
+const COMMERCE_MAX_DESC_LEN = 10000;
+
+function plainPreviewFromDesc(text, maxLen) {
+    const flat = String(text || '').replace(/\r\n/g, '\n').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!flat) return '';
+    if (flat.length > maxLen) return `${flat.slice(0, maxLen)}…`;
+    return flat;
+}
+
+function parseAdminProductPriceInput(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return { ok: false, message: '请填写价格' };
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+        return { ok: false, message: '价格须为数字，最多两位小数' };
+    }
+    const n = parseFloat(s);
+    if (!(n > 0)) return { ok: false, message: '价格必须大于 0' };
+    return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
+function renderAdminProductCard(p) {
+    const offline = p.offline;
+    const statusHtml = offline
+        ? '<span class="commerce-badge commerce-product-offline">已下架</span>'
+        : '<span class="commerce-badge commerce-product-online">上架中</span>';
+    const actionHtml = offline
+        ? '<span class="commerce-muted">—</span>'
+        : `<button type="button" class="commerce-offline-btn btn-offline-product" data-id="${p.id}">下架</button>`;
+    const validity = p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久';
+    const renew = p.support_continue ? '支持续费' : '不支持续费';
+    const preview = plainPreviewFromDesc(p.desc, 140);
+    const previewBlock = preview
+        ? `<p class="commerce-product-card-desc">${escapeHtml(preview)}</p>`
+        : '';
+    const media = p.icon
+        ? `<div class="commerce-product-card-media"><img src="${escapeHtml(p.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'"></div>`
+        : '<div class="commerce-product-card-media commerce-product-card-media-placeholder" aria-hidden="true">📦</div>';
+    return `<article class="commerce-product-card${offline ? ' is-offline' : ''}">
+  ${media}
+  <div class="commerce-product-card-body">
+    <div class="commerce-product-card-top">
+      <h4 class="commerce-product-card-name">${escapeHtml(p.title)}</h4>
+      ${statusHtml}
+    </div>
+    <div class="commerce-product-card-key"><code class="commerce-code">${escapeHtml(p.key)}</code><span class="commerce-product-card-id">#${p.id}</span></div>
+    <div class="commerce-product-card-price commerce-amount">¥${Number(p.price || 0).toFixed(2)}</div>
+    ${previewBlock}
+    <ul class="commerce-product-card-meta">
+      <li><span>有效期</span><strong>${validity}</strong></li>
+      <li><span>续费</span><strong>${renew}</strong></li>
+      <li><span>创建</span><strong class="commerce-meta-time">${formatDateTime(p.created_at)}</strong></li>
+    </ul>
+    <div class="commerce-product-card-actions">${actionHtml}</div>
+  </div>
+</article>`;
+}
+
+function showAdminCreateProductModal() {
+    const content = `
+        <form id="admin-create-product-form" class="commerce-modal-form commerce-modal-form-refined">
+            <p class="commerce-modal-lead">带 <span class="commerce-req">*</span> 为必填项。</p>
+            <div class="commerce-modal-grid">
+                <div class="commerce-modal-field">
+                    <label class="commerce-modal-label" for="admin-product-key">商品 Key <span class="commerce-req">*</span></label>
+                    <input id="admin-product-key" type="text" name="key" required placeholder="字母数字下划线，如 pro_monthly" autocomplete="off" maxlength="64">
+                </div>
+                <div class="commerce-modal-field">
+                    <label class="commerce-modal-label" for="admin-product-title">商品名称 <span class="commerce-req">*</span></label>
+                    <input id="admin-product-title" type="text" name="title" required placeholder="展示名称" autocomplete="off" maxlength="128">
+                </div>
+                <div class="commerce-modal-field commerce-modal-field-span">
+                    <label class="commerce-modal-label" for="admin-product-price">价格（元）<span class="commerce-req">*</span></label>
+                    <input id="admin-product-price" type="text" name="price" required placeholder="如 9.99" inputmode="decimal" autocomplete="off">
+                    <p class="commerce-field-hint">仅数字，最多保留两位小数。</p>
+                </div>
+                <div class="commerce-modal-field commerce-modal-field-span commerce-expire-row">
+                    <label class="commerce-modal-label" for="admin-product-expire-val">有效期</label>
+                    <div class="commerce-expire-inputs">
+                        <input id="admin-product-expire-val" type="text" name="expire_val" placeholder="留空表示永久" inputmode="numeric" autocomplete="off">
+                        <select id="admin-product-expire-unit" name="expire_unit" aria-label="有效期单位">
+                            <option value="day" selected>天</option>
+                            <option value="hour">小时</option>
+                        </select>
+                    </div>
+                    <p class="commerce-field-hint">将换算为秒存储，换算结果须在 1～10⁸ 秒之间。</p>
+                </div>
+                <div class="commerce-modal-field commerce-modal-field-span">
+                    <label class="commerce-modal-label">封面图</label>
+                    <input type="hidden" name="icon" id="admin-product-icon-url" value="">
+                    <input type="file" id="admin-product-icon-file" class="commerce-file-input-hidden" accept="image/jpeg,image/png,image/gif,image/webp">
+                    <div class="commerce-icon-upload-row">
+                        <button type="button" class="btn-secondary commerce-btn-upload" id="admin-product-icon-trigger">上传图片</button>
+                        <span id="admin-product-icon-status" class="commerce-icon-status"></span>
+                    </div>
+                    <div id="admin-product-icon-preview" class="commerce-icon-preview" hidden>
+                        <img id="admin-product-icon-preview-img" alt="封面预览">
+                    </div>
+                    <p class="commerce-field-hint">上传到 OSS，需服务端已开启对象存储。</p>
+                </div>
+            </div>
+            <label class="commerce-modal-checkbox commerce-modal-checkbox-block"><input type="checkbox" name="support_continue"> 支持续费</label>
+            <div class="commerce-modal-field commerce-modal-field-span commerce-modal-desc-block">
+                <label class="commerce-modal-label" for="admin-product-desc">商品描述</label>
+                <textarea id="admin-product-desc" name="desc" class="commerce-desc-textarea" rows="5" maxlength="${COMMERCE_MAX_DESC_LEN}" placeholder="支持换行，前台按原格式展示"></textarea>
+            </div>
+            <div class="modal-actions commerce-modal-actions commerce-modal-actions-compact">
+                <button type="button" class="btn-secondary commerce-btn-modal-cancel" onclick="closeModal()">取消</button>
+                <button type="submit" class="btn-primary commerce-btn-submit-create">创建商品</button>
+            </div>
+        </form>
+    `;
+    openModal('新增商品', content, 'modal-commerce-product');
+
+    const fileInput = document.getElementById('admin-product-icon-file');
+    const trigger = document.getElementById('admin-product-icon-trigger');
+    const statusEl = document.getElementById('admin-product-icon-status');
+    const hiddenIcon = document.getElementById('admin-product-icon-url');
+    const previewWrap = document.getElementById('admin-product-icon-preview');
+    const previewImg = document.getElementById('admin-product-icon-preview-img');
+
+    if (trigger && fileInput) {
+        trigger.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+            const f = fileInput.files && fileInput.files[0];
+            if (!f) return;
+            statusEl.textContent = '上传中…';
+            try {
+                const res = await adminCommerceAPI.uploadProductIcon(f);
+                const url = res.data && res.data.url;
+                if (!url) throw new Error('未返回链接');
+                hiddenIcon.value = url;
+                previewImg.src = url;
+                previewWrap.hidden = false;
+                statusEl.textContent = '已上传';
+            } catch (err) {
+                hiddenIcon.value = '';
+                previewWrap.hidden = true;
+                statusEl.textContent = err.message || '上传失败';
+                showToast(statusEl.textContent, 'error');
+            }
+            fileInput.value = '';
+        });
+    }
+
+    const form = document.getElementById('admin-create-product-form');
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const key = form.querySelector('[name=key]').value.trim();
+            if (!/^[a-zA-Z0-9_-]+$/.test(key) || key.length > 64) {
+                showToast('Key 仅允许字母、数字、下划线与短横线，且不超过 64 字符', 'error');
+                return;
+            }
+            const title = form.querySelector('[name=title]').value.trim();
+            if (!title || title.length > 128) {
+                showToast('请填写商品名称（不超过 128 字）', 'error');
+                return;
+            }
+            const pr = parseAdminProductPriceInput(form.querySelector('[name=price]').value);
+            if (!pr.ok) {
+                showToast(pr.message, 'error');
+                return;
+            }
+            const desc = (form.querySelector('[name=desc]').value || '');
+            if (desc.length > COMMERCE_MAX_DESC_LEN) {
+                showToast(`描述过长（最多 ${COMMERCE_MAX_DESC_LEN} 字符）`, 'error');
+                return;
+            }
+            const ev = (form.querySelector('[name=expire_val]').value || '').trim();
+            let expireSeconds = null;
+            if (ev !== '') {
+                if (!/^\d+$/.test(ev)) {
+                    showToast('有效期须为正整数', 'error');
+                    return;
+                }
+                const n = parseInt(ev, 10);
+                const unit = form.querySelector('[name=expire_unit]').value;
+                const mult = unit === 'hour' ? 3600 : 86400;
+                expireSeconds = n * mult;
+                if (expireSeconds < 1 || expireSeconds > COMMERCE_MAX_EXPIRE_SECONDS) {
+                    showToast(`换算后有效期须对应 1～${COMMERCE_MAX_EXPIRE_SECONDS} 秒`, 'error');
+                    return;
+                }
+            }
+            const icon = (hiddenIcon && hiddenIcon.value || '').trim() || null;
+
+            const productData = {
+                key,
+                title,
+                desc,
+                price: pr.value,
+                expire_time: expireSeconds,
+                support_continue: form.querySelector('[name=support_continue]').checked,
+                icon,
+            };
+            try {
+                await adminCommerceAPI.createProduct(productData);
+                closeModal();
+                await loadAdminProducts();
+                showToast('商品创建成功', 'success');
+            } catch (err) {
+                showToast(`创建失败：${err.message}`, 'error');
+            }
+        });
+    }
+}
+
 async function loadAdminProducts() {
-    const tbody = document.querySelector('#products-table tbody');
-    if (!tbody) return;
+    const root = document.getElementById('products-list');
+    if (!root) return;
     try {
         const resp = await adminCommerceAPI.getAdminProducts();
         const items = resp.data || [];
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center">暂无商品</td></tr>';
+            root.innerHTML = '<div class="commerce-products-empty">暂无商品，点击右上角「新增商品」开始添加。</div>';
             return;
         }
-        tbody.innerHTML = items.map((p) => {
-            const offline = p.offline;
-            const statusCell = offline
-                ? '<span style="color:#dc2626;font-size:12px">已下架</span>'
-                : '<span style="color:#16a34a;font-size:12px">上架中</span>';
-            const actionCell = offline
-                ? '—'
-                : `<button type="button" class="btn-danger btn-offline-product" data-id="${p.id}">下架</button>`;
-            return `<tr>
-  <td>${p.id}</td>
-  <td>${escapeHtml(p.key)}</td>
-  <td>${escapeHtml(p.title)}</td>
-  <td>¥${Number(p.price || 0).toFixed(2)}</td>
-  <td>${p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久'}</td>
-  <td>${p.support_continue ? '是' : '否'}</td>
-  <td>${formatDateTime(p.created_at)}</td>
-  <td>${statusCell}</td>
-  <td>${actionCell}</td>
-</tr>`;
-        }).join('');
+        root.innerHTML = items.map((p) => renderAdminProductCard(p)).join('');
 
-        tbody.querySelectorAll('.btn-offline-product').forEach((btn) => {
+        root.querySelectorAll('.btn-offline-product').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const productId = Number(btn.dataset.id);
                 if (!productId) return;
@@ -2134,39 +2354,24 @@ async function loadAdminProducts() {
     }
 }
 
-async function handleAdminCreateProduct(e) {
-    e.preventDefault();
-    const form = e.target;
-    const productData = {
-        key: form.querySelector('[name=key]').value.trim(),
-        title: form.querySelector('[name=title]').value.trim(),
-        desc: form.querySelector('[name=desc]').value,
-        price: parseFloat(form.querySelector('[name=price]').value),
-        expire_time: form.querySelector('[name=expire_time]').value
-            ? parseInt(form.querySelector('[name=expire_time]').value, 10)
-            : null,
-        support_continue: form.querySelector('[name=support_continue]').checked,
-        icon: form.querySelector('[name=icon]').value.trim() || null
-    };
-    try {
-        await adminCommerceAPI.createProduct(productData);
-        form.reset();
-        await loadAdminProducts();
-        showToast('商品创建成功', 'success');
-    } catch (err) {
-        showToast(`创建失败：${err.message}`, 'error');
-    }
-}
-
 async function loadAdminOrders(page) {
     adminOrderPage = page;
-    const userIdFilter = (document.getElementById('order-user-filter') || {}).value || null;
+    const raw = (document.getElementById('order-user-filter') || {}).value;
     const statusFilter = (document.getElementById('order-status-filter') || {}).value || null;
+    const s = (raw || '').trim();
+    let userIdFilter;
+    if (s) {
+        if (!/^[1-9]\d{5}$/.test(s)) {
+            showToast('用户编号须为 6 位数字且首位不能为 0', 'error');
+            return;
+        }
+        userIdFilter = s;
+    }
     try {
         const resp = await adminCommerceAPI.getOrders({
             page,
             page_size: 20,
-            user_id: userIdFilter || undefined,
+            user_id: userIdFilter,
             status: statusFilter || undefined
         });
         renderAdminOrdersTable(resp.data || {});
@@ -2180,19 +2385,21 @@ function renderAdminOrdersTable(data) {
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center">暂无订单</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="commerce-empty-cell">暂无订单</td></tr>';
     } else {
         tbody.innerHTML = items.map((o) => {
             const canRefund = o.status === 'paid';
+            const sk = commerceOrderStatusKey(o.status);
+            const statusLabel = ORDER_STATUS_LABELS[o.status] || escapeHtml(o.status);
             return `<tr>
   <td>${o.id}</td>
   <td>${o.user_id}</td>
-  <td>${escapeHtml(o.product_key)}</td>
-  <td>¥${Number(o.amount || 0).toFixed(2)}</td>
-  <td>${escapeHtml(o.status)}</td>
-  <td>${escapeHtml(o.trade_no || '-')}</td>
-  <td>${formatDateTime(o.created_at)}</td>
-  <td>${canRefund ? `<button class="btn-danger refund-btn" data-id="${o.id}">退款</button>` : '-'}</td>
+  <td><code class="commerce-code">${escapeHtml(o.product_key)}</code></td>
+  <td class="commerce-amount">¥${Number(o.amount || 0).toFixed(2)}</td>
+  <td><span class="commerce-badge commerce-order-${sk}">${statusLabel}</span></td>
+  <td class="commerce-muted">${o.trade_no ? escapeHtml(o.trade_no) : '—'}</td>
+  <td class="commerce-muted">${formatDateTime(o.created_at)}</td>
+  <td>${canRefund ? `<button type="button" class="commerce-refund-btn refund-btn" data-id="${o.id}">退款</button>` : '<span class="commerce-muted">—</span>'}</td>
 </tr>`;
         }).join('');
     }
