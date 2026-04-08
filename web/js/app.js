@@ -2190,22 +2190,20 @@ function renderAdminProductCard(p) {
 function showAdminCreateProductModal() {
     const content = `
         <form id="admin-create-product-form" class="commerce-modal-form commerce-modal-form-refined">
-            <p class="commerce-modal-lead">带 <span class="commerce-req">*</span> 为必填项。</p>
             <div class="commerce-modal-grid">
                 <div class="commerce-modal-field">
                     <label class="commerce-modal-label" for="admin-product-key">商品 Key <span class="commerce-req">*</span></label>
-                    <input id="admin-product-key" type="text" name="key" required placeholder="字母数字下划线，如 pro_monthly" autocomplete="off" maxlength="64">
+                    <input id="admin-product-key" type="text" name="key" required placeholder="如 pro_monthly" autocomplete="off" maxlength="64">
                 </div>
                 <div class="commerce-modal-field">
                     <label class="commerce-modal-label" for="admin-product-title">商品名称 <span class="commerce-req">*</span></label>
                     <input id="admin-product-title" type="text" name="title" required placeholder="展示名称" autocomplete="off" maxlength="128">
                 </div>
-                <div class="commerce-modal-field commerce-modal-field-span">
+                <div class="commerce-modal-field">
                     <label class="commerce-modal-label" for="admin-product-price">价格（元）<span class="commerce-req">*</span></label>
                     <input id="admin-product-price" type="text" name="price" required placeholder="如 9.99" inputmode="decimal" autocomplete="off">
-                    <p class="commerce-field-hint">仅数字，最多保留两位小数。</p>
                 </div>
-                <div class="commerce-modal-field commerce-modal-field-span commerce-expire-row">
+                <div class="commerce-modal-field commerce-expire-row">
                     <label class="commerce-modal-label" for="admin-product-expire-val">有效期</label>
                     <div class="commerce-expire-inputs">
                         <input id="admin-product-expire-val" type="text" name="expire_val" placeholder="留空表示永久" inputmode="numeric" autocomplete="off">
@@ -2214,7 +2212,6 @@ function showAdminCreateProductModal() {
                             <option value="hour">小时</option>
                         </select>
                     </div>
-                    <p class="commerce-field-hint">将换算为秒存储，换算结果须在 1～10⁸ 秒之间。</p>
                 </div>
                 <div class="commerce-modal-field commerce-modal-field-span">
                     <label class="commerce-modal-label">封面图</label>
@@ -2227,13 +2224,12 @@ function showAdminCreateProductModal() {
                     <div id="admin-product-icon-preview" class="commerce-icon-preview" hidden>
                         <img id="admin-product-icon-preview-img" alt="封面预览">
                     </div>
-                    <p class="commerce-field-hint">上传到 OSS，需服务端已开启对象存储。</p>
                 </div>
             </div>
             <label class="commerce-modal-checkbox commerce-modal-checkbox-block"><input type="checkbox" name="support_continue"> 支持续费</label>
             <div class="commerce-modal-field commerce-modal-field-span commerce-modal-desc-block">
                 <label class="commerce-modal-label" for="admin-product-desc">商品描述</label>
-                <textarea id="admin-product-desc" name="desc" class="commerce-desc-textarea" rows="5" maxlength="${COMMERCE_MAX_DESC_LEN}" placeholder="支持换行，前台按原格式展示"></textarea>
+                <textarea id="admin-product-desc" name="desc" class="commerce-desc-textarea" rows="4" maxlength="${COMMERCE_MAX_DESC_LEN}" placeholder="支持换行，前台按原格式展示"></textarea>
             </div>
             <div class="modal-actions commerce-modal-actions commerce-modal-actions-compact">
                 <button type="button" class="btn-secondary commerce-btn-modal-cancel" onclick="closeModal()">取消</button>
