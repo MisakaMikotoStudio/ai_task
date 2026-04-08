@@ -2069,8 +2069,33 @@ function initSecrets() {
 
 // ===== Admin 商品/订单 =====
 let adminOrderPage = 1;
+let productQuillEditor = null;
 
 function initAdminCommerce() {
+    const openBtn = document.getElementById('open-create-product-btn');
+    const closeBtn = document.getElementById('close-create-product');
+    const cancelBtn = document.getElementById('cancel-create-product');
+    const overlay = document.getElementById('create-product-overlay');
+
+    if (openBtn && openBtn.dataset.bound !== 'true') {
+        openBtn.addEventListener('click', openProductModal);
+        openBtn.dataset.bound = 'true';
+    }
+    if (closeBtn && closeBtn.dataset.bound !== 'true') {
+        closeBtn.addEventListener('click', closeProductModal);
+        closeBtn.dataset.bound = 'true';
+    }
+    if (cancelBtn && cancelBtn.dataset.bound !== 'true') {
+        cancelBtn.addEventListener('click', closeProductModal);
+        cancelBtn.dataset.bound = 'true';
+    }
+    if (overlay && overlay.dataset.bound !== 'true') {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeProductModal();
+        });
+        overlay.dataset.bound = 'true';
+    }
+
     const createForm = document.getElementById('create-product-form');
     if (createForm && createForm.dataset.bound !== 'true') {
         createForm.addEventListener('submit', handleAdminCreateProduct);
@@ -2084,38 +2109,119 @@ function initAdminCommerce() {
     }
 }
 
+function openProductModal() {
+    const overlay = document.getElementById('create-product-overlay');
+    if (overlay) overlay.classList.add('active');
+    initProductQuill();
+}
+
+function closeProductModal() {
+    const overlay = document.getElementById('create-product-overlay');
+    if (overlay) overlay.classList.remove('active');
+    const form = document.getElementById('create-product-form');
+    if (form) form.reset();
+    if (productQuillEditor) productQuillEditor.setContents([]);
+}
+
+function initProductQuill() {
+    if (productQuillEditor) return;
+    const container = document.getElementById('product-desc-editor');
+    if (!container) return;
+    productQuillEditor = new Quill(container, {
+        theme: 'snow',
+        placeholder: '输入商品描述...',
+        modules: {
+            toolbar: [
+                [{ 'header': [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline', 'strike'],
+                [{ 'color': [] }, { 'background': [] }],
+                [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                ['blockquote', 'link'],
+                ['clean']
+            ]
+        }
+    });
+}
+
+function getProductDescHtml() {
+    if (!productQuillEditor) return '';
+    const html = productQuillEditor.root.innerHTML;
+    if (html === '<p><br></p>' || html === '<p></p>') return '';
+    return html;
+}
+
+function stripHtmlToText(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+}
+
+function renderProductCard(product) {
+    const isOffline = !!product.offline;
+    const offlineClass = isOffline ? ' offline' : '';
+
+    const iconHtml = product.icon
+        ? `<img class="product-card-icon" src="${escapeHtml(product.icon)}" alt="${escapeHtml(product.title)}">`
+        : '<div class="product-card-icon-placeholder">📦</div>';
+
+    const statusBadge = isOffline
+        ? '<span class="product-card-badge badge-danger">已下架</span>'
+        : '<span class="product-card-badge badge-success">上架中</span>';
+
+    const expireBadge = product.expire_time
+        ? `<span class="product-card-badge badge-info">${Math.round(product.expire_time / 86400)} 天</span>`
+        : '<span class="product-card-badge badge-muted">永久</span>';
+
+    const renewBadge = product.support_continue
+        ? '<span class="product-card-badge badge-info">可续费</span>'
+        : '';
+
+    const actionBtn = isOffline
+        ? ''
+        : `<button class="btn-danger btn-offline-product" style="padding:4px 12px;font-size:12px;border-radius:6px;" data-id="${product.id}">下架</button>`;
+
+    const descText = stripHtmlToText(product.desc || '');
+    const descHtml = descText
+        ? `<p class="product-card-desc">${escapeHtml(descText)}</p>`
+        : '';
+
+    return `
+    <div class="product-card${offlineClass}">
+        ${iconHtml}
+        <div class="product-card-body">
+            <div class="product-card-title">${escapeHtml(product.title)}</div>
+            <span class="product-card-key">${escapeHtml(product.key)}</span>
+            ${descHtml}
+            <div class="product-card-meta">
+                <span class="product-card-price">${Number(product.price || 0).toFixed(2)}</span>
+                ${statusBadge}
+                ${expireBadge}
+                ${renewBadge}
+            </div>
+        </div>
+        <div class="product-card-footer">
+            <span class="product-card-date">ID: ${product.id} | ${formatDateTime(product.created_at)}</span>
+            ${actionBtn}
+        </div>
+    </div>`;
+}
+
 async function loadAdminProducts() {
-    const tbody = document.querySelector('#products-table tbody');
-    if (!tbody) return;
+    const grid = document.getElementById('products-grid');
+    const empty = document.getElementById('products-empty');
+    if (!grid) return;
     try {
         const resp = await adminCommerceAPI.getAdminProducts();
         const items = resp.data || [];
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center">暂无商品</td></tr>';
+            grid.innerHTML = '';
+            if (empty) empty.style.display = '';
             return;
         }
-        tbody.innerHTML = items.map((p) => {
-            const offline = p.offline;
-            const statusCell = offline
-                ? '<span style="color:#dc2626;font-size:12px">已下架</span>'
-                : '<span style="color:#16a34a;font-size:12px">上架中</span>';
-            const actionCell = offline
-                ? '—'
-                : `<button type="button" class="btn-danger btn-offline-product" data-id="${p.id}">下架</button>`;
-            return `<tr>
-  <td>${p.id}</td>
-  <td>${escapeHtml(p.key)}</td>
-  <td>${escapeHtml(p.title)}</td>
-  <td>¥${Number(p.price || 0).toFixed(2)}</td>
-  <td>${p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久'}</td>
-  <td>${p.support_continue ? '是' : '否'}</td>
-  <td>${formatDateTime(p.created_at)}</td>
-  <td>${statusCell}</td>
-  <td>${actionCell}</td>
-</tr>`;
-        }).join('');
+        if (empty) empty.style.display = 'none';
+        grid.innerHTML = items.map((p) => renderProductCard(p)).join('');
 
-        tbody.querySelectorAll('.btn-offline-product').forEach((btn) => {
+        grid.querySelectorAll('.btn-offline-product').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const productId = Number(btn.dataset.id);
                 if (!productId) return;
@@ -2140,7 +2246,7 @@ async function handleAdminCreateProduct(e) {
     const productData = {
         key: form.querySelector('[name=key]').value.trim(),
         title: form.querySelector('[name=title]').value.trim(),
-        desc: form.querySelector('[name=desc]').value,
+        desc: getProductDescHtml(),
         price: parseFloat(form.querySelector('[name=price]').value),
         expire_time: form.querySelector('[name=expire_time]').value
             ? parseInt(form.querySelector('[name=expire_time]').value, 10)
@@ -2150,7 +2256,7 @@ async function handleAdminCreateProduct(e) {
     };
     try {
         await adminCommerceAPI.createProduct(productData);
-        form.reset();
+        closeProductModal();
         await loadAdminProducts();
         showToast('商品创建成功', 'success');
     } catch (err) {

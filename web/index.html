@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/style.css?v=16">
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
 </head>
 <body>
     <div class="app-container">
@@ -383,31 +384,16 @@
 
                 <!-- 商品管理视图（admin） -->
                 <div id="products-view" class="view">
-                    <div class="card">
-                        <h3 class="section-title">新增商品</h3>
-                        <form id="create-product-form">
-                            <div class="row">
-                                <div class="col"><input type="text" name="key" required placeholder="商品 Key（唯一）"></div>
-                                <div class="col"><input type="text" name="title" required placeholder="商品名称"></div>
-                                <div class="col"><input type="number" name="price" min="0.01" step="0.01" required placeholder="价格"></div>
-                            </div>
-                            <div class="row" style="margin-top:8px;">
-                                <div class="col"><input type="number" name="expire_time" min="1" placeholder="有效期秒（空=永久）"></div>
-                                <div class="col"><input type="text" name="icon" placeholder="封面图 URL"></div>
-                                <div class="col"><input type="text" name="desc" placeholder="商品描述"></div>
-                            </div>
-                            <div style="margin-top:8px;"><label><input type="checkbox" name="support_continue"> 支持续费</label></div>
-                            <div style="margin-top:10px;"><button type="submit" class="btn-primary">添加商品</button></div>
-                        </form>
+                    <div class="view-header">
+                        <h2>商品管理</h2>
+                        <button id="open-create-product-btn" class="btn-primary">+ 新增商品</button>
                     </div>
-                    <div class="card" style="margin-top:12px;">
-                        <h3 class="section-title">商品列表</h3>
-                        <div class="table-wrap">
-                            <table id="products-table">
-                                <thead><tr><th>ID</th><th>Key</th><th>名称</th><th>价格</th><th>有效期</th><th>续费</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
+                    <div id="products-grid" class="products-grid">
+                        <!-- 动态渲染商品卡片 -->
+                    </div>
+                    <div id="products-empty" class="empty-state" style="display:none;">
+                        <span class="empty-icon">📦</span>
+                        <p>暂无商品，点击上方按钮添加</p>
                     </div>
                 </div>
 
@@ -462,6 +448,58 @@
         </div>
     </div>
     
+    <!-- 新增商品弹窗 -->
+    <div id="create-product-overlay" class="modal-overlay">
+        <div class="modal" style="max-width:640px;">
+            <div class="modal-header">
+                <h3>新增商品</h3>
+                <button class="modal-close" id="close-create-product">&times;</button>
+            </div>
+            <form id="create-product-form">
+                <div class="modal-content">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group">
+                            <label>商品 Key（唯一）</label>
+                            <input type="text" name="key" required placeholder="如 pro_monthly">
+                        </div>
+                        <div class="form-group">
+                            <label>商品名称</label>
+                            <input type="text" name="title" required placeholder="如 专业版月卡">
+                        </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group">
+                            <label>价格（元）</label>
+                            <input type="number" name="price" min="0.01" step="0.01" required placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label>有效期（秒，空=永久）</label>
+                            <input type="number" name="expire_time" min="1" placeholder="如 2592000（30天）">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>封面图 URL</label>
+                        <input type="text" name="icon" placeholder="https://...">
+                    </div>
+                    <div class="form-group">
+                        <label>商品描述</label>
+                        <div id="product-desc-editor"></div>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" name="support_continue" style="width:16px;height:16px;">
+                            支持续费
+                        </label>
+                    </div>
+                </div>
+                <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;justify-content:flex-end;gap:8px;">
+                    <button type="button" class="btn-secondary" id="cancel-create-product">取消</button>
+                    <button type="submit" class="btn-primary">确认添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- 模态框 -->
     <div id="modal-overlay" class="modal-overlay">
         <div id="modal" class="modal">
@@ -478,11 +516,12 @@
     <!-- Toast通知 -->
     <div id="toast-container" class="toast-container"></div>
     
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
     <script src="js/utils.js?v=3"></script>
     <script src="js/api.js?v=10"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=19"></script>
+    <script src="js/app.js?v=20"></script>
 </body>
 </html>
 
