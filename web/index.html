@@ -1253,31 +1253,73 @@
                     </div>
                 </div>
 
-                <!-- 应用配置页面 -->
+                <!-- 应用配置向导页面 -->
                 <div id="client-config-view" class="view">
-                    <div class="view-header">
+                    <div class="view-header wizard-view-header">
                         <div class="view-header-left">
                             <button class="btn-back" id="client-config-back-btn">← 返回</button>
                             <h2 id="client-config-title">应用配置</h2>
                         </div>
-                        <div class="view-header-right" id="client-config-header-actions" style="display: none;">
-                            <button type="button" class="btn-secondary" id="client-config-cancel-btn">取消</button>
-                            <button type="button" class="btn-primary" id="client-config-save-btn">保存</button>
+                    </div>
+
+                    <!-- 步骤流程节点图 -->
+                    <div class="wizard-flow-bar" id="wizard-flow-bar">
+                        <div class="wizard-step-node" data-step="0">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">基本信息</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="1">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">环境变量</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="2">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">代码仓库</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="3">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">云服务器</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="4">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">域名</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="5">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">数据库</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="6">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">支付</div>
+                        </div>
+                        <div class="wizard-step-connector"></div>
+                        <div class="wizard-step-node" data-step="7">
+                            <div class="wizard-step-dot"></div>
+                            <div class="wizard-step-label">对象存储</div>
                         </div>
                     </div>
-                    <div class="config-tabs-nav">
-                        <button class="config-tab-btn active" data-config-tab="basic">基本信息</button>
-                        <button class="config-tab-btn" data-config-tab="env-vars" id="tab-btn-env-vars">环境变量</button>
-                        <button class="config-tab-btn" data-config-tab="repos" id="tab-btn-repos">代码仓库</button>
-                    </div>
-                    <div class="config-tab-panels">
-                        <!-- 基本信息 -->
-                        <div id="client-tab-basic" class="config-tab-panel active">
+
+                    <!-- 向导步骤内容 -->
+                    <div class="wizard-body">
+                        <!-- Step 0: 基本信息 -->
+                        <div id="wizard-step-0" class="wizard-step-panel active">
                             <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">基本信息</div>
+                                        <div class="config-section-subtitle">必填，应用的基本描述信息。</div>
+                                    </div>
+                                </div>
                                 <form id="client-basic-form">
                                     <div class="client-basic-grid">
                                         <div class="form-group client-basic-name">
-                                            <label>应用名称</label>
+                                            <label>应用名称 <span class="required-mark">*</span></label>
                                             <input type="text" id="cfg-client-name" placeholder="请输入名称（最多16个字符）" maxlength="16">
                                         </div>
                                         <div class="form-group client-basic-agent">
@@ -1295,38 +1337,223 @@
                                 </form>
                             </div>
                         </div>
-                        <!-- 环境变量 -->
-                        <div id="client-tab-env-vars" class="config-tab-panel">
+
+                        <!-- Step 1: 环境变量 -->
+                        <div id="wizard-step-1" class="wizard-step-panel">
                             <div class="config-section">
                                 <div class="config-section-toolbar">
                                     <div class="config-section-intro">
                                         <div class="config-section-title">环境变量</div>
-                                        <div class="config-section-subtitle">变量修改会在点击右上角保存后统一提交。</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。修改在下一步后统一保存。</div>
                                     </div>
                                     <button class="btn-secondary config-add-btn" id="add-env-var-btn" type="button">+ 新增变量</button>
                                 </div>
-                                <div class="config-section-tip" id="env-vars-tip"></div>
-                                <div id="env-vars-list" class="env-vars-list">
-                                    <!-- 动态填充 -->
+                                <div class="wizard-env-tabs" id="env-var-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
                                 </div>
+                                <div class="config-section-tip tip-warn" id="env-vars-tip">注意：仅在 docker私有化部署、官方云部署场景下环境变量才会生效。</div>
+                                <div id="env-vars-list" class="env-vars-list"></div>
                                 <div id="env-vars-empty" class="empty-state" style="display:none;">
                                     <p>暂无环境变量配置</p>
                                 </div>
                             </div>
                         </div>
-                        <!-- 代码仓库 -->
-                        <div id="client-tab-repos" class="config-tab-panel">
+
+                        <!-- Step 2: 代码仓库 -->
+                        <div id="wizard-step-2" class="wizard-step-panel">
                             <div class="config-section">
                                 <div class="config-section-toolbar">
                                     <div class="config-section-intro">
-                                        <div class="config-section-title">代码仓库</div>
-                                        <div class="config-section-subtitle">仓库修改会在点击右上角保存后统一提交。</div>
+                                        <div class="config-section-title">代码仓库 <span class="required-mark">*</span></div>
+                                        <div class="config-section-subtitle">必填，须指定唯一文档仓库。</div>
                                     </div>
                                     <button class="btn-secondary config-add-btn" id="cfg-add-repo-btn" type="button">+ 新增仓库</button>
                                 </div>
-                                <div class="config-section-tip tip-info" id="repos-tip">须指定唯一文档仓库。</div>
                                 <div class="repos-waterfall" id="cfg-repos-waterfall"></div>
                             </div>
+                        </div>
+
+                        <!-- Step 3: 云服务器 -->
+                        <div id="wizard-step-3" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">云服务器</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置，保存时会校验 SSH 连通性。</div>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="server-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="server-form-container">
+                                    <div class="infra-form-grid">
+                                        <div class="form-group">
+                                            <label>登录账号</label>
+                                            <input type="text" id="cfg-server-name" placeholder="如 root">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>登录密码</label>
+                                            <input type="password" id="cfg-server-password" placeholder="SSH 登录密码">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>服务器 IP</label>
+                                            <input type="text" id="cfg-server-ip" placeholder="如 1.2.3.4">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 4: 域名 -->
+                        <div id="wizard-step-4" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">域名</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。</div>
+                                    </div>
+                                    <button class="btn-secondary config-add-btn" id="add-domain-btn" type="button">+ 新增域名</button>
+                                </div>
+                                <div class="wizard-env-tabs" id="domain-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="domains-list" class="infra-list"></div>
+                                <div id="domains-empty" class="empty-state" style="display:none;"><p>暂无域名配置</p></div>
+                            </div>
+                        </div>
+
+                        <!-- Step 5: 数据库 -->
+                        <div id="wizard-step-5" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">数据库</div>
+                                        <div class="config-section-subtitle">可跳过；支持多条配置，选择环境后配置。</div>
+                                    </div>
+                                    <button class="btn-secondary config-add-btn" id="add-database-btn" type="button">+ 新增数据库</button>
+                                </div>
+                                <div class="wizard-env-tabs" id="database-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="databases-list" class="infra-list"></div>
+                                <div id="databases-empty" class="empty-state" style="display:none;"><p>暂无数据库配置</p></div>
+                            </div>
+                        </div>
+
+                        <!-- Step 6: 支付 -->
+                        <div id="wizard-step-6" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">支付</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。目前支持支付宝。</div>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="payment-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="payment-form-container">
+                                    <div class="form-group" style="margin-bottom:12px;">
+                                        <label>支付类型</label>
+                                        <select id="cfg-payment-type" class="status-select">
+                                            <option value="alipay">支付宝</option>
+                                        </select>
+                                    </div>
+                                    <div class="infra-form-grid">
+                                        <div class="form-group">
+                                            <label>AppID</label>
+                                            <input type="text" id="cfg-payment-appid" placeholder="支付宝应用 AppID">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>notify_url</label>
+                                            <input type="text" id="cfg-payment-notify-url" placeholder="异步通知回调 URL">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>return_url</label>
+                                            <input type="text" id="cfg-payment-return-url" placeholder="支付完成同步跳转 URL">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>gateway</label>
+                                            <input type="text" id="cfg-payment-gateway" placeholder="支付宝网关">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>app_encrypt_key</label>
+                                            <input type="text" id="cfg-payment-app-encrypt-key" placeholder="AES 加密密钥（可选）">
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-top:8px;">
+                                        <label>app_private_key（应用 RSA2 私钥）</label>
+                                        <textarea id="cfg-payment-app-private-key" rows="4" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+                                    </div>
+                                    <div class="form-group" style="margin-top:8px;">
+                                        <label>alipay_public_key（支付宝公钥）</label>
+                                        <textarea id="cfg-payment-alipay-public-key" rows="4" placeholder="支付宝公钥内容"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 7: 对象存储 -->
+                        <div id="wizard-step-7" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">对象存储</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。目前支持腾讯云 COS。</div>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="oss-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="oss-form-container">
+                                    <div class="form-group" style="margin-bottom:12px;">
+                                        <label>存储类型</label>
+                                        <select id="cfg-oss-type" class="status-select">
+                                            <option value="cos">腾讯云 COS</option>
+                                        </select>
+                                    </div>
+                                    <div class="infra-form-grid">
+                                        <div class="form-group">
+                                            <label>SecretId</label>
+                                            <input type="text" id="cfg-oss-secret-id" placeholder="腾讯云 SecretId">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>SecretKey</label>
+                                            <input type="password" id="cfg-oss-secret-key" placeholder="腾讯云 SecretKey">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Region</label>
+                                            <input type="text" id="cfg-oss-region" placeholder="如 ap-guangzhou">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Bucket</label>
+                                            <input type="text" id="cfg-oss-bucket" placeholder="如 myapp-1234567890">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>base_url（公开访问域名前缀）</label>
+                                            <input type="text" id="cfg-oss-base-url" placeholder="如 https://xxx.cos.ap-guangzhou.myqcloud.com">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 向导底部操作栏 -->
+                    <div class="wizard-footer" id="wizard-footer">
+                        <div class="wizard-footer-left">
+                            <button type="button" class="btn-secondary" id="wizard-prev-btn">← 上一步</button>
+                        </div>
+                        <div class="wizard-footer-right">
+                            <button type="button" class="btn-secondary" id="wizard-skip-btn">跳过</button>
+                            <button type="button" class="btn-primary" id="wizard-next-btn">下一步 →</button>
+                            <button type="button" class="btn-success" id="wizard-finish-btn" style="display:none;">完成</button>
                         </div>
                     </div>
                 </div>
