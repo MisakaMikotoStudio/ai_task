@@ -6,11 +6,13 @@
     'use strict';
 
     let currentOrderPage = 1;
+    let quillEditor = null;
 
     async function init() {
         await initAPIConfig();
         await ensureAdmin();
         bindTabEvents();
+        bindModalEvents();
         bindBusinessEvents();
         await loadProducts();
         await loadOrders(1);
@@ -46,6 +48,81 @@
         });
     }
 
+    // ========== Modal 弹窗逻辑 ==========
+
+    function bindModalEvents() {
+        const modal = document.getElementById('create-product-modal');
+        const openBtn = document.getElementById('open-create-product-btn');
+        const closeBtn = document.getElementById('close-create-modal');
+        const cancelBtn = document.getElementById('cancel-create-modal');
+
+        if (openBtn) {
+            openBtn.addEventListener('click', () => openCreateModal());
+        }
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => closeCreateModal());
+        }
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => closeCreateModal());
+        }
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeCreateModal();
+            });
+        }
+    }
+
+    function openCreateModal() {
+        const modal = document.getElementById('create-product-modal');
+        if (!modal) return;
+        modal.classList.add('show');
+        initQuillEditor();
+    }
+
+    function closeCreateModal() {
+        const modal = document.getElementById('create-product-modal');
+        if (!modal) return;
+        modal.classList.remove('show');
+        resetCreateForm();
+    }
+
+    function resetCreateForm() {
+        const form = document.getElementById('create-product-form');
+        if (form) form.reset();
+        if (quillEditor) {
+            quillEditor.setContents([]);
+        }
+    }
+
+    function initQuillEditor() {
+        if (quillEditor) return;
+        const container = document.getElementById('product-desc-editor');
+        if (!container) return;
+        quillEditor = new Quill(container, {
+            theme: 'snow',
+            placeholder: '输入商品描述...',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'color': [] }, { 'background': [] }],
+                    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                    ['blockquote', 'link'],
+                    ['clean']
+                ]
+            }
+        });
+    }
+
+    function getQuillHtml() {
+        if (!quillEditor) return '';
+        const html = quillEditor.root.innerHTML;
+        if (html === '<p><br></p>' || html === '<p></p>') return '';
+        return html;
+    }
+
+    // ========== 商品逻辑 ==========
+
     function bindBusinessEvents() {
         const createForm = document.getElementById('create-product-form');
         if (createForm) createForm.addEventListener('submit', handleCreateProduct);
@@ -55,37 +132,22 @@
     }
 
     async function loadProducts() {
-        const tbody = document.querySelector('#products-table tbody');
-        if (!tbody) return;
+        const grid = document.getElementById('products-grid');
+        if (!grid) return;
         try {
             const resp = await adminCommerceAPI.getAdminProducts();
             const items = resp.data || [];
             if (!items.length) {
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center">暂无商品</td></tr>';
+                grid.innerHTML = `
+                    <div class="empty-state" style="grid-column:1/-1;">
+                        <div class="empty-state-icon">&#128230;</div>
+                        <p class="empty-state-text">暂无商品，点击上方按钮添加</p>
+                    </div>`;
                 return;
             }
-            tbody.innerHTML = items.map((p) => {
-                const offline = p.offline;
-                const statusCell = offline
-                    ? '<span style="color:#dc2626;font-size:12px">已下架</span>'
-                    : '<span style="color:#16a34a;font-size:12px">上架中</span>';
-                const actionCell = offline
-                    ? '—'
-                    : `<button type="button" class="btn-danger btn-offline-product" data-id="${p.id}">下架</button>`;
-                return `<tr>
-  <td>${p.id}</td>
-  <td>${escapeHtml(p.key)}</td>
-  <td>${escapeHtml(p.title)}</td>
-  <td>¥${Number(p.price || 0).toFixed(2)}</td>
-  <td>${p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久'}</td>
-  <td>${p.support_continue ? '是' : '否'}</td>
-  <td>${formatDate(p.created_at)}</td>
-  <td>${statusCell}</td>
-  <td>${actionCell}</td>
-</tr>`;
-            }).join('');
+            grid.innerHTML = items.map((p) => renderProductCard(p)).join('');
 
-            tbody.querySelectorAll('.btn-offline-product').forEach((btn) => {
+            grid.querySelectorAll('.btn-offline-product').forEach((btn) => {
                 btn.addEventListener('click', async () => {
                     const productId = Number(btn.dataset.id);
                     if (!productId) return;
@@ -93,15 +155,74 @@
                     try {
                         await adminCommerceAPI.offlineProduct(productId);
                         await loadProducts();
-                        alert('已下架');
                     } catch (err) {
-                        alert(`下架失败：${err.message}`);
+                        alert('下架失败：' + err.message);
                     }
                 });
             });
         } catch (err) {
-            alert(`加载商品失败：${err.message}`);
+            grid.innerHTML = `
+                <div class="empty-state" style="grid-column:1/-1;">
+                    <div class="empty-state-icon">&#9888;</div>
+                    <p class="empty-state-text">加载失败：${escapeHtml(err.message)}</p>
+                </div>`;
         }
+    }
+
+    function renderProductCard(product) {
+        const isOffline = !!product.offline;
+        const offlineClass = isOffline ? ' offline' : '';
+
+        const iconHtml = product.icon
+            ? `<img class="product-card-icon" src="${escapeHtml(product.icon)}" alt="${escapeHtml(product.title)}">`
+            : `<div class="product-card-icon-placeholder">&#128230;</div>`;
+
+        const statusBadge = isOffline
+            ? '<span class="product-card-badge badge-danger">已下架</span>'
+            : '<span class="product-card-badge badge-success">上架中</span>';
+
+        const expireBadge = product.expire_time
+            ? `<span class="product-card-badge badge-info">${Math.round(product.expire_time / 86400)} 天</span>`
+            : '<span class="product-card-badge badge-muted">永久</span>';
+
+        const renewBadge = product.support_continue
+            ? '<span class="product-card-badge badge-info">可续费</span>'
+            : '';
+
+        const actionBtn = isOffline
+            ? ''
+            : `<button class="btn btn-danger btn-sm btn-offline-product" data-id="${product.id}">下架</button>`;
+
+        const descText = stripHtml(product.desc || '');
+        const descDisplay = descText
+            ? `<p class="product-card-desc">${escapeHtml(descText)}</p>`
+            : '';
+
+        return `
+        <div class="product-card${offlineClass}">
+            ${iconHtml}
+            <div class="product-card-body">
+                <div class="product-card-title">${escapeHtml(product.title)}</div>
+                <span class="product-card-key">${escapeHtml(product.key)}</span>
+                ${descDisplay}
+                <div class="product-card-meta">
+                    <span class="product-card-price">${Number(product.price || 0).toFixed(2)}</span>
+                    ${statusBadge}
+                    ${expireBadge}
+                    ${renewBadge}
+                </div>
+            </div>
+            <div class="product-card-footer">
+                <span class="product-card-date">ID: ${product.id} | ${formatDate(product.created_at)}</span>
+                ${actionBtn}
+            </div>
+        </div>`;
+    }
+
+    function stripHtml(html) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        return tmp.textContent || tmp.innerText || '';
     }
 
     async function handleCreateProduct(e) {
@@ -110,7 +231,7 @@
         const productData = {
             key: form.querySelector('[name=key]').value.trim(),
             title: form.querySelector('[name=title]').value.trim(),
-            desc: form.querySelector('[name=desc]').value,
+            desc: getQuillHtml(),
             price: parseFloat(form.querySelector('[name=price]').value),
             expire_time: form.querySelector('[name=expire_time]').value
                 ? parseInt(form.querySelector('[name=expire_time]').value, 10)
@@ -120,13 +241,15 @@
         };
         try {
             await adminCommerceAPI.createProduct(productData);
-            form.reset();
+            closeCreateModal();
             await loadProducts();
             alert('商品创建成功');
         } catch (err) {
-            alert(`创建失败：${err.message}`);
+            alert('创建失败：' + err.message);
         }
     }
+
+    // ========== 订单逻辑 ==========
 
     async function loadOrders(page) {
         currentOrderPage = page;
@@ -141,7 +264,7 @@
             });
             renderOrdersTable(resp.data || {});
         } catch (err) {
-            alert(`加载订单失败：${err.message}`);
+            alert('加载订单失败：' + err.message);
         }
     }
 
@@ -150,19 +273,19 @@
         if (!tbody) return;
         const items = data.items || [];
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center">暂无订单</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:40px;">暂无订单</td></tr>';
         } else {
             tbody.innerHTML = items.map((o) => {
                 const canRefund = o.status === 'paid';
                 return `<tr>
   <td>${o.id}</td>
   <td>${o.user_id}</td>
-  <td>${escapeHtml(o.product_key)}</td>
-  <td>¥${Number(o.amount || 0).toFixed(2)}</td>
+  <td><code>${escapeHtml(o.product_key)}</code></td>
+  <td style="font-weight:600;">¥${Number(o.amount || 0).toFixed(2)}</td>
   <td>${escapeHtml(o.status)}</td>
   <td>${escapeHtml(o.trade_no || '-')}</td>
   <td>${formatDate(o.created_at)}</td>
-  <td>${canRefund ? `<button class="btn-danger refund-btn" data-id="${o.id}">退款</button>` : '-'}</td>
+  <td>${canRefund ? `<button class="btn btn-danger btn-sm refund-btn" data-id="${o.id}">退款</button>` : '-'}</td>
 </tr>`;
             }).join('');
         }
@@ -191,11 +314,13 @@
                     await loadOrders(currentOrderPage);
                     alert('退款成功');
                 } catch (err) {
-                    alert(`退款失败：${err.message}`);
+                    alert('退款失败：' + err.message);
                 }
             });
         });
     }
+
+    // ========== 工具函数 ==========
 
     function escapeHtml(str) {
         return String(str)
