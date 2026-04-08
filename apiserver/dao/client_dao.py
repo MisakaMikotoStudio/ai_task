@@ -11,9 +11,12 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import or_
 
 from .connection import get_db_session
+from .models import (
+    Client, ClientRepo, ClientEnvVar, User,
+    ClientServer, ClientDomain, ClientDatabase, ClientPayment, ClientOss,
+)
 
 logger = logging.getLogger(__name__)
-from .models import Client, ClientRepo, ClientEnvVar, User
 
 
 def create_client(
@@ -554,6 +557,7 @@ def apply_client_env_var_sync(
                 {
                     ClientEnvVar.key: row["key"],
                     ClientEnvVar.value: row.get("value", ""),
+                    ClientEnvVar.env: row.get("env") or None,
                 },
                 synchronize_session=False,
             )
@@ -564,8 +568,267 @@ def apply_client_env_var_sync(
                     user_id=user_id,
                     key=ins["key"],
                     value=ins.get("value", ""),
+                    env=ins.get("env") or None,
                 )
             )
+
+
+# ============================================================
+# 基础设施配置 DAO（云服务器、域名、数据库、支付、对象存储）
+# ============================================================
+
+VALID_ENVS = ('test', 'prod')
+
+
+def get_client_servers(client_id: int, user_id: int) -> List[ClientServer]:
+    """获取客户端云服务器配置（所有环境）"""
+    with get_db_session() as session:
+        return session.query(ClientServer).filter(
+            ClientServer.client_id == client_id,
+            ClientServer.user_id == user_id,
+            ClientServer.deleted_at.is_(None),
+        ).order_by(ClientServer.env.asc()).all()
+
+
+def upsert_client_server(
+    client_id: int,
+    user_id: int,
+    env: str,
+    name: str,
+    password: str,
+    ip: str,
+) -> None:
+    """新增或更新指定环境的云服务器配置（每个环境只保留一条）"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        existing = session.query(ClientServer).filter(
+            ClientServer.client_id == client_id,
+            ClientServer.user_id == user_id,
+            ClientServer.env == env,
+            ClientServer.deleted_at.is_(None),
+        ).first()
+        if existing:
+            existing.name = name
+            existing.password = password
+            existing.ip = ip
+            existing.updated_at = now
+        else:
+            session.add(ClientServer(
+                client_id=client_id,
+                user_id=user_id,
+                env=env,
+                name=name,
+                password=password,
+                ip=ip,
+            ))
+
+
+def delete_client_server_by_env(client_id: int, user_id: int, env: str) -> None:
+    """软删除指定环境的云服务器配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        session.query(ClientServer).filter(
+            ClientServer.client_id == client_id,
+            ClientServer.user_id == user_id,
+            ClientServer.env == env,
+            ClientServer.deleted_at.is_(None),
+        ).update({ClientServer.deleted_at: now}, synchronize_session=False)
+
+
+def get_client_domains(client_id: int, user_id: int) -> List[ClientDomain]:
+    """获取客户端域名配置（所有环境）"""
+    with get_db_session() as session:
+        return session.query(ClientDomain).filter(
+            ClientDomain.client_id == client_id,
+            ClientDomain.user_id == user_id,
+            ClientDomain.deleted_at.is_(None),
+        ).order_by(ClientDomain.env.asc()).all()
+
+
+def sync_client_domains(client_id: int, user_id: int, env: str, domains: List[str]) -> None:
+    """全量同步指定环境的域名配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        # 软删除该环境下所有旧记录
+        session.query(ClientDomain).filter(
+            ClientDomain.client_id == client_id,
+            ClientDomain.user_id == user_id,
+            ClientDomain.env == env,
+            ClientDomain.deleted_at.is_(None),
+        ).update({ClientDomain.deleted_at: now}, synchronize_session=False)
+        # 插入新记录
+        for domain in domains:
+            domain = domain.strip()
+            if domain:
+                session.add(ClientDomain(
+                    client_id=client_id,
+                    user_id=user_id,
+                    env=env,
+                    domain=domain,
+                ))
+
+
+def get_client_databases(client_id: int, user_id: int) -> List[ClientDatabase]:
+    """获取客户端数据库配置（所有环境）"""
+    with get_db_session() as session:
+        return session.query(ClientDatabase).filter(
+            ClientDatabase.client_id == client_id,
+            ClientDatabase.user_id == user_id,
+            ClientDatabase.deleted_at.is_(None),
+        ).order_by(ClientDatabase.env.asc(), ClientDatabase.id.asc()).all()
+
+
+def sync_client_databases(
+    client_id: int,
+    user_id: int,
+    env: str,
+    databases: List[Dict[str, Any]],
+) -> None:
+    """全量同步指定环境的数据库配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        session.query(ClientDatabase).filter(
+            ClientDatabase.client_id == client_id,
+            ClientDatabase.user_id == user_id,
+            ClientDatabase.env == env,
+            ClientDatabase.deleted_at.is_(None),
+        ).update({ClientDatabase.deleted_at: now}, synchronize_session=False)
+        for db in databases:
+            session.add(ClientDatabase(
+                client_id=client_id,
+                user_id=user_id,
+                env=env,
+                db_type=db.get('db_type', 'mysql'),
+                host=db.get('host', ''),
+                port=int(db.get('port', 3306)),
+                username=db.get('username', ''),
+                password=db.get('password', ''),
+                db_name=db.get('db_name', ''),
+            ))
+
+
+def get_client_payment(client_id: int, user_id: int) -> List[ClientPayment]:
+    """获取客户端支付配置（所有环境）"""
+    with get_db_session() as session:
+        return session.query(ClientPayment).filter(
+            ClientPayment.client_id == client_id,
+            ClientPayment.user_id == user_id,
+            ClientPayment.deleted_at.is_(None),
+        ).order_by(ClientPayment.env.asc()).all()
+
+
+def upsert_client_payment(
+    client_id: int,
+    user_id: int,
+    env: str,
+    payment_type: str,
+    fields: Dict[str, Any],
+) -> None:
+    """新增或更新指定环境的支付配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        existing = session.query(ClientPayment).filter(
+            ClientPayment.client_id == client_id,
+            ClientPayment.user_id == user_id,
+            ClientPayment.env == env,
+            ClientPayment.deleted_at.is_(None),
+        ).first()
+        if existing:
+            existing.payment_type = payment_type
+            existing.appid = fields.get('appid', '')
+            existing.app_private_key = fields.get('app_private_key', '')
+            existing.alipay_public_key = fields.get('alipay_public_key', '')
+            existing.notify_url = fields.get('notify_url', '')
+            existing.return_url = fields.get('return_url', '')
+            existing.gateway = fields.get('gateway', '')
+            existing.app_encrypt_key = fields.get('app_encrypt_key', '')
+            existing.updated_at = now
+        else:
+            session.add(ClientPayment(
+                client_id=client_id,
+                user_id=user_id,
+                env=env,
+                payment_type=payment_type,
+                appid=fields.get('appid', ''),
+                app_private_key=fields.get('app_private_key', ''),
+                alipay_public_key=fields.get('alipay_public_key', ''),
+                notify_url=fields.get('notify_url', ''),
+                return_url=fields.get('return_url', ''),
+                gateway=fields.get('gateway', ''),
+                app_encrypt_key=fields.get('app_encrypt_key', ''),
+            ))
+
+
+def delete_client_payment_by_env(client_id: int, user_id: int, env: str) -> None:
+    """软删除指定环境的支付配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        session.query(ClientPayment).filter(
+            ClientPayment.client_id == client_id,
+            ClientPayment.user_id == user_id,
+            ClientPayment.env == env,
+            ClientPayment.deleted_at.is_(None),
+        ).update({ClientPayment.deleted_at: now}, synchronize_session=False)
+
+
+def get_client_oss(client_id: int, user_id: int) -> List[ClientOss]:
+    """获取客户端对象存储配置（所有环境）"""
+    with get_db_session() as session:
+        return session.query(ClientOss).filter(
+            ClientOss.client_id == client_id,
+            ClientOss.user_id == user_id,
+            ClientOss.deleted_at.is_(None),
+        ).order_by(ClientOss.env.asc()).all()
+
+
+def upsert_client_oss(
+    client_id: int,
+    user_id: int,
+    env: str,
+    oss_type: str,
+    fields: Dict[str, Any],
+) -> None:
+    """新增或更新指定环境的对象存储配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        existing = session.query(ClientOss).filter(
+            ClientOss.client_id == client_id,
+            ClientOss.user_id == user_id,
+            ClientOss.env == env,
+            ClientOss.deleted_at.is_(None),
+        ).first()
+        if existing:
+            existing.oss_type = oss_type
+            existing.secret_id = fields.get('secret_id', '')
+            existing.secret_key = fields.get('secret_key', '')
+            existing.region = fields.get('region', '')
+            existing.bucket = fields.get('bucket', '')
+            existing.base_url = fields.get('base_url', '')
+            existing.updated_at = now
+        else:
+            session.add(ClientOss(
+                client_id=client_id,
+                user_id=user_id,
+                env=env,
+                oss_type=oss_type,
+                secret_id=fields.get('secret_id', ''),
+                secret_key=fields.get('secret_key', ''),
+                region=fields.get('region', ''),
+                bucket=fields.get('bucket', ''),
+                base_url=fields.get('base_url', ''),
+            ))
+
+
+def delete_client_oss_by_env(client_id: int, user_id: int, env: str) -> None:
+    """软删除指定环境的对象存储配置"""
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        session.query(ClientOss).filter(
+            ClientOss.client_id == client_id,
+            ClientOss.user_id == user_id,
+            ClientOss.env == env,
+            ClientOss.deleted_at.is_(None),
+        ).update({ClientOss.deleted_at: now}, synchronize_session=False)
 
 
 def check_client_usable_for_user(client_id: int, user_id: int) -> bool:

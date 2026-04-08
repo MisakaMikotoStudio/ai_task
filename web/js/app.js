@@ -641,19 +641,67 @@ async function copyClient(id) {
     }
 }
 
-// ===== 客户端配置页面 =====
+// ===== 客户端配置向导页面 =====
 
-// 当前客户端配置页面状态
+// 向导步骤定义
+const WIZARD_STEPS = [
+    { id: 0, label: '基本信息', required: true },
+    { id: 1, label: '环境变量', required: false },
+    { id: 2, label: '代码仓库', required: true },
+    { id: 3, label: '云服务器', required: false },
+    { id: 4, label: '域名',     required: false },
+    { id: 5, label: '数据库',   required: false },
+    { id: 6, label: '支付',     required: false },
+    { id: 7, label: '对象存储', required: false },
+];
+
+// 当前向导状态
 let cfgClientId = null;      // null = 新建模式
 let cfgClientMode = 'add';   // 'add' | 'edit' | 'view'
+let cfgCurrentStep = 0;
 let cfgReposList = [];
-let cfgEnvVarsData = [];
+
+// 环境变量：按 env 分组 { test: [{key,value,...}], prod: [...] }
+let cfgEnvVarsByEnv = { test: [], prod: [] };
+let cfgEnvVarsCurrentEnv = 'test';
+
+// 云服务器：按 env 存储 { test: {name,password,ip}, prod: {name,password,ip} }
+let cfgServersByEnv = { test: { name: '', password: '', ip: '' }, prod: { name: '', password: '', ip: '' } };
+let cfgServerCurrentEnv = 'test';
+
+// 域名：按 env 存储 { test: ['...'], prod: ['...'] }
+let cfgDomainsByEnv = { test: [], prod: [] };
+let cfgDomainCurrentEnv = 'test';
+
+// 数据库：按 env 存储 { test: [{...}], prod: [{...}] }
+let cfgDatabasesByEnv = { test: [], prod: [] };
+let cfgDatabaseCurrentEnv = 'test';
+
+// 支付：按 env 存储 { test: {...}, prod: {...} }
+let cfgPaymentsByEnv = { test: {}, prod: {} };
+let cfgPaymentCurrentEnv = 'test';
+
+// 对象存储：按 env 存储 { test: {...}, prod: {...} }
+let cfgOssByEnv = { test: {}, prod: {} };
+let cfgOssCurrentEnv = 'test';
 
 function cfgResetClientConfigState() {
     cfgClientId = null;
     cfgClientMode = 'add';
+    cfgCurrentStep = 0;
     cfgReposList = [];
-    cfgEnvVarsData = [];
+    cfgEnvVarsByEnv = { test: [], prod: [] };
+    cfgEnvVarsCurrentEnv = 'test';
+    cfgServersByEnv = { test: { name: '', password: '', ip: '' }, prod: { name: '', password: '', ip: '' } };
+    cfgServerCurrentEnv = 'test';
+    cfgDomainsByEnv = { test: [], prod: [] };
+    cfgDomainCurrentEnv = 'test';
+    cfgDatabasesByEnv = { test: [], prod: [] };
+    cfgDatabaseCurrentEnv = 'test';
+    cfgPaymentsByEnv = { test: {}, prod: {} };
+    cfgPaymentCurrentEnv = 'test';
+    cfgOssByEnv = { test: {}, prod: {} };
+    cfgOssCurrentEnv = 'test';
 }
 
 function backToClients() {
@@ -662,7 +710,7 @@ function backToClients() {
     loadClients();
 }
 
-// 打开客户端配置页（替代弹窗）
+// 打开客户端配置向导
 async function openClientConfig(id, mode) {
     cfgResetClientConfigState();
     cfgClientId = id;
@@ -677,35 +725,11 @@ async function openClientConfig(id, mode) {
     const titleMap = { add: '新建应用', edit: '编辑应用', view: '查看应用' };
     document.getElementById('client-config-title').textContent = titleMap[mode] || '应用配置';
 
-    // Tab 切换逻辑
-    const tabBtns = document.querySelectorAll('.config-tab-btn');
-    const tabPanels = document.querySelectorAll('.config-tab-panel');
-
-    tabBtns.forEach(btn => {
-        btn.onclick = () => {
-            const tab = btn.dataset.configTab;
-            tabBtns.forEach(b => b.classList.remove('active'));
-            tabPanels.forEach(p => p.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(`client-tab-${tab}`).classList.add('active');
-        };
-    });
-
-    // 默认显示基本信息 tab
-    tabBtns.forEach(b => b.classList.remove('active'));
-    tabPanels.forEach(p => p.classList.remove('active'));
-    document.querySelector('[data-config-tab="basic"]').classList.add('active');
-    document.getElementById('client-tab-basic').classList.add('active');
-
     // 返回按钮
-    document.getElementById('client-config-back-btn').onclick = cfgCancelClientConfig;
-
-    const envTab = document.getElementById('tab-btn-env-vars');
-    const reposTab = document.getElementById('tab-btn-repos');
-    envTab.disabled = false;
-    reposTab.disabled = false;
-    envTab.title = '';
-    reposTab.title = '';
+    document.getElementById('client-config-back-btn').onclick = () => {
+        cfgResetClientConfigState();
+        backToClients();
+    };
 
     // 加载 Agent 列表
     let agentOptions = ['claude sdk', 'claude cli'];
@@ -715,22 +739,52 @@ async function openClientConfig(id, mode) {
     } catch (e) { console.warn('获取Agent列表失败', e); }
 
     const agentSelect = document.getElementById('cfg-client-agent');
-    const officialCloudDeploySelect = document.getElementById('cfg-client-official-cloud-deploy');
     agentSelect.innerHTML = agentOptions.map(a =>
         `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`
     ).join('');
 
-    // 编辑/查看：一次 GET 拉取基本信息、仓库、环境变量
+    // 如果是编辑/查看模式，加载已有数据
     if (id !== null) {
         try {
             const clientResult = await activeClientAPI.get(id);
             const clientData = clientResult.data;
             cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
-            cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev }));
+
+            // 按环境分组加载环境变量
+            const envVars = clientData.env_vars || [];
+            cfgEnvVarsByEnv = { test: [], prod: [] };
+            envVars.forEach(ev => {
+                const envKey = ev.env || 'test';
+                if (!cfgEnvVarsByEnv[envKey]) cfgEnvVarsByEnv[envKey] = [];
+                cfgEnvVarsByEnv[envKey].push({ ...ev });
+            });
 
             document.getElementById('cfg-client-name').value = clientData.name;
             agentSelect.value = clientData.agent || 'claude sdk';
-            officialCloudDeploySelect.value = String(clientData.official_cloud_deploy ?? 0);
+            document.getElementById('cfg-client-official-cloud-deploy').value = String(clientData.official_cloud_deploy ?? 0);
+
+            // 加载基础设施配置
+            try {
+                const infraResult = await infraAPI.get(id);
+                const infra = infraResult.data || {};
+                // 云服务器
+                cfgServersByEnv.test = infra.servers && infra.servers.test ? { ...infra.servers.test } : { name: '', password: '', ip: '' };
+                cfgServersByEnv.prod = infra.servers && infra.servers.prod ? { ...infra.servers.prod } : { name: '', password: '', ip: '' };
+                // 域名
+                cfgDomainsByEnv.test = (infra.domains && infra.domains.test) || [];
+                cfgDomainsByEnv.prod = (infra.domains && infra.domains.prod) || [];
+                // 数据库
+                cfgDatabasesByEnv.test = (infra.databases && infra.databases.test) || [];
+                cfgDatabasesByEnv.prod = (infra.databases && infra.databases.prod) || [];
+                // 支付
+                cfgPaymentsByEnv.test = (infra.payments && infra.payments.test) ? { ...infra.payments.test } : {};
+                cfgPaymentsByEnv.prod = (infra.payments && infra.payments.prod) ? { ...infra.payments.prod } : {};
+                // 对象存储
+                cfgOssByEnv.test = (infra.oss && infra.oss.test) ? { ...infra.oss.test } : {};
+                cfgOssByEnv.prod = (infra.oss && infra.oss.prod) ? { ...infra.oss.prod } : {};
+            } catch (e) {
+                console.warn('加载基础设施配置失败', e);
+            }
         } catch (error) {
             showToast(error.message, 'error');
             return;
@@ -738,214 +792,280 @@ async function openClientConfig(id, mode) {
     } else {
         document.getElementById('cfg-client-name').value = '';
         agentSelect.value = agentOptions[0] || 'claude sdk';
-        officialCloudDeploySelect.value = '0';
+        document.getElementById('cfg-client-official-cloud-deploy').value = '0';
     }
 
-    cfgApplyBasicFormMode();
-    cfgBindClientConfigHeader();
-
-    cfgRenderEnvVarsTab();
-    cfgRenderReposTab();
+    // 初始化向导
+    wizardGoToStep(0);
 }
 
-function cfgApplyBasicFormMode() {
-    const form = document.getElementById('client-basic-form');
-    if (form) {
-        form.onsubmit = (e) => e.preventDefault();
+// ---- 向导步骤导航 ----
+
+function wizardGoToStep(stepIndex) {
+    cfgCurrentStep = stepIndex;
+    wizardUpdateFlowBar();
+    wizardShowStepPanel(stepIndex);
+    wizardRenderStepContent(stepIndex);
+    wizardUpdateFooter(stepIndex);
+}
+
+function wizardUpdateFlowBar() {
+    const nodes = document.querySelectorAll('.wizard-step-node');
+    nodes.forEach((node, idx) => {
+        node.classList.remove('active', 'done');
+        if (idx < cfgCurrentStep) node.classList.add('done');
+        else if (idx === cfgCurrentStep) node.classList.add('active');
+        // 仅允许已完成步骤或当前步骤跳转（编辑模式允许任意跳转）
+        node.onclick = null;
+        if (cfgClientId !== null || idx <= cfgCurrentStep) {
+            node.style.cursor = 'pointer';
+            node.onclick = () => wizardGoToStep(idx);
+        } else {
+            node.style.cursor = 'default';
+        }
+    });
+}
+
+function wizardShowStepPanel(stepIndex) {
+    document.querySelectorAll('.wizard-step-panel').forEach((p, idx) => {
+        p.classList.toggle('active', idx === stepIndex);
+    });
+}
+
+function wizardRenderStepContent(stepIndex) {
+    const isView = (cfgClientMode === 'view');
+    switch (stepIndex) {
+        case 0: wizardRenderBasicStep(isView); break;
+        case 1: wizardRenderEnvVarsStep(isView); break;
+        case 2: wizardRenderReposStep(isView); break;
+        case 3: wizardRenderServerStep(isView); break;
+        case 4: wizardRenderDomainStep(isView); break;
+        case 5: wizardRenderDatabaseStep(isView); break;
+        case 6: wizardRenderPaymentStep(isView); break;
+        case 7: wizardRenderOssStep(isView); break;
     }
-    const basicInputs = document.querySelectorAll('#client-tab-basic input, #client-tab-basic select');
-    basicInputs.forEach(el => { el.disabled = (cfgClientMode === 'view'); });
+}
 
-    const headerActions = document.getElementById('client-config-header-actions');
-    if (headerActions) {
-        headerActions.style.display = (cfgClientMode === 'view') ? 'none' : 'flex';
+function wizardUpdateFooter(stepIndex) {
+    const isView = (cfgClientMode === 'view');
+    const prevBtn = document.getElementById('wizard-prev-btn');
+    const skipBtn = document.getElementById('wizard-skip-btn');
+    const nextBtn = document.getElementById('wizard-next-btn');
+    const finishBtn = document.getElementById('wizard-finish-btn');
+
+    const isFirst = stepIndex === 0;
+    const isLast = stepIndex === WIZARD_STEPS.length - 1;
+    const step = WIZARD_STEPS[stepIndex];
+
+    prevBtn.style.display = isFirst ? 'none' : '';
+    prevBtn.onclick = () => wizardGoToStep(stepIndex - 1);
+
+    // 跳过按钮：可跳过且非查看模式
+    skipBtn.style.display = (!step.required && !isView && !isLast) ? '' : 'none';
+    skipBtn.onclick = () => wizardGoToStep(stepIndex + 1);
+
+    // 下一步 / 完成
+    if (isLast) {
+        nextBtn.style.display = 'none';
+        finishBtn.style.display = isView ? 'none' : '';
+        finishBtn.onclick = () => wizardFinish();
+    } else {
+        nextBtn.style.display = isView ? 'none' : '';
+        finishBtn.style.display = 'none';
+        nextBtn.textContent = '下一步 →';
+        nextBtn.onclick = () => wizardHandleNextStep(stepIndex);
+    }
+
+    // 查看模式只显示返回
+    if (isView) {
+        prevBtn.style.display = '';
+        prevBtn.textContent = isFirst ? '← 返回列表' : '← 上一步';
+        if (isFirst) prevBtn.onclick = () => { cfgResetClientConfigState(); backToClients(); };
     }
 }
 
-function cfgBindClientConfigHeader() {
-    const saveBtn = document.getElementById('client-config-save-btn');
-    const cancelBtn = document.getElementById('client-config-cancel-btn');
-    if (saveBtn) saveBtn.onclick = () => cfgUnifiedSaveClient();
-    if (cancelBtn) cancelBtn.onclick = () => cfgCancelClientConfig();
+// ---- 各步骤处理 ----
+
+async function wizardHandleNextStep(stepIndex) {
+    // 步骤校验并保存
+    const err = await wizardSaveCurrentStep(stepIndex);
+    if (err) {
+        showToast(err, 'error');
+        return;
+    }
+    if (stepIndex < WIZARD_STEPS.length - 1) {
+        wizardGoToStep(stepIndex + 1);
+    }
 }
 
-function cfgCancelClientConfig() {
+async function wizardSaveCurrentStep(stepIndex) {
+    switch (stepIndex) {
+        case 0: return await wizardSaveBasicStep();
+        case 1: return null; // 环境变量暂存，最终保存时提交
+        case 2: return wizardValidateRepos();
+        case 3: return await wizardSaveServerStep();
+        case 4: return await wizardSaveDomainStep();
+        case 5: return await wizardSaveDatabaseStep();
+        case 6: return await wizardSavePaymentStep();
+        case 7: return await wizardSaveOssStep();
+        default: return null;
+    }
+}
+
+async function wizardFinish() {
+    // 完成前先保存最后一步（对象存储），然后保存环境变量（统一在finish时提交）
+    const ossErr = await wizardSaveOssStep();
+    if (ossErr) { showToast(ossErr, 'error'); return; }
+
+    // 保存环境变量
+    if (cfgClientId !== null) {
+        const envVarsErr = await wizardSaveEnvVars();
+        if (envVarsErr) { showToast(envVarsErr, 'error'); return; }
+    }
+
+    showToast('应用配置完成', 'success');
     cfgResetClientConfigState();
     backToClients();
 }
 
-function cfgCollectBasicFields() {
+// ---- Step 0: 基本信息 ----
+
+function wizardRenderBasicStep(isView) {
+    const form = document.getElementById('client-basic-form');
+    if (form) form.onsubmit = (e) => e.preventDefault();
+    document.querySelectorAll('#wizard-step-0 input, #wizard-step-0 select').forEach(el => {
+        el.disabled = isView;
+    });
+}
+
+async function wizardSaveBasicStep() {
     const name = document.getElementById('cfg-client-name').value.trim();
     const agent = document.getElementById('cfg-client-agent').value;
     const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
-    return { name, agent, officialCloudDeploy };
-}
 
-function cfgBuildReposPayload() {
-    return cfgReposList.map(r => ({
-        desc: (r.desc || '').trim(),
-        url: (r.url || '').trim(),
-        token: r.token,
-        default_branch: r.default_branch || '',
-        branch_prefix: r.branch_prefix || 'ai_',
-        docs_repo: !!r.docs_repo
-    }));
-}
-
-function cfgValidateReposForSave() {
-    if (!cfgReposList.length) {
-        return '请至少添加一个代码仓库';
-    }
-    let docs = 0;
-    for (let i = 0; i < cfgReposList.length; i++) {
-        const r = cfgReposList[i];
-        const n = i + 1;
-        if (!(r.url || '').trim()) return `仓库 #${n} 的 URL 不能为空`;
-        if (!(r.desc || '').trim()) return `仓库 #${n} 的简介不能为空`;
-        if (String(r.url).trim().startsWith('http') && !(r.token || '').trim()) {
-            return `仓库 #${n} 使用 HTTP 地址时必须填写 Token`;
-        }
-        if (r.docs_repo) docs++;
-    }
-    if (docs === 0) return '请指定一个文档仓库（单选）';
-    if (docs > 1) return '只能指定一个文档仓库';
-    return null;
-}
-
-function cfgBuildEnvVarsPayload() {
-    return cfgEnvVarsData.map(ev => ({
-        key: (ev.key || '').trim(),
-        value: ev.value == null ? '' : String(ev.value)
-    }));
-}
-
-async function cfgUnifiedSaveClient() {
-    if (cfgClientMode === 'view') return;
-
-    const { name, agent, officialCloudDeploy } = cfgCollectBasicFields();
-    if (!name) {
-        showToast('应用名称不能为空', 'error');
-        return;
-    }
-    if (name.length > 16) {
-        showToast('应用名称最多 16 个字符', 'error');
-        return;
-    }
-    if (cfgEnvVarsData.some(ev => !(ev.key || '').trim())) {
-        showToast('环境变量名称不能为空', 'error');
-        return;
-    }
-    const keys = cfgEnvVarsData.map(ev => (ev.key || '').trim()).filter(Boolean);
-    if (new Set(keys).size !== keys.length) {
-        showToast('环境变量名称不能重复', 'error');
-        return;
-    }
-
-    const repoErr = cfgValidateReposForSave();
-    if (repoErr) {
-        showToast(repoErr, 'error');
-        return;
-    }
-
-    const repos = cfgBuildReposPayload();
-    const env_vars = cfgBuildEnvVarsPayload();
+    if (!name) return '应用名称不能为空';
+    if (name.length > 16) return '应用名称最多 16 个字符';
 
     try {
         if (cfgClientId === null) {
-            await activeClientAPI.create(name, {
-                agent,
-                official_cloud_deploy: officialCloudDeploy,
-                repos,
-                env_vars
-            });
-            showToast('应用创建成功', 'success');
+            // 新建：先创建基本信息，仓库随后保存
+            const result = await activeClientAPI.create(name, { agent, official_cloud_deploy: officialCloudDeploy });
+            cfgClientId = result.data.id;
+            showToast('应用创建成功，继续配置其他信息', 'success');
         } else {
-            await activeClientAPI.update(cfgClientId, name, {
-                agent,
-                official_cloud_deploy: officialCloudDeploy,
-                repos,
-                env_vars
-            });
-            showToast('保存成功', 'success');
+            await activeClientAPI.update(cfgClientId, name, { agent, official_cloud_deploy: officialCloudDeploy });
         }
-        cfgResetClientConfigState();
-        backToClients();
-    } catch (error) {
-        showToast(error.message, 'error');
+        return null;
+    } catch (e) {
+        return e.message;
     }
 }
 
-// ---- 环境变量管理 ----
+// ---- Step 1: 环境变量 ----
 
-function cfgRenderEnvVarsTab() {
-    const tipEl = document.getElementById('env-vars-tip');
+function wizardRenderEnvVarsStep(isView) {
     const addBtn = document.getElementById('add-env-var-btn');
-
-    if (tipEl) {
-        tipEl.textContent = '注意：仅在 docker私有化部署、官方云部署场景下环境变量才会生效。';
-        tipEl.className = 'config-section-tip tip-warn';
-    }
-
     if (addBtn) {
-        addBtn.style.display = (cfgClientMode === 'view') ? 'none' : '';
-        addBtn.onclick = cfgAddEnvVar;
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].push({ key: '', value: '', env: cfgEnvVarsCurrentEnv });
+            wizardRenderEnvVarsList();
+        };
     }
-
-    cfgRenderEnvVarsList();
+    // 绑定环境切换 tab
+    const tabs = document.querySelectorAll('#env-var-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            // 保存当前 DOM 值到内存
+            wizardSyncEnvVarsFromDOM();
+            cfgEnvVarsCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardRenderEnvVarsList();
+        };
+    });
+    // 确保当前 tab 显示正确
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgEnvVarsCurrentEnv));
+    wizardRenderEnvVarsList();
 }
 
-function cfgRenderEnvVarsList() {
+function wizardSyncEnvVarsFromDOM() {
+    const list = document.getElementById('env-vars-list');
+    if (!list) return;
+    const rows = list.querySelectorAll('.env-var-row');
+    cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv] = [];
+    rows.forEach(row => {
+        const key = row.querySelector('.env-var-key-input')?.value || '';
+        const value = row.querySelector('.env-var-val-input')?.value || '';
+        cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].push({ key, value, env: cfgEnvVarsCurrentEnv });
+    });
+}
+
+function wizardRenderEnvVarsList() {
     const list = document.getElementById('env-vars-list');
     const empty = document.getElementById('env-vars-empty');
     if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv] || [];
 
-    if (cfgEnvVarsData.length === 0) {
+    if (items.length === 0) {
         list.innerHTML = '';
-        empty.style.display = '';
+        if (empty) empty.style.display = '';
         return;
     }
-    empty.style.display = 'none';
-
-    list.innerHTML = cfgEnvVarsData.map((ev, idx) => {
-        const disabledAttr = cfgClientMode === 'view' ? 'disabled' : '';
-        const actions = cfgClientMode !== 'view'
+    if (empty) empty.style.display = 'none';
+    const disabledAttr = isView ? 'disabled' : '';
+    list.innerHTML = items.map((ev, idx) => {
+        const actions = !isView
             ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteEnvVar(${idx})">删除</button>`
             : '';
         return `
         <div class="env-var-row env-var-row-editing" data-idx="${idx}">
-            <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}" ${disabledAttr}
-                oninput="cfgUpdateEnvVarField(${idx}, 'key', this.value)">
+            <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}" ${disabledAttr}>
             <span class="env-var-eq">=</span>
-            <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}" ${disabledAttr}
-                oninput="cfgUpdateEnvVarField(${idx}, 'value', this.value)">
+            <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}" ${disabledAttr}>
             <div class="env-var-actions">${actions}</div>
         </div>`;
     }).join('');
 }
 
-function cfgAddEnvVar() {
-    cfgEnvVarsData.push({ id: null, key: '', value: '' });
-    cfgRenderEnvVarsList();
-}
-
-function cfgUpdateEnvVarField(idx, field, value) {
-    if (!cfgEnvVarsData[idx]) {
-        return;
-    }
-    cfgEnvVarsData[idx][field] = value;
-}
-
 function cfgDeleteEnvVar(idx) {
-    cfgEnvVarsData.splice(idx, 1);
-    cfgRenderEnvVarsList();
+    cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].splice(idx, 1);
+    wizardRenderEnvVarsList();
 }
 
-// ---- 代码仓库管理 ----
+async function wizardSaveEnvVars() {
+    // 先同步 DOM 中的当前环境值
+    wizardSyncEnvVarsFromDOM();
 
-function cfgRenderReposTab() {
+    // 构建全量 env_vars 列表（合并所有环境）
+    const envVars = [];
+    for (const envKey of ['test', 'prod']) {
+        const items = cfgEnvVarsByEnv[envKey] || [];
+        for (const ev of items) {
+            const key = (ev.key || '').trim();
+            const value = (ev.value == null ? '' : String(ev.value));
+            if (!key) return `环境 ${envKey} 中存在空变量名`;
+            if (!value) return `环境 ${envKey} 变量 ${key} 的值不能为空`;
+            envVars.push({ key, value, env: envKey });
+        }
+    }
+    try {
+        await activeClientAPI.update(cfgClientId, document.getElementById('cfg-client-name').value.trim(), {
+            agent: document.getElementById('cfg-client-agent').value,
+            official_cloud_deploy: parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0,
+            env_vars: envVars,
+        });
+        return null;
+    } catch (e) {
+        return e.message;
+    }
+}
+
+// ---- Step 2: 代码仓库 ----
+
+function wizardRenderReposStep(isView) {
     const addBtn = document.getElementById('cfg-add-repo-btn');
-    const isView = (cfgClientMode === 'view');
-
     if (addBtn) {
         addBtn.style.display = isView ? 'none' : '';
         addBtn.onclick = () => {
@@ -954,7 +1074,6 @@ function cfgRenderReposTab() {
             cfgRenderReposWaterfall();
         };
     }
-
     cfgRenderReposWaterfall();
 }
 
@@ -1036,6 +1155,365 @@ function cfgRenderReposWaterfall() {
 function cfgRemoveRepo(index) {
     cfgReposList.splice(index, 1);
     cfgRenderReposWaterfall();
+}
+
+function wizardValidateRepos() {
+    if (!cfgReposList.length) return '请至少添加一个代码仓库';
+    let docs = 0;
+    for (let i = 0; i < cfgReposList.length; i++) {
+        const r = cfgReposList[i];
+        const n = i + 1;
+        if (!(r.url || '').trim()) return `仓库 #${n} 的 URL 不能为空`;
+        if (!(r.desc || '').trim()) return `仓库 #${n} 的简介不能为空`;
+        if (String(r.url).trim().startsWith('http') && !(r.token || '').trim()) {
+            return `仓库 #${n} 使用 HTTP 地址时必须填写 Token`;
+        }
+        if (r.docs_repo) docs++;
+    }
+    if (docs === 0) return '请指定一个文档仓库（单选）';
+    if (docs > 1) return '只能指定一个文档仓库';
+
+    // 保存仓库配置
+    const repos = cfgReposList.map(r => ({
+        desc: (r.desc || '').trim(),
+        url: (r.url || '').trim(),
+        token: r.token,
+        default_branch: r.default_branch || '',
+        branch_prefix: r.branch_prefix || 'ai_',
+        docs_repo: !!r.docs_repo
+    }));
+
+    if (cfgClientId !== null) {
+        const name = document.getElementById('cfg-client-name').value.trim();
+        activeClientAPI.update(cfgClientId, name, {
+            agent: document.getElementById('cfg-client-agent').value,
+            official_cloud_deploy: parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0,
+            repos,
+        }).catch(e => console.warn('仓库保存失败', e));
+    }
+    return null;
+}
+
+// ---- Step 3: 云服务器 ----
+
+function wizardRenderServerStep(isView) {
+    const tabs = document.querySelectorAll('#server-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncServerFromDOM();
+            cfgServerCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardFillServerForm();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgServerCurrentEnv));
+    // 禁用/启用表单
+    document.querySelectorAll('#server-form-container input').forEach(el => { el.disabled = isView; });
+    wizardFillServerForm();
+}
+
+function wizardFillServerForm() {
+    const cfg = cfgServersByEnv[cfgServerCurrentEnv] || {};
+    document.getElementById('cfg-server-name').value = cfg.name || '';
+    document.getElementById('cfg-server-password').value = cfg.password || '';
+    document.getElementById('cfg-server-ip').value = cfg.ip || '';
+}
+
+function wizardSyncServerFromDOM() {
+    cfgServersByEnv[cfgServerCurrentEnv] = {
+        name: document.getElementById('cfg-server-name').value.trim(),
+        password: document.getElementById('cfg-server-password').value,
+        ip: document.getElementById('cfg-server-ip').value.trim(),
+    };
+}
+
+async function wizardSaveServerStep() {
+    if (cfgClientId === null) return null;
+    wizardSyncServerFromDOM();
+
+    // 如果两个环境都未填 ip，则跳过
+    const hasAnyIp = Object.values(cfgServersByEnv).some(s => s.ip);
+    if (!hasAnyIp) return null;
+
+    try {
+        showToast('正在校验 SSH 连通性，请稍候...', 'success');
+        await infraAPI.saveServers(cfgClientId, cfgServersByEnv);
+        return null;
+    } catch (e) {
+        return e.message;
+    }
+}
+
+// ---- Step 4: 域名 ----
+
+function wizardRenderDomainStep(isView) {
+    const addBtn = document.getElementById('add-domain-btn');
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgDomainsByEnv[cfgDomainCurrentEnv].push('');
+            wizardRenderDomainList();
+        };
+    }
+    const tabs = document.querySelectorAll('#domain-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncDomainsFromDOM();
+            cfgDomainCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardRenderDomainList();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgDomainCurrentEnv));
+    wizardRenderDomainList();
+}
+
+function wizardSyncDomainsFromDOM() {
+    const list = document.getElementById('domains-list');
+    if (!list) return;
+    cfgDomainsByEnv[cfgDomainCurrentEnv] = Array.from(list.querySelectorAll('.domain-input'))
+        .map(inp => inp.value.trim()).filter(Boolean);
+}
+
+function wizardRenderDomainList() {
+    const list = document.getElementById('domains-list');
+    const empty = document.getElementById('domains-empty');
+    if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgDomainsByEnv[cfgDomainCurrentEnv] || [];
+    if (items.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.innerHTML = items.map((d, idx) => `
+        <div class="infra-list-row">
+            <input class="domain-input" type="text" value="${escapeHtml(d)}" placeholder="如 example.com" ${isView ? 'disabled' : ''}>
+            ${!isView ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteDomain(${idx})">删除</button>` : ''}
+        </div>`).join('');
+}
+
+function cfgDeleteDomain(idx) {
+    cfgDomainsByEnv[cfgDomainCurrentEnv].splice(idx, 1);
+    wizardRenderDomainList();
+}
+
+async function wizardSaveDomainStep() {
+    if (cfgClientId === null) return null;
+    wizardSyncDomainsFromDOM();
+    try {
+        await infraAPI.saveDomains(cfgClientId, cfgDomainsByEnv);
+        return null;
+    } catch (e) { return e.message; }
+}
+
+// ---- Step 5: 数据库 ----
+
+function wizardRenderDatabaseStep(isView) {
+    const addBtn = document.getElementById('add-database-btn');
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgDatabasesByEnv[cfgDatabaseCurrentEnv].push({
+                db_type: 'mysql', host: '', port: 3306, username: '', password: '', db_name: ''
+            });
+            wizardRenderDatabaseList();
+        };
+    }
+    const tabs = document.querySelectorAll('#database-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            cfgDatabaseCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardRenderDatabaseList();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgDatabaseCurrentEnv));
+    wizardRenderDatabaseList();
+}
+
+function wizardRenderDatabaseList() {
+    const list = document.getElementById('databases-list');
+    const empty = document.getElementById('databases-empty');
+    if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgDatabasesByEnv[cfgDatabaseCurrentEnv] || [];
+    if (items.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    const disAttr = isView ? 'disabled' : '';
+    list.innerHTML = items.map((db, idx) => `
+        <div class="infra-card" data-db-idx="${idx}">
+            <div class="infra-card-header">
+                <span class="infra-card-label">#${idx + 1} MySQL</span>
+                ${!isView ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteDatabase(${idx})">删除</button>` : ''}
+            </div>
+            <div class="infra-form-grid">
+                <div class="form-group">
+                    <label>数据库地址</label>
+                    <input type="text" class="db-host" value="${escapeHtml(db.host || '')}" placeholder="如 127.0.0.1" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>端口</label>
+                    <input type="number" class="db-port" value="${db.port || 3306}" placeholder="3306" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" class="db-username" value="${escapeHtml(db.username || '')}" placeholder="root" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" class="db-password" value="${escapeHtml(db.password || '')}" placeholder="数据库密码" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>数据库名称</label>
+                    <input type="text" class="db-name" value="${escapeHtml(db.db_name || '')}" placeholder="mydb" ${disAttr}>
+                </div>
+            </div>
+        </div>`).join('');
+
+    // 绑定输入事件
+    list.querySelectorAll('.infra-card').forEach(card => {
+        const idx = parseInt(card.dataset.dbIdx);
+        card.addEventListener('input', (e) => {
+            const db = cfgDatabasesByEnv[cfgDatabaseCurrentEnv][idx];
+            if (!db) return;
+            if (e.target.classList.contains('db-host')) db.host = e.target.value;
+            if (e.target.classList.contains('db-port')) db.port = parseInt(e.target.value) || 3306;
+            if (e.target.classList.contains('db-username')) db.username = e.target.value;
+            if (e.target.classList.contains('db-password')) db.password = e.target.value;
+            if (e.target.classList.contains('db-name')) db.db_name = e.target.value;
+        });
+    });
+}
+
+function cfgDeleteDatabase(idx) {
+    cfgDatabasesByEnv[cfgDatabaseCurrentEnv].splice(idx, 1);
+    wizardRenderDatabaseList();
+}
+
+async function wizardSaveDatabaseStep() {
+    if (cfgClientId === null) return null;
+    try {
+        await infraAPI.saveDatabases(cfgClientId, cfgDatabasesByEnv);
+        return null;
+    } catch (e) { return e.message; }
+}
+
+// ---- Step 6: 支付 ----
+
+function wizardRenderPaymentStep(isView) {
+    const tabs = document.querySelectorAll('#payment-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncPaymentFromDOM();
+            cfgPaymentCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardFillPaymentForm();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgPaymentCurrentEnv));
+    document.querySelectorAll('#payment-form-container input, #payment-form-container textarea, #payment-form-container select').forEach(el => {
+        el.disabled = isView;
+    });
+    wizardFillPaymentForm();
+}
+
+function wizardFillPaymentForm() {
+    const cfg = cfgPaymentsByEnv[cfgPaymentCurrentEnv] || {};
+    document.getElementById('cfg-payment-type').value = cfg.payment_type || 'alipay';
+    document.getElementById('cfg-payment-appid').value = cfg.appid || '';
+    document.getElementById('cfg-payment-notify-url').value = cfg.notify_url || '';
+    document.getElementById('cfg-payment-return-url').value = cfg.return_url || '';
+    document.getElementById('cfg-payment-gateway').value = cfg.gateway || '';
+    document.getElementById('cfg-payment-app-encrypt-key').value = cfg.app_encrypt_key || '';
+    document.getElementById('cfg-payment-app-private-key').value = cfg.app_private_key || '';
+    document.getElementById('cfg-payment-alipay-public-key').value = cfg.alipay_public_key || '';
+}
+
+function wizardSyncPaymentFromDOM() {
+    cfgPaymentsByEnv[cfgPaymentCurrentEnv] = {
+        payment_type: document.getElementById('cfg-payment-type').value,
+        appid: document.getElementById('cfg-payment-appid').value.trim(),
+        notify_url: document.getElementById('cfg-payment-notify-url').value.trim(),
+        return_url: document.getElementById('cfg-payment-return-url').value.trim(),
+        gateway: document.getElementById('cfg-payment-gateway').value.trim(),
+        app_encrypt_key: document.getElementById('cfg-payment-app-encrypt-key').value.trim(),
+        app_private_key: document.getElementById('cfg-payment-app-private-key').value.trim(),
+        alipay_public_key: document.getElementById('cfg-payment-alipay-public-key').value.trim(),
+    };
+}
+
+async function wizardSavePaymentStep() {
+    if (cfgClientId === null) return null;
+    wizardSyncPaymentFromDOM();
+    try {
+        await infraAPI.savePayments(cfgClientId, cfgPaymentsByEnv);
+        return null;
+    } catch (e) { return e.message; }
+}
+
+// ---- Step 7: 对象存储 ----
+
+function wizardRenderOssStep(isView) {
+    const tabs = document.querySelectorAll('#oss-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncOssFromDOM();
+            cfgOssCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardFillOssForm();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgOssCurrentEnv));
+    document.querySelectorAll('#oss-form-container input, #oss-form-container select').forEach(el => {
+        el.disabled = isView;
+    });
+    wizardFillOssForm();
+}
+
+function wizardFillOssForm() {
+    const cfg = cfgOssByEnv[cfgOssCurrentEnv] || {};
+    document.getElementById('cfg-oss-type').value = cfg.oss_type || 'cos';
+    document.getElementById('cfg-oss-secret-id').value = cfg.secret_id || '';
+    document.getElementById('cfg-oss-secret-key').value = cfg.secret_key || '';
+    document.getElementById('cfg-oss-region').value = cfg.region || '';
+    document.getElementById('cfg-oss-bucket').value = cfg.bucket || '';
+    document.getElementById('cfg-oss-base-url').value = cfg.base_url || '';
+}
+
+function wizardSyncOssFromDOM() {
+    cfgOssByEnv[cfgOssCurrentEnv] = {
+        oss_type: document.getElementById('cfg-oss-type').value,
+        secret_id: document.getElementById('cfg-oss-secret-id').value.trim(),
+        secret_key: document.getElementById('cfg-oss-secret-key').value.trim(),
+        region: document.getElementById('cfg-oss-region').value.trim(),
+        bucket: document.getElementById('cfg-oss-bucket').value.trim(),
+        base_url: document.getElementById('cfg-oss-base-url').value.trim(),
+    };
+}
+
+async function wizardSaveOssStep() {
+    if (cfgClientId === null) return null;
+    wizardSyncOssFromDOM();
+    try {
+        await infraAPI.saveOss(cfgClientId, cfgOssByEnv);
+        return null;
+    } catch (e) { return e.message; }
+}
+
+// 兼容旧代码的 showAddTaskModal 别名
+function showAddTaskModal() {
+    showTaskEditModal(null, true);
 }
 
 // ===== 任务管理 =====
@@ -1815,10 +2293,6 @@ function getNodeStatusText(status) {
     return texts[status] || '待处理';
 }
 
-// 兼容旧的调用方式
-function showAddTaskModal() {
-    showTaskEditModal(null);
-}
 
 async function updateTaskStatus(taskId, status, selectElement) {
     try {
