@@ -144,7 +144,9 @@ def _do_auth_check():
 
 
 def register_global_auth(app, api_prefix: str = '/api'):
-    """注册全局鉴权：默认所有 API 接口需要登录，可通过 @skip_auth 放行。"""
+    """注册全局鉴权：默认所有 API 接口需要登录，可通过 @skip_auth 放行。
+    """
+
     @app.before_request
     def _global_auth_guard():
         # CORS 预检请求放行

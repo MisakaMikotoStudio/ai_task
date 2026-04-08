@@ -11,6 +11,37 @@ const authMessage = document.getElementById('auth-message');
 const logoutBtn = document.getElementById('logout-btn');
 const currentUsername = document.getElementById('current-username');
 
+// Admin 页面复用 index.html：通过 pathname 判断是否处于 /admin
+const ADMIN_PAGE = /\/admin\/?$/.test(window.location.pathname);
+const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders']);
+
+function getUrlBasePrefix() {
+    // 把 /admin 或 /index.html 去掉，得到类似 "/v1" 的前缀（若无则返回 ""）
+    const p = window.location.pathname || '/';
+    if (p.endsWith('/admin')) return p.slice(0, -'/admin'.length) || '';
+    if (p.endsWith('/admin/')) return p.slice(0, -'/admin/'.length) || '';
+    if (p.endsWith('/index.html')) return p.slice(0, -'/index.html'.length) || '';
+    return p.endsWith('/') ? p.slice(0, -1) : p;
+}
+
+function getAdminUrl() {
+    const base = getUrlBasePrefix();
+    return `${base}/admin`.replace(/\/$/, '');
+}
+
+function getIndexUrl() {
+    const base = getUrlBasePrefix();
+    return base ? `${base}/` : '/';
+}
+
+function redirectToIndex() {
+    window.location.href = getIndexUrl();
+}
+
+// Admin 模式下，切换到 /api/admin/... 专用接口
+const activeClientAPI = ADMIN_PAGE ? adminClientAPI : clientAPI;
+const activeSecretAPI = ADMIN_PAGE ? adminSecretAPI : secretAPI;
+
 // 客户端数据缓存
 let clientsCache = [];
 
@@ -26,7 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 先加载API配置（获取后端地址）
     await initAPIConfig();
 
-    initAuth();
+    await initAuth();
     initTabs();
     initNavigation();
     initForms();
@@ -35,15 +66,48 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ===== 认证相关 =====
 
-function initAuth() {
-    if (isLoggedIn()) {
-        showMainPage();
-        loadUserInfo();
+async function initAuth() {
+    if (!logoutBtn) {
+        console.warn('logoutBtn element not found');
     } else {
-        showLoginPage();
+        // 避免重复绑定
+        logoutBtn.onclick = logout;
     }
-    
-    logoutBtn.addEventListener('click', logout);
+
+    if (!isLoggedIn()) {
+        showLoginPage();
+        return;
+    }
+
+    try {
+        const resp = await userAPI.me();
+        const userData = resp && resp.data;
+        if (userData) {
+            // 同步到 localStorage，保证后续 loadUserInfo 能拿到 name
+            setCurrentUser({ id: userData.id, name: userData.name });
+        }
+
+        const isAdmin = (userData && userData.name === 'admin');
+        if (ADMIN_PAGE) {
+            if (!isAdmin) {
+                redirectToIndex();
+                return;
+            }
+        } else {
+            if (isAdmin) {
+                window.location.href = getAdminUrl();
+                return;
+            }
+        }
+    } catch (e) {
+        console.warn('initAuth failed, clear auth:', e);
+        clearAuth();
+        showLoginPage();
+        return;
+    }
+
+    showMainPage();
+    loadUserInfo();
 }
 
 function showLoginPage() {
@@ -54,6 +118,22 @@ function showLoginPage() {
 function showMainPage() {
     loginPage.classList.remove('active');
     mainPage.classList.add('active');
+
+    // Admin 页面只保留“应用/秘钥”
+    if (ADMIN_PAGE) {
+        // 显示 admin 专属导航项
+        document.querySelectorAll('.nav-item[data-view="products"], .nav-item[data-view="orders"]').forEach((el) => {
+            el.style.display = '';
+        });
+        const rechargeLink = document.querySelector('.sidebar-footer a[href="shop.html"]');
+        if (rechargeLink) rechargeLink.style.display = 'none';
+        initAdminCommerce();
+        initSecrets();
+        initClientSearch();
+        loadClients();
+        loadSecrets();
+        return;
+    }
 
     // 初始化任务筛选控件
     initTaskFilter();
@@ -116,6 +196,16 @@ function initTabs() {
 
 function initNavigation() {
     const navItems = document.querySelectorAll('.nav-item');
+
+    // Admin 页面只展示“应用/秘钥”
+    if (ADMIN_PAGE) {
+        navItems.forEach((item) => {
+            const view = item.dataset.view;
+            if (!ADMIN_ALLOWED_VIEWS.has(view)) {
+                item.style.display = 'none';
+            }
+        });
+    }
     
     // 点击导航时更新 hash
     navItems.forEach(item => {
@@ -142,7 +232,7 @@ function initNavigation() {
 function handleHashChange() {
     // 从 hash 中提取视图名称，如 #/clients -> clients
     const hash = window.location.hash;
-    let view = 'tasks'; // 默认视图
+    let view = ADMIN_PAGE ? 'clients' : 'tasks'; // 默认视图
     
     if (hash.startsWith('#/')) {
         view = hash.substring(2); // 去掉 #/
@@ -150,13 +240,20 @@ function handleHashChange() {
     
     // 验证视图是否存在
     if (!document.getElementById(`${view}-view`)) {
-        view = 'tasks';
+        view = ADMIN_PAGE ? 'clients' : 'tasks';
+    }
+
+    if (ADMIN_PAGE && !ADMIN_ALLOWED_VIEWS.has(view)) {
+        view = 'clients';
     }
     
     switchToView(view);
 }
 
 function switchToView(view) {
+    if (ADMIN_PAGE && !ADMIN_ALLOWED_VIEWS.has(view)) {
+        view = 'clients';
+    }
     const navItems = document.querySelectorAll('.nav-item');
 
     // 切换导航状态
@@ -175,6 +272,10 @@ function switchToView(view) {
         initOKREvents();
     } else if (view === 'secrets') {
         loadSecrets();
+    } else if (view === 'products') {
+        loadAdminProducts();
+    } else if (view === 'orders') {
+        loadAdminOrders(1);
     }
 }
 
@@ -203,6 +304,17 @@ function initForms() {
             setCurrentUser({id: userData.id, name: userData.name});
 
             showToast('登录成功', 'success');
+
+            const isAdmin = (userData && userData.name === 'admin');
+            if (isAdmin && !ADMIN_PAGE) {
+                window.location.href = getAdminUrl();
+                return;
+            }
+            if (!isAdmin && ADMIN_PAGE) {
+                redirectToIndex();
+                return;
+            }
+
             showMainPage();
             loadUserInfo();
         } catch (error) {
@@ -384,7 +496,7 @@ async function loadClients() {
     clientsLoading = true;
 
     try {
-        const clientsResult = await clientAPI.list();
+        const clientsResult = await activeClientAPI.list();
 
         clientsCache = clientsResult.data || [];
         heartbeatMap = {};
@@ -477,7 +589,7 @@ async function deleteClient(id) {
     }
 
     try {
-        await clientAPI.delete(id);
+        await activeClientAPI.delete(id);
         showToast('应用删除成功', 'success');
         loadClients();
     } catch (error) {
@@ -487,7 +599,7 @@ async function deleteClient(id) {
 
 async function copyClient(id) {
     try {
-        const result = await clientAPI.copy(id);
+        const result = await activeClientAPI.copy(id);
         showToast(`应用复制成功，新名称: ${result.name}`, 'success');
         loadClients();
     } catch (error) {
@@ -564,7 +676,7 @@ async function openClientConfig(id, mode) {
     // 加载 Agent 列表
     let agentOptions = ['claude sdk', 'claude cli'];
     try {
-        const r = await clientAPI.getAgents();
+        const r = await activeClientAPI.getAgents();
         if (r.data && r.data.length > 0) agentOptions = r.data;
     } catch (e) { console.warn('获取Agent列表失败', e); }
 
@@ -577,7 +689,7 @@ async function openClientConfig(id, mode) {
     // 编辑/查看：一次 GET 拉取基本信息、仓库、环境变量
     if (id !== null) {
         try {
-            const clientResult = await clientAPI.get(id);
+            const clientResult = await activeClientAPI.get(id);
             const clientData = clientResult.data;
             cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
             cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev }));
@@ -706,7 +818,7 @@ async function cfgUnifiedSaveClient() {
 
     try {
         if (cfgClientId === null) {
-            await clientAPI.create(name, {
+            await activeClientAPI.create(name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
@@ -714,7 +826,7 @@ async function cfgUnifiedSaveClient() {
             });
             showToast('应用创建成功', 'success');
         } else {
-            await clientAPI.update(cfgClientId, name, {
+            await activeClientAPI.update(cfgClientId, name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
@@ -1107,7 +1219,7 @@ async function showTaskEditModal(taskId = null, startInEditMode = false) {
         
         // 获取客户端列表
         try {
-            const result = await clientAPI.list();
+            const result = await activeClientAPI.list();
             usableClientsCache = result.data || [];
         } catch (error) {
             console.warn('获取客户端列表失败:', error);
@@ -1130,7 +1242,7 @@ async function enterTaskEditMode() {
     if (task) {
         // 获取客户端列表（编辑模式下需要选择客户端）
         try {
-            const result = await clientAPI.list();
+            const result = await activeClientAPI.list();
             usableClientsCache = result.data || [];
         } catch (error) {
             console.warn('获取客户端列表失败:', error);
@@ -1867,7 +1979,7 @@ let secretsCache = [];
 
 async function loadSecrets() {
     try {
-        const result = await secretAPI.list();
+        const result = await activeSecretAPI.list();
         secretsCache = result.data || [];
         renderSecrets(secretsCache);
     } catch (error) {
@@ -1912,7 +2024,7 @@ async function deleteSecret(id) {
     if (!confirm('确定要删除这个秘钥吗？')) return;
 
     try {
-        await secretAPI.delete(id);
+        await activeSecretAPI.delete(id);
         showToast('秘钥删除成功', 'success');
         loadSecrets();
     } catch (error) {
@@ -1938,7 +2050,7 @@ function showAddSecretModal() {
         const name = document.getElementById('secret-name').value.trim();
 
         try {
-            await secretAPI.create(name);
+            await activeSecretAPI.create(name);
             showToast('秘钥创建成功', 'success');
             closeModal();
             loadSecrets();
@@ -1953,6 +2065,166 @@ function initSecrets() {
     if (addBtn) {
         addBtn.addEventListener('click', showAddSecretModal);
     }
+}
+
+// ===== Admin 商品/订单 =====
+let adminOrderPage = 1;
+
+function initAdminCommerce() {
+    const createForm = document.getElementById('create-product-form');
+    if (createForm && createForm.dataset.bound !== 'true') {
+        createForm.addEventListener('submit', handleAdminCreateProduct);
+        createForm.dataset.bound = 'true';
+    }
+
+    const loadOrdersBtn = document.getElementById('load-orders-btn');
+    if (loadOrdersBtn && loadOrdersBtn.dataset.bound !== 'true') {
+        loadOrdersBtn.addEventListener('click', () => loadAdminOrders(1));
+        loadOrdersBtn.dataset.bound = 'true';
+    }
+}
+
+async function loadAdminProducts() {
+    const tbody = document.querySelector('#products-table tbody');
+    if (!tbody) return;
+    try {
+        const resp = await adminCommerceAPI.getAdminProducts();
+        const items = resp.data || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center">暂无商品</td></tr>';
+            return;
+        }
+        tbody.innerHTML = items.map((p) => {
+            const offline = p.offline;
+            const statusCell = offline
+                ? '<span style="color:#dc2626;font-size:12px">已下架</span>'
+                : '<span style="color:#16a34a;font-size:12px">上架中</span>';
+            const actionCell = offline
+                ? '—'
+                : `<button type="button" class="btn-danger btn-offline-product" data-id="${p.id}">下架</button>`;
+            return `<tr>
+  <td>${p.id}</td>
+  <td>${escapeHtml(p.key)}</td>
+  <td>${escapeHtml(p.title)}</td>
+  <td>¥${Number(p.price || 0).toFixed(2)}</td>
+  <td>${p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久'}</td>
+  <td>${p.support_continue ? '是' : '否'}</td>
+  <td>${formatDateTime(p.created_at)}</td>
+  <td>${statusCell}</td>
+  <td>${actionCell}</td>
+</tr>`;
+        }).join('');
+
+        tbody.querySelectorAll('.btn-offline-product').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const productId = Number(btn.dataset.id);
+                if (!productId) return;
+                if (!confirm('确认下架该商品？前台将不再展示。')) return;
+                try {
+                    await adminCommerceAPI.offlineProduct(productId);
+                    await loadAdminProducts();
+                    showToast('已下架', 'success');
+                } catch (err) {
+                    showToast(`下架失败：${err.message}`, 'error');
+                }
+            });
+        });
+    } catch (err) {
+        showToast(`加载商品失败：${err.message}`, 'error');
+    }
+}
+
+async function handleAdminCreateProduct(e) {
+    e.preventDefault();
+    const form = e.target;
+    const productData = {
+        key: form.querySelector('[name=key]').value.trim(),
+        title: form.querySelector('[name=title]').value.trim(),
+        desc: form.querySelector('[name=desc]').value,
+        price: parseFloat(form.querySelector('[name=price]').value),
+        expire_time: form.querySelector('[name=expire_time]').value
+            ? parseInt(form.querySelector('[name=expire_time]').value, 10)
+            : null,
+        support_continue: form.querySelector('[name=support_continue]').checked,
+        icon: form.querySelector('[name=icon]').value.trim() || null
+    };
+    try {
+        await adminCommerceAPI.createProduct(productData);
+        form.reset();
+        await loadAdminProducts();
+        showToast('商品创建成功', 'success');
+    } catch (err) {
+        showToast(`创建失败：${err.message}`, 'error');
+    }
+}
+
+async function loadAdminOrders(page) {
+    adminOrderPage = page;
+    const userIdFilter = (document.getElementById('order-user-filter') || {}).value || null;
+    const statusFilter = (document.getElementById('order-status-filter') || {}).value || null;
+    try {
+        const resp = await adminCommerceAPI.getOrders({
+            page,
+            page_size: 20,
+            user_id: userIdFilter || undefined,
+            status: statusFilter || undefined
+        });
+        renderAdminOrdersTable(resp.data || {});
+    } catch (err) {
+        showToast(`加载订单失败：${err.message}`, 'error');
+    }
+}
+
+function renderAdminOrdersTable(data) {
+    const tbody = document.querySelector('#orders-table tbody');
+    if (!tbody) return;
+    const items = data.items || [];
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center">暂无订单</td></tr>';
+    } else {
+        tbody.innerHTML = items.map((o) => {
+            const canRefund = o.status === 'paid';
+            return `<tr>
+  <td>${o.id}</td>
+  <td>${o.user_id}</td>
+  <td>${escapeHtml(o.product_key)}</td>
+  <td>¥${Number(o.amount || 0).toFixed(2)}</td>
+  <td>${escapeHtml(o.status)}</td>
+  <td>${escapeHtml(o.trade_no || '-')}</td>
+  <td>${formatDateTime(o.created_at)}</td>
+  <td>${canRefund ? `<button class="btn-danger refund-btn" data-id="${o.id}">退款</button>` : '-'}</td>
+</tr>`;
+        }).join('');
+    }
+
+    const pageInfo = document.getElementById('orders-page-info');
+    if (pageInfo) pageInfo.textContent = `共 ${data.total || 0} 条，第 ${data.page || 1} 页`;
+
+    const prevBtn = document.getElementById('orders-prev-btn');
+    const nextBtn = document.getElementById('orders-next-btn');
+    if (prevBtn) {
+        prevBtn.disabled = (data.page || 1) <= 1;
+        prevBtn.onclick = () => loadAdminOrders((data.page || 1) - 1);
+    }
+    if (nextBtn) {
+        nextBtn.disabled = (data.page || 1) * (data.page_size || 20) >= (data.total || 0);
+        nextBtn.onclick = () => loadAdminOrders((data.page || 1) + 1);
+    }
+
+    tbody.querySelectorAll('.refund-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const orderId = Number(btn.dataset.id);
+            if (!orderId) return;
+            if (!confirm(`确认退款订单 #${orderId}？`)) return;
+            try {
+                await adminCommerceAPI.refundOrder(orderId);
+                await loadAdminOrders(adminOrderPage);
+                showToast('退款成功', 'success');
+            } catch (err) {
+                showToast(`退款失败：${err.message}`, 'error');
+            }
+        });
+    });
 }
 
 // ===== Chat 跳转 =====

@@ -175,6 +175,101 @@ const secretAPI = {
     }
 };
 
+// ===== 管理后台 API（admin 专用：/api/admin/...）=====
+const adminSecretAPI = {
+    async list() {
+        return request('/admin/secrets');
+    },
+    async create(name) {
+        return request('/admin/secrets', {
+            method: 'POST',
+            body: JSON.stringify({ name })
+        });
+    },
+    async delete(id) {
+        return request(`/admin/secrets/${id}`, {
+            method: 'DELETE'
+        });
+    }
+};
+
+const adminClientAPI = {
+    async getAgents() {
+        return request('/admin/clients/agents');
+    },
+    async list() {
+        return request('/admin/clients');
+    },
+    async get(id) {
+        return request(`/admin/clients/${id}`);
+    },
+    async create(name, options = {}) {
+        const body = { name };
+        if (options.agent !== undefined) body.agent = options.agent;
+        if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.repos !== undefined) body.repos = options.repos;
+        if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        return request('/admin/clients', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    },
+    async update(id, name, options = {}) {
+        const body = { name };
+        if (options.agent !== undefined) body.agent = options.agent;
+        if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.repos !== undefined) body.repos = options.repos;
+        if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        return request(`/admin/clients/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(body)
+        });
+    },
+    async delete(id) {
+        return request(`/admin/clients/${id}`, {
+            method: 'DELETE'
+        });
+    },
+    async copy(id) {
+        return request(`/admin/clients/${id}/copy`, {
+            method: 'POST'
+        });
+    }
+};
+
+const adminCommerceAPI = {
+    async createProduct(productData) {
+        return request('/admin/product', {
+            method: 'POST',
+            body: JSON.stringify(productData)
+        });
+    },
+    async getAdminProducts() {
+        return request('/admin/products', {
+            method: 'GET'
+        });
+    },
+    async offlineProduct(productId) {
+        return request(`/admin/product/${productId}/offline`, {
+            method: 'POST'
+        });
+    },
+    async getOrders(params = {}) {
+        const query = new URLSearchParams();
+        if (params.page) query.set('page', String(params.page));
+        if (params.page_size) query.set('page_size', String(params.page_size));
+        if (params.user_id) query.set('user_id', String(params.user_id));
+        if (params.status) query.set('status', params.status);
+        const qs = query.toString() ? `?${query.toString()}` : '';
+        return request(`/admin/orders${qs}`);
+    },
+    async refundOrder(orderId) {
+        return request(`/admin/orders/${orderId}/refund`, {
+            method: 'POST'
+        });
+    }
+};
+
 // 任务API
 const taskAPI = {
     // 获取列表
@@ -375,6 +470,24 @@ const chatAPI = {
         return request(`/chat/task/${taskId}/messages`, {
             method: 'POST',
             body: JSON.stringify({ input, extra })
+        });
+    }
+};
+
+// 商业化 API（商品列表、购买）
+const commercialAPI = {
+    // 获取商品列表（公开，无需登录）
+    async getProducts() {
+        return request('/commercial/products');
+    },
+
+    // 生成支付链接
+    async buy(productId, orderType = 'purchase', device = null) {
+        const body = { product_id: productId, order_type: orderType };
+        if (device) body.device = device;
+        return request('/commercial/buy', {
+            method: 'POST',
+            body: JSON.stringify(body)
         });
     }
 };
