@@ -4921,6 +4921,76 @@ textarea:focus {
 }
 
 /* ===== 我的视图（个人中心）===== */
+
+/* 用户信息卡片 */
+.profile-user-card {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    margin-bottom: 24px;
+    transition: var(--transition);
+}
+
+.profile-user-card:hover {
+    border-color: rgba(88, 166, 255, 0.3);
+    box-shadow: var(--shadow-sm);
+}
+
+.profile-user-avatar-wrap {
+    width: 64px;
+    height: 64px;
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.15), rgba(163, 113, 247, 0.1));
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    flex-shrink: 0;
+}
+
+.profile-user-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-user-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.profile-user-id-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.profile-user-id-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.profile-user-id-value {
+    font-family: 'Consolas', 'SF Mono', 'Monaco', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    letter-spacing: 0.08em;
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    padding: 2px 10px;
+    border-radius: 6px;
+}
+
 .profile-section-title {
     font-size: 15px;
     font-weight: 600;

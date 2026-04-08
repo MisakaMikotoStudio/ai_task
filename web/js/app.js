@@ -168,6 +168,13 @@ async function loadUserInfo() {
     const idWrap = document.getElementById('current-user-id-wrap');
     const idEl = document.getElementById('current-user-id');
     if (!idWrap || !idEl) return;
+
+    // 优先从 localStorage 立即展示，避免等待 API
+    if (user && user.user_id != null) {
+        idEl.textContent = String(user.user_id);
+        idWrap.removeAttribute('hidden');
+    }
+
     try {
         const resp = await userAPI.me();
         const u = resp && resp.data;
@@ -175,14 +182,11 @@ async function loadUserInfo() {
             idEl.textContent = String(u.user_id);
             idWrap.removeAttribute('hidden');
             if (u.name) setCurrentUser({ user_id: u.user_id, name: u.name });
-        } else {
+        } else if (!user || user.user_id == null) {
             idWrap.setAttribute('hidden', '');
         }
     } catch {
-        if (user && user.user_id != null) {
-            idEl.textContent = String(user.user_id);
-            idWrap.removeAttribute('hidden');
-        } else {
+        if (!user || user.user_id == null) {
             idWrap.setAttribute('hidden', '');
         }
     }
@@ -305,6 +309,7 @@ function switchToView(view) {
     } else if (view === 'store') {
         loadStoreProducts();
     } else if (view === 'profile') {
+        loadProfileUserInfo();
         loadMyServices();
         loadMyOrders(1);
     }
@@ -2542,6 +2547,14 @@ function escapeHtml(str) {
 // ===== 我的（个人中心）=====
 
 let profileOrderPage = 1;
+
+function loadProfileUserInfo() {
+    const user = getCurrentUser();
+    const nameEl = document.getElementById('profile-username');
+    const idEl = document.getElementById('profile-user-id');
+    if (nameEl) nameEl.textContent = (user && user.name) ? user.name : '用户';
+    if (idEl) idEl.textContent = (user && user.user_id != null) ? String(user.user_id) : '—';
+}
 
 function initProfile() {
     // 初始化分页按钮
