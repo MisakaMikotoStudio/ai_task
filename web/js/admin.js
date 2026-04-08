@@ -61,25 +61,25 @@
             const resp = await adminCommerceAPI.getAdminProducts();
             const items = resp.data || [];
             if (!items.length) {
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center">暂无商品</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-cell">暂无商品</td></tr>';
                 return;
             }
             tbody.innerHTML = items.map((p) => {
                 const offline = p.offline;
                 const statusCell = offline
-                    ? '<span style="color:#dc2626;font-size:12px">已下架</span>'
-                    : '<span style="color:#16a34a;font-size:12px">上架中</span>';
+                    ? '<span class="status-badge status-offline">已下架</span>'
+                    : '<span class="status-badge status-online">上架中</span>';
                 const actionCell = offline
-                    ? '—'
-                    : `<button type="button" class="btn-danger btn-offline-product" data-id="${p.id}">下架</button>`;
+                    ? '<span style="color:var(--text-muted)">—</span>'
+                    : `<button type="button" class="btn-danger btn-sm btn-offline-product" data-id="${p.id}">下架</button>`;
                 return `<tr>
   <td>${p.id}</td>
-  <td>${escapeHtml(p.key)}</td>
+  <td><code style="font-size:12px;background:var(--bg-tertiary,#f3f4f6);padding:2px 6px;border-radius:4px;">${escapeHtml(p.key)}</code></td>
   <td>${escapeHtml(p.title)}</td>
-  <td>¥${Number(p.price || 0).toFixed(2)}</td>
+  <td class="amount">¥${Number(p.price || 0).toFixed(2)}</td>
   <td>${p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久'}</td>
   <td>${p.support_continue ? '是' : '否'}</td>
-  <td>${formatDate(p.created_at)}</td>
+  <td style="color:var(--text-secondary,#6b7280)">${formatDate(p.created_at)}</td>
   <td>${statusCell}</td>
   <td>${actionCell}</td>
 </tr>`;
@@ -145,24 +145,33 @@
         }
     }
 
+    const STATUS_MAP = {
+        pending: '待支付',
+        paid: '已支付',
+        failed: '失败',
+        refunded: '已退款'
+    };
+
     function renderOrdersTable(data) {
         const tbody = document.querySelector('#orders-table tbody');
         if (!tbody) return;
         const items = data.items || [];
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center">暂无订单</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">暂无订单</td></tr>';
         } else {
             tbody.innerHTML = items.map((o) => {
                 const canRefund = o.status === 'paid';
+                const statusLabel = STATUS_MAP[o.status] || escapeHtml(o.status);
+                const statusClass = `status-${escapeHtml(o.status)}`;
                 return `<tr>
   <td>${o.id}</td>
   <td>${o.user_id}</td>
-  <td>${escapeHtml(o.product_key)}</td>
-  <td>¥${Number(o.amount || 0).toFixed(2)}</td>
-  <td>${escapeHtml(o.status)}</td>
-  <td>${escapeHtml(o.trade_no || '-')}</td>
-  <td>${formatDate(o.created_at)}</td>
-  <td>${canRefund ? `<button class="btn-danger refund-btn" data-id="${o.id}">退款</button>` : '-'}</td>
+  <td><code style="font-size:12px;background:var(--bg-tertiary,#f3f4f6);padding:2px 6px;border-radius:4px;">${escapeHtml(o.product_key)}</code></td>
+  <td class="amount">¥${Number(o.amount || 0).toFixed(2)}</td>
+  <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+  <td style="color:var(--text-secondary,#6b7280);font-size:12px;">${escapeHtml(o.trade_no || '-')}</td>
+  <td style="color:var(--text-secondary,#6b7280)">${formatDate(o.created_at)}</td>
+  <td>${canRefund ? `<button class="btn-danger btn-sm refund-btn" data-id="${o.id}">退款</button>` : '<span style="color:var(--text-muted,#6e7681)">—</span>'}</td>
 </tr>`;
             }).join('');
         }

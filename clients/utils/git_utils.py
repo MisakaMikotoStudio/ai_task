@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 from urllib.parse import quote
@@ -34,6 +35,50 @@ class GitResult:
     branch_name: str = ""
     repo_name: str = ""
     merge_url: str = None
+
+
+# 共享 git 缓存目录（如 git_repo_cache/<repo>）多线程并发会导致 index.lock 冲突，按仓库路径串行化。
+_repo_lock_guard = threading.Lock()
+_repo_operation_locks: dict[str, threading.Lock] = {}
+
+
+def _repo_lock_key(repo_dir: str) -> str:
+    return os.path.normcase(os.path.abspath(os.path.normpath(repo_dir)))
+
+
+def _get_repo_operation_lock(repo_dir: str) -> threading.Lock:
+    key = _repo_lock_key(repo_dir)
+    with _repo_lock_guard:
+        lock = _repo_operation_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _repo_operation_locks[key] = lock
+        return lock
+
+
+def _remove_stale_git_index_lock(repo_dir: str, trace_id: Optional[str] = None) -> None:
+    """在已持有该仓库操作锁的前提下，删除残留的 .git/index.lock（异常退出时可能遗留）。"""
+    lock_path = os.path.join(repo_dir, ".git", "index.lock")
+    if not os.path.isfile(lock_path):
+        return
+    try:
+        os.remove(lock_path)
+        logger.warning(
+            f"[trace_id={trace_id}] 已删除陈旧 .git/index.lock: {lock_path}"
+        )
+    except OSError as e:
+        logger.warning(
+            f"[trace_id={trace_id}] 删除 index.lock 失败 {lock_path}: {e}"
+        )
+
+
+def _git_error_suggests_index_lock(message: str) -> bool:
+    if not message:
+        return False
+    lower = message.lower()
+    return "index.lock" in lower or (
+        "unable to create" in lower and "lock" in lower
+    )
 
 
 # ──────────────────────────────────────────────────────
@@ -283,29 +328,19 @@ def update_remote_auth_url(
     )
 
 
-def clone_or_sync_repo(
+def _clone_or_sync_repo_impl(
     work_dir: str,
     repo_config: "GitRepoConfig",
-    timeout_clone: int = 60,
-    timeout_cmd: int = 10,
-    trace_id: Optional[str] = None,
+    repo_name: str,
+    repo_dir: str,
+    auth_url: str,
+    timeout_clone: int,
+    timeout_cmd: int,
+    trace_id: Optional[str],
 ) -> GitResult:
     """
-    克隆或同步 Git 仓库。
-
-    流程:
-    1. 如果仓库已存在则跳过克隆，否则执行 git clone
-    2. 获取或确认默认主分支
-    3. 更新 remote URL
-    4. fetch 远端
-    5. 丢弃本地所有修改
-    6. 切换到默认主分支（若不存在则创建并推送）
-    7. 强制同步远端
+    clone_or_sync_repo 的实际同步逻辑（调用方须已持有该 repo_dir 的操作锁）。
     """
-    repo_name = repo_config.name
-    repo_dir = os.path.join(work_dir, repo_name)
-    auth_url = repo_config.auth_url
-
     try:
         os.makedirs(work_dir, exist_ok=True)
 
@@ -390,6 +425,57 @@ def clone_or_sync_repo(
     except Exception as e:
         logger.error(f"[trace_id={trace_id}] [{repo_name}] 仓库操作异常: {e}", exc_info=True)
         return GitResult(success=False, message=f"仓库操作异常: {str(e)}")
+
+
+def clone_or_sync_repo(
+    work_dir: str,
+    repo_config: "GitRepoConfig",
+    timeout_clone: int = 60,
+    timeout_cmd: int = 10,
+    trace_id: Optional[str] = None,
+) -> GitResult:
+    """
+    克隆或同步 Git 仓库。
+
+    同一本地路径（如共享 git_repo_cache 下的仓库）在多线程下会竞争 index.lock，
+    此处按 repo_dir 串行化，并在进入锁后清理陈旧的 index.lock；失败且疑似锁问题时重试一轮。
+
+    流程:
+    1. 如果仓库已存在则跳过克隆，否则执行 git clone
+    2. 获取或确认默认主分支
+    3. 更新 remote URL
+    4. fetch 远端
+    5. 丢弃本地所有修改
+    6. 切换到默认主分支（若不存在则创建并推送）
+    7. 强制同步远端
+    """
+    repo_name = repo_config.name
+    repo_dir = os.path.join(work_dir, repo_name)
+    auth_url = repo_config.auth_url
+    lock = _get_repo_operation_lock(repo_dir)
+    with lock:
+        for attempt in range(2):
+            _remove_stale_git_index_lock(repo_dir, trace_id=trace_id)
+            result = _clone_or_sync_repo_impl(
+                work_dir,
+                repo_config,
+                repo_name,
+                repo_dir,
+                auth_url,
+                timeout_clone,
+                timeout_cmd,
+                trace_id,
+            )
+            if result.success:
+                return result
+            if attempt == 0 and _git_error_suggests_index_lock(result.message):
+                logger.warning(
+                    f"[trace_id={trace_id}] [{repo_name}] Git 因锁/并发失败，清理 index.lock 后重试一次: "
+                    f"{result.message[:300]}"
+                )
+                continue
+            return result
+        return GitResult(success=False, message="clone_or_sync_repo: 未预期退出")
 
 
 def sync_and_rebase_branch(

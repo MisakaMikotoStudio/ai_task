@@ -14,7 +14,7 @@ todo_bp = Blueprint('todo', __name__)
 @todo_bp.route('', methods=['GET'])
 def list_todos():
     """获取待办列表"""
-    todos = get_todos(request.user_info.id)
+    todos = get_todos(request.user_info.user_id)
     return jsonify({
         'code': 200,
         'message': '获取待办列表成功',
@@ -30,7 +30,7 @@ def create_todo_api():
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
     todo = create_todo(
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         content=data.get('content', '')
     )
 
@@ -50,7 +50,7 @@ def update_todo_api(todo_id):
 
     todo = update_todo(
         todo_id=todo_id,
-        user_id=request.user_info.id,
+        user_id=request.user_info.user_id,
         content=data.get('content'),
         completed=data.get('completed')
     )
@@ -67,7 +67,7 @@ def delete_todo_api(todo_id):
     """删除待办"""
     result = delete_todo(
         todo_id=todo_id,
-        user_id=request.user_info.id
+        user_id=request.user_info.user_id
     )
 
     return jsonify({

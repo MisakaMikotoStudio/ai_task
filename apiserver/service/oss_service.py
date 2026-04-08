@@ -37,11 +37,20 @@ def upload_image(config: OssConfig, file_storage) -> str:
     client = CosS3Client(cos_config)
 
     file_data = file_storage.read()
+    # 官方：PUT Object 请求头 x-cos-acl: public-read = 公有读私有写；不设或为 default 则对象继承桶权限（控制台常显示「继承权限」）
+    # SDK 将 ACL= 映射为 x-cos-acl（cos-python-sdk-v5 cos_comm.maplist）
     client.put_object(
         Bucket=config.bucket,
         Body=file_data,
         Key=object_key,
         ContentType=file_storage.content_type,
+        ACL='public-read',
+    )
+    # 再调 PutObjectACL，避免部分环境下仅上传头未落对象 ACL；若桶开启「阻止通过 ACL 将对象设为公有读」此处会报错，需在控制台关闭对应项或改用桶策略
+    client.put_object_acl(
+        Bucket=config.bucket,
+        Key=object_key,
+        ACL='public-read',
     )
 
     url = f'{config.base_url.rstrip("/")}/{object_key}'

@@ -4,12 +4,15 @@
 客户端数据访问对象 - SQLAlchemy ORM 版本
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import or_
 
 from .connection import get_db_session
+
+logger = logging.getLogger(__name__)
 from .models import Client, ClientRepo, ClientEnvVar, User
 
 
@@ -408,24 +411,44 @@ def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:
         return [{'client_id': client_id, 'version': version} for client_id, version in rows]
 
 
-def get_cannot_run_client_ids_by_user(user_id: int, client_ids: List[int]) -> List[int]:
+def get_cannot_run_client_ids_by_user(user_id: int, client_ids: List[int], is_admin: bool = False) -> List[int]:
     """
-    在传入的 client_ids 中，返回属于该用户但是不能运行的客户端 ID。
-    顺序与 client_ids 中首次出现的顺序一致。
-    不能运行的客户端包括：
-    1. 官方云部署客户端
-    2. 已软删除客户端
+    在传入的 client_ids 中，返回「不应在宿主机本地 Docker 继续运行」的客户端 ID 子集（用于启动器清理遗留容器）。
+
+    规则：
+    - 已软删除（deleted_at 非空）的客户端：始终计入。
+    - 非管理员：official_cloud_deploy=1 的客户端也计入，避免宿主机误跑应与云端并行的实例。
+    - 管理员：仅软删除计入；官方云客户端不得出现在本列表中（configs 全量下发云客户端，若标为 invalid 会导致
+      main_docker 每轮删建本地容器死循环）。
+
+    返回顺序与 client_ids 中首次出现的顺序一致。
     """
     if not client_ids:
+        logger.debug(
+            "get_cannot_run_client_ids_by_user: skip empty client_ids user_id=%s is_admin=%s",
+            user_id,
+            is_admin,
+        )
         return []
+
     with get_db_session() as session:
-        rows = session.query(Client.id).filter(
+        q = session.query(Client.id).filter(
             Client.user_id == user_id,
             Client.id.in_(client_ids),
-            or_(Client.official_cloud_deploy == 1, Client.deleted_at.isnot(None)),
-        ).all()
-        deleted_set = {r[0] for r in rows}
-        return [cid for cid in client_ids if cid in deleted_set]
+        )
+        if is_admin:
+            q = q.filter(Client.deleted_at.isnot(None))
+        else:
+            q = q.filter(
+                or_(
+                    Client.deleted_at.isnot(None),
+                    Client.official_cloud_deploy == 1,
+                )
+            )
+        cannot_run_set = {row[0] for row in q.all()}
+
+    ordered = [cid for cid in client_ids if cid in cannot_run_set]
+    return ordered
 
 
 def increment_client_version(client_id: int, user_id: int) -> bool:

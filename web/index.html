@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/style.css?v=18">
 </head>
 <body>
     <div class="app-container">
@@ -99,9 +99,15 @@
                     </a>
                 </nav>
                 <div class="sidebar-footer">
-                    <div class="user-info">
-                        <span class="user-avatar">👤</span>
-                        <span id="current-username">用户</span>
+                    <div class="sidebar-user-panel">
+                        <div class="user-info">
+                            <span class="user-avatar">👤</span>
+                            <span id="current-username">用户</span>
+                        </div>
+                        <div id="current-user-id-wrap" class="user-public-id-wrap" hidden>
+                            <span class="user-public-id-label">用户编号</span>
+                            <span id="current-user-id" class="user-public-id-value"></span>
+                        </div>
                     </div>
                     <a href="shop.html" class="btn-secondary" style="display:block; text-align:center; margin-top:8px; text-decoration:none;">充值中心</a>
                     <button id="logout-btn" class="btn-logout">退出</button>
@@ -381,63 +387,59 @@
                     </div>
                 </div>
 
-                <!-- 商品管理视图（admin） -->
+                <!-- 商品管理视图（admin，与 /admin 下 app.js 联动） -->
                 <div id="products-view" class="view">
-                    <div class="card">
-                        <h3 class="section-title">新增商品</h3>
-                        <form id="create-product-form">
-                            <div class="row">
-                                <div class="col"><input type="text" name="key" required placeholder="商品 Key（唯一）"></div>
-                                <div class="col"><input type="text" name="title" required placeholder="商品名称"></div>
-                                <div class="col"><input type="number" name="price" min="0.01" step="0.01" required placeholder="价格"></div>
-                            </div>
-                            <div class="row" style="margin-top:8px;">
-                                <div class="col"><input type="number" name="expire_time" min="1" placeholder="有效期秒（空=永久）"></div>
-                                <div class="col"><input type="text" name="icon" placeholder="封面图 URL"></div>
-                                <div class="col"><input type="text" name="desc" placeholder="商品描述"></div>
-                            </div>
-                            <div style="margin-top:8px;"><label><input type="checkbox" name="support_continue"> 支持续费</label></div>
-                            <div style="margin-top:10px;"><button type="submit" class="btn-primary">添加商品</button></div>
-                        </form>
-                    </div>
-                    <div class="card" style="margin-top:12px;">
-                        <h3 class="section-title">商品列表</h3>
-                        <div class="table-wrap">
-                            <table id="products-table">
-                                <thead><tr><th>ID</th><th>Key</th><th>名称</th><th>价格</th><th>有效期</th><th>续费</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead>
-                                <tbody></tbody>
-                            </table>
+                    <div class="commerce-page-head">
+                        <div class="commerce-page-head-text">
+                            <h2 class="commerce-page-title">商品管理</h2>
+                            <p class="commerce-page-sub">维护商品信息与前台展示内容</p>
                         </div>
+                        <button type="button" id="open-create-product-btn" class="commerce-add-product-btn">
+                            <span class="commerce-add-icon">+</span> 新增商品
+                        </button>
+                    </div>
+                    <div class="card commerce-card commerce-products-board">
+                        <h3 class="section-title commerce-products-board-title">商品列表</h3>
+                        <div id="products-list" class="commerce-product-grid" aria-live="polite"></div>
                     </div>
                 </div>
 
                 <!-- 订单管理视图（admin） -->
                 <div id="orders-view" class="view">
-                    <div class="card">
-                        <h3 class="section-title">订单管理</h3>
-                        <div class="row">
-                            <div class="col"><input type="number" id="order-user-filter" placeholder="用户 ID（可选）"></div>
-                            <div class="col">
+                    <div class="card commerce-card">
+                        <h3 class="section-title">订单查询</h3>
+                        <div class="commerce-filter-row row">
+                            <div class="col commerce-col">
+                                <label class="commerce-label" for="order-user-filter">用户编号</label>
+                                <input type="text" id="order-user-filter" class="commerce-input-plain" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="可选，6 位数字">
+                            </div>
+                            <div class="col commerce-col">
+                                <label class="commerce-label" for="order-status-filter">订单状态</label>
                                 <select id="order-status-filter">
                                     <option value="">全部状态</option>
-                                    <option value="pending">pending</option>
-                                    <option value="paid">paid</option>
-                                    <option value="failed">failed</option>
-                                    <option value="refunded">refunded</option>
+                                    <option value="pending">待支付</option>
+                                    <option value="paid">已支付</option>
+                                    <option value="failed">失败</option>
+                                    <option value="refunded">已退款</option>
                                 </select>
                             </div>
-                            <div><button id="load-orders-btn" class="btn-primary">查询</button></div>
+                            <div class="commerce-filter-actions">
+                                <button type="button" id="load-orders-btn" class="btn-primary">查询</button>
+                            </div>
                         </div>
-                        <div class="table-wrap">
-                            <table id="orders-table">
-                                <thead><tr><th>ID</th><th>用户ID</th><th>商品Key</th><th>金额</th><th>状态</th><th>交易号</th><th>创建时间</th><th>操作</th></tr></thead>
+                    </div>
+                    <div class="card commerce-card commerce-card-gap">
+                        <h3 class="section-title">订单列表</h3>
+                        <div class="table-wrap commerce-table-wrap">
+                            <table id="orders-table" class="commerce-table">
+                                <thead><tr><th>ID</th><th>用户编号</th><th>商品Key</th><th>金额</th><th>状态</th><th>交易号</th><th>创建时间</th><th>操作</th></tr></thead>
                                 <tbody></tbody>
                             </table>
                         </div>
-                        <div class="pagination">
-                            <button id="orders-prev-btn" class="btn-secondary" disabled>上一页</button>
-                            <span id="orders-page-info">-</span>
-                            <button id="orders-next-btn" class="btn-secondary" disabled>下一页</button>
+                        <div class="commerce-pagination">
+                            <button id="orders-prev-btn" class="btn-secondary btn-small" type="button" disabled>上一页</button>
+                            <span id="orders-page-info" class="commerce-page-info">-</span>
+                            <button id="orders-next-btn" class="btn-secondary btn-small" type="button" disabled>下一页</button>
                         </div>
                     </div>
                 </div>
@@ -479,10 +481,10 @@
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=10"></script>
+    <script src="js/api.js?v=11"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=19"></script>
+    <script src="js/app.js?v=22"></script>
 </body>
 </html>
 
