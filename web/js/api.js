@@ -156,6 +156,54 @@ const clientAPI = {
     }
 };
 
+// 基础设施配置 API
+const infraAPI = {
+    // 获取全量基础设施配置
+    async get(clientId) {
+        return request(`/client/${clientId}/infrastructure`);
+    },
+
+    // 保存云服务器配置（含 SSH 校验）
+    async saveServers(clientId, data) {
+        return request(`/client/${clientId}/servers`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+
+    // 保存域名配置
+    async saveDomains(clientId, data) {
+        return request(`/client/${clientId}/domains`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+
+    // 保存数据库配置
+    async saveDatabases(clientId, data) {
+        return request(`/client/${clientId}/databases`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+
+    // 保存支付配置
+    async savePayments(clientId, data) {
+        return request(`/client/${clientId}/payments`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+
+    // 保存对象存储配置
+    async saveOss(clientId, data) {
+        return request(`/client/${clientId}/oss`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+};
+
 // 秘钥API
 const secretAPI = {
     // 获取列表
