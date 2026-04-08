@@ -5,6 +5,7 @@
 - POST /api/admin/product              - 新增商品
 - GET  /api/admin/products             - 商品列表（含已下架）
 - POST /api/admin/product/<id>/offline - 商品下架（软删除）
+- POST /api/admin/product/<id>/online  - 商品上架（恢复已下架商品）
 - GET  /api/admin/orders               - 查询购买记录
 - POST /api/admin/upload/icon          - 上传商品封面图到 OSS
 - 管理秘钥/应用（admin 专用）：
@@ -153,9 +154,21 @@ def list_products_admin():
 def offline_product(product_id: int):
     """下架商品（软删除，前台不再展示）"""
     with get_db_session():
-        ok = product_dao.soft_delete_product(product_id)
+        ok = product_dao.soft_delete_product(product_id=product_id)
     if not ok:
         return jsonify({'code': 404, 'message': '商品不存在或已下架', 'data': None}), 404
+    return jsonify({'code': 200, 'message': 'ok', 'data': None})
+
+
+@admin_bp.route('/product/<int:product_id>/online', methods=['POST'])
+@require_admin
+def online_product(product_id: int):
+    """上架商品（恢复已下架商品，前台重新展示）"""
+    with get_db_session():
+        ok = product_dao.restore_product(product_id=product_id)
+    if not ok:
+        return jsonify({'code': 404, 'message': '商品不存在或已在上架中', 'data': None}), 404
+    logger.info("商品上架: product_id=%s", product_id)
     return jsonify({'code': 200, 'message': 'ok', 'data': None})
 
 

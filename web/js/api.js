@@ -283,6 +283,11 @@ const adminCommerceAPI = {
             method: 'POST'
         });
     },
+    async onlineProduct(productId) {
+        return request(`/admin/product/${productId}/online`, {
+            method: 'POST'
+        });
+    },
     async getOrders(params = {}) {
         const query = new URLSearchParams();
         if (params.page) query.set('page', String(params.page));
