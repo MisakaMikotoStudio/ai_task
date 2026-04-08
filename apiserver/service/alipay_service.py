@@ -11,6 +11,8 @@ import json
 import logging
 import time
 import urllib.parse
+import urllib.request
+import urllib.error
 from typing import Dict
 
 from cryptography.hazmat.backends import default_backend
@@ -225,3 +227,103 @@ def decrypt_response_content(config: AlipayConfig, encrypted_content: str) -> Di
     except Exception as e:
         logger.exception("支付宝响应内容解密失败: %s", e)
         raise
+
+
+def _call_openapi(config: AlipayConfig, method: str, biz_content: Dict) -> Dict:
+    """
+    调用支付宝 OpenAPI 通用方法并返回解包后的 response 节点。
+    当配置了 app_encrypt_key 时，会对请求 biz_content 加密，并尝试解密响应内容。
+    """
+    gateway = _SANDBOX_GATEWAY if config.sandbox else config.gateway
+    biz_content_json = json.dumps(biz_content, ensure_ascii=False, separators=(',', ':'))
+
+    params = {
+        'app_id': config.app_id,
+        'method': method,
+        'format': 'JSON',
+        'charset': 'utf-8',
+        'sign_type': 'RSA2',
+        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'version': '1.0',
+    }
+
+    if config.app_encrypt_key:
+        params['biz_content'] = _aes_encrypt(biz_content_json, config.app_encrypt_key)
+        params['encrypt_type'] = 'AES'
+    else:
+        params['biz_content'] = biz_content_json
+
+    private_key = _load_private_key(config.app_private_key)
+    sign_string = _build_sign_string(params)
+    params['sign'] = _rsa2_sign(sign_string, private_key)
+
+    body = urllib.parse.urlencode(params).encode('utf-8')
+    req = urllib.request.Request(
+        gateway,
+        data=body,
+        headers={'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'},
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp_text = resp.read().decode('utf-8')
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
+        raise RuntimeError(f"支付宝退款请求失败(HTTP {e.code}): {detail}") from e
+    except Exception as e:
+        raise RuntimeError(f"支付宝退款请求失败: {e}") from e
+
+    try:
+        payload = json.loads(resp_text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"支付宝响应非 JSON: {resp_text}") from e
+
+    response_key = f"{method.replace('.', '_')}_response"
+    response_node = payload.get(response_key)
+    if response_node is None:
+        raise RuntimeError(f"支付宝响应缺少 {response_key}: {payload}")
+
+    if isinstance(response_node, str):
+        if not config.app_encrypt_key:
+            raise RuntimeError("支付宝响应为加密字符串，但未配置 app_encrypt_key")
+        response_node = decrypt_response_content(config=config, encrypted_content=response_node)
+
+    if not isinstance(response_node, dict):
+        raise RuntimeError(f"支付宝响应格式异常: {response_node}")
+
+    code = str(response_node.get('code', ''))
+    if code != '10000':
+        sub_code = response_node.get('sub_code', '')
+        sub_msg = response_node.get('sub_msg', '')
+        msg = response_node.get('msg', '')
+        raise RuntimeError(
+            f"支付宝接口调用失败: code={code}, msg={msg}, sub_code={sub_code}, sub_msg={sub_msg}"
+        )
+
+    return response_node
+
+
+def refund(config: AlipayConfig, out_trade_no: str, amount: float, reason: str = "") -> Dict:
+    """
+    调用 alipay.trade.refund 执行原路退款。
+    返回支付宝接口的退款响应节点。
+    """
+    if not out_trade_no:
+        raise ValueError("out_trade_no 不能为空")
+
+    if amount <= 0:
+        raise ValueError("refund_amount 必须大于 0")
+
+    biz_content = {
+        'out_trade_no': out_trade_no,
+        'refund_amount': f'{float(amount):.2f}',
+    }
+    if reason:
+        biz_content['refund_reason'] = reason
+
+    return _call_openapi(
+        config=config,
+        method='alipay.trade.refund',
+        biz_content=biz_content
+    )
