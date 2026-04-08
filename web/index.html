@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=19">
+    <link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
     <div class="app-container">
@@ -107,14 +107,10 @@
                     </a>
                 </nav>
                 <div class="sidebar-footer">
-                    <div class="sidebar-user-panel">
+                    <div class="sidebar-user-panel sidebar-user-panel-clickable" id="sidebar-user-panel">
                         <div class="user-info">
                             <span class="user-avatar">👤</span>
                             <span id="current-username">用户</span>
-                        </div>
-                        <div id="current-user-id-wrap" class="user-public-id-wrap" hidden>
-                            <span class="user-public-id-label">用户编号</span>
-                            <span id="current-user-id" class="user-public-id-value"></span>
                         </div>
                     </div>
                     <button id="logout-btn" class="btn-logout">退出</button>
@@ -566,7 +562,7 @@
     <script src="js/api.js?v=11"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=23"></script>
+    <script src="js/app.js?v=24"></script>
 </body>
 </html>
 

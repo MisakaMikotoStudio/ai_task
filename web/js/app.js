@@ -152,6 +152,7 @@ function showMainPage() {
     // 初始化商店和个人中心
     initStore();
     initProfile();
+    initUserPanel();
 
     // 加载数据
     loadClients();
@@ -165,31 +166,27 @@ async function loadUserInfo() {
     if (user) {
         currentUsername.textContent = user.name;
     }
-    const idWrap = document.getElementById('current-user-id-wrap');
-    const idEl = document.getElementById('current-user-id');
-    if (!idWrap || !idEl) return;
-
-    // 优先从 localStorage 立即展示，避免等待 API
-    if (user && user.user_id != null) {
-        idEl.textContent = String(user.user_id);
-        idWrap.removeAttribute('hidden');
-    }
-
     try {
         const resp = await userAPI.me();
         const u = resp && resp.data;
-        if (u && u.user_id != null) {
-            idEl.textContent = String(u.user_id);
-            idWrap.removeAttribute('hidden');
-            if (u.name) setCurrentUser({ user_id: u.user_id, name: u.name });
-        } else if (!user || user.user_id == null) {
-            idWrap.setAttribute('hidden', '');
+        if (u) {
+            if (u.name) {
+                currentUsername.textContent = u.name;
+                setCurrentUser({ user_id: u.user_id, name: u.name });
+            }
         }
     } catch {
-        if (!user || user.user_id == null) {
-            idWrap.setAttribute('hidden', '');
-        }
+        // 使用 localStorage 缓存值即可，无需额外处理
     }
+}
+
+function initUserPanel() {
+    const panel = document.getElementById('sidebar-user-panel');
+    if (!panel || ADMIN_PAGE) return;
+    panel.addEventListener('click', () => {
+        switchToView('profile');
+        window.location.hash = '/profile';
+    });
 }
 
 function logout() {

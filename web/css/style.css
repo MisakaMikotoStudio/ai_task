@@ -346,48 +346,30 @@ input, select, textarea {
 
 .sidebar-user-panel {
     margin-bottom: 12px;
-    padding: 10px 10px 12px;
+    padding: 10px 10px 10px;
     background: var(--bg-tertiary);
     border-radius: 12px;
     border: 1px solid var(--border-color);
+}
+
+.sidebar-user-panel-clickable {
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.sidebar-user-panel-clickable:hover {
+    background: var(--bg-card);
+    border-color: rgba(88, 166, 255, 0.35);
+    box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.15);
 }
 
 .user-info {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 0;
-    padding: 4px 2px 8px;
+    padding: 4px 2px;
     background: transparent;
     border-radius: 0;
-}
-
-.user-public-id-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 8px 10px;
-    margin-top: 4px;
-    background: linear-gradient(135deg, rgba(88, 166, 255, 0.12), rgba(163, 113, 247, 0.08));
-    border: 1px solid rgba(88, 166, 255, 0.25);
-    border-radius: 8px;
-}
-
-.user-public-id-label {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
-
-.user-public-id-value {
-    font-family: 'Consolas', 'SF Mono', 'Monaco', monospace;
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--accent-primary);
-    letter-spacing: 0.08em;
 }
 
 .user-avatar {
