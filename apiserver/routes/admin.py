@@ -15,7 +15,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 from dao import get_db_session
 from dao import product_dao, order_dao
-from service import oss_service
+from service import oss_service, order_service
 
 logger = logging.getLogger(__name__)
 admin_bp = Blueprint('admin', __name__)
@@ -119,7 +119,7 @@ def list_orders():
 
 @admin_bp.route('/orders/<int:order_id>/refund', methods=['POST'])
 def refund_order(order_id: int):
-    """管理员退款：当前实现为内部标记退款（不调用第三方网关）"""
+    """管理员退款：调用支付宝退款接口，成功后更新本地订单状态"""
     order = order_dao.get_order_by_id(order_id=order_id)
     if not order:
         return jsonify({'code': 404, 'message': '订单不存在', 'data': None}), 404
@@ -130,12 +130,23 @@ def refund_order(order_id: int):
     if order.status != 'paid':
         return jsonify({'code': 400, 'message': '仅支持对已支付订单退款', 'data': None}), 400
 
-    with get_db_session():
-        updated = order_dao.mark_order_refunded(out_trade_no=order.out_trade_no)
-        if not updated:
-            return jsonify({'code': 500, 'message': '退款标记失败，请重试', 'data': None}), 500
+    config = current_app.config['APP_CONFIG']
 
-    latest = order_dao.get_order_by_id(order_id=order_id)
+    with get_db_session():
+        try:
+            latest = order_service.refund_order(
+                out_trade_no=order.out_trade_no,
+                alipay_config=config.alipay,
+            )
+        except ValueError as e:
+            return jsonify({'code': 400, 'message': str(e), 'data': None}), 400
+        except RuntimeError as e:
+            logger.exception("退款失败: order_id=%s", order_id)
+            return jsonify({'code': 502, 'message': f'第三方退款失败: {e}', 'data': None}), 502
+        except Exception as e:
+            logger.exception("退款异常: order_id=%s", order_id)
+            return jsonify({'code': 500, 'message': f'退款异常: {e}', 'data': None}), 500
+
     return jsonify({'code': 200, 'message': 'ok', 'data': latest.to_dict() if latest else None})
 
 

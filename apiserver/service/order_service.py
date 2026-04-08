@@ -9,8 +9,10 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from config_model import AlipayConfig
 from dao import order_dao
 from dao.models import Order, Product
+from service import alipay_service
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +62,17 @@ def confirm_paid(out_trade_no: str, trade_no: str):
         logger.info("订单已处理或不存在（幂等）: out_trade_no=%s", out_trade_no)
 
 
-def call_third_party_refund(order: Order) -> None:
+def call_third_party_refund(order: Order, alipay_config: AlipayConfig) -> None:
     """
-    调用第三方平台退款（默认未实现）
-    业务方可在此接入支付宝/微信/其他平台退款接口。
+    调用第三方平台退款（当前实现：支付宝原路退款）。
+    只有支付宝返回成功后，才允许更新本地订单为 refunded。
     """
-    raise NotImplementedError("请实现第三方平台退款逻辑：service.order_service.call_third_party_refund")
+    alipay_service.refund(
+        config=alipay_config,
+        out_trade_no=order.out_trade_no,
+        amount=float(order.amount),
+        reason='管理员退款'
+    )
 
 
 def handle_refund_post_business(order: Order) -> None:
@@ -73,10 +80,10 @@ def handle_refund_post_business(order: Order) -> None:
     退款成功后的业务处理（默认未实现）
     例如：权益收回、回滚发放记录、通知等。
     """
-    raise NotImplementedError("请实现退款后的业务逻辑：service.order_service.handle_refund_post_business")
+    logger.info("退款后业务逻辑未配置，跳过: out_trade_no=%s", order.out_trade_no)
 
 
-def refund_order(out_trade_no: str) -> Order:
+def refund_order(out_trade_no: str, alipay_config: AlipayConfig) -> Order:
     """
     管理后台发起退款
     - 仅允许对 paid 状态订单退款
@@ -92,7 +99,7 @@ def refund_order(out_trade_no: str) -> Order:
     if order.status != Order.STATUS_PAID:
         raise ValueError("仅支持对已支付订单发起退款")
 
-    call_third_party_refund(order=order)
+    call_third_party_refund(order=order, alipay_config=alipay_config)
 
     updated = order_dao.mark_order_refunded(out_trade_no=out_trade_no)
     if not updated:
