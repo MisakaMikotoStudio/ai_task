@@ -335,7 +335,7 @@ function initClientSearch() {
                     // 搜索时在当前已加载的数据中过滤
                     renderClients(filterClientsBySearch(clientsCache));
                 } else {
-                    showToast('请输入有效的客户端ID', 'error');
+                    showToast('请输入有效的应用ID', 'error');
                 }
             }
         });
@@ -472,13 +472,13 @@ function getHeartbeatClass(lastSync) {
 }
 
 async function deleteClient(id) {
-    if (!confirm('确定要删除这个客户端吗？')) {
+    if (!confirm('确定要删除这个应用吗？')) {
         return;
     }
 
     try {
         await clientAPI.delete(id);
-        showToast('客户端删除成功', 'success');
+        showToast('应用删除成功', 'success');
         loadClients();
     } catch (error) {
         showToast(error.message, 'error');
@@ -488,7 +488,7 @@ async function deleteClient(id) {
 async function copyClient(id) {
     try {
         const result = await clientAPI.copy(id);
-        showToast(`客户端复制成功，新名称: ${result.name}`, 'success');
+        showToast(`应用复制成功，新名称: ${result.name}`, 'success');
         loadClients();
     } catch (error) {
         showToast(error.message, 'error');
@@ -528,8 +528,8 @@ async function openClientConfig(id, mode) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
     // 设置标题
-    const titleMap = { add: '新建客户端', edit: '编辑客户端', view: '查看客户端' };
-    document.getElementById('client-config-title').textContent = titleMap[mode] || '客户端配置';
+    const titleMap = { add: '新建应用', edit: '编辑应用', view: '查看应用' };
+    document.getElementById('client-config-title').textContent = titleMap[mode] || '应用配置';
 
     // Tab 切换逻辑
     const tabBtns = document.querySelectorAll('.config-tab-btn');
@@ -678,11 +678,11 @@ async function cfgUnifiedSaveClient() {
 
     const { name, agent, officialCloudDeploy } = cfgCollectBasicFields();
     if (!name) {
-        showToast('客户端名称不能为空', 'error');
+        showToast('应用名称不能为空', 'error');
         return;
     }
     if (name.length > 16) {
-        showToast('客户端名称最多 16 个字符', 'error');
+        showToast('应用名称最多 16 个字符', 'error');
         return;
     }
     if (cfgEnvVarsData.some(ev => !(ev.key || '').trim())) {
@@ -712,7 +712,7 @@ async function cfgUnifiedSaveClient() {
                 repos,
                 env_vars
             });
-            showToast('客户端创建成功', 'success');
+            showToast('应用创建成功', 'success');
         } else {
             await clientAPI.update(cfgClientId, name, {
                 agent,
@@ -1183,9 +1183,9 @@ function renderTaskEditModal(task) {
         headerInfoHtml = `
             <div class="form-row">
                 <div class="form-group form-group-half">
-                    <label>关联客户端 <span class="required">*</span></label>
+                    <label>关联应用 <span class="required">*</span></label>
                     <select id="task-edit-client" class="status-select" required>
-                        <option value="">请选择客户端</option>
+                        <option value="">请选择应用</option>
                         ${clientOptions}
                     </select>
                 </div>
@@ -1220,9 +1220,9 @@ function renderTaskEditModal(task) {
             
             clientHtml = `
                 <div class="form-group form-group-half">
-                    <label>关联客户端</label>
+                    <label>关联应用</label>
                     <select id="task-edit-client" class="status-select">
-                        <option value="0" ${!task.client_id ? 'selected' : ''}>不指定客户端</option>
+                        <option value="0" ${!task.client_id ? 'selected' : ''}>不指定应用</option>
                         ${clientOptions}
                     </select>
                 </div>
@@ -1243,7 +1243,7 @@ function renderTaskEditModal(task) {
             // 查看模式 - 只读
             clientHtml = `
                 <div class="form-group form-group-half">
-                    <label>关联客户端</label>
+                    <label>关联应用</label>
                     <div class="readonly-field">${task.client_name ? escapeHtml(task.client_name) : '-'}</div>
                 </div>
             `;
@@ -1332,7 +1332,7 @@ async function saveTaskEdit() {
         }
         
         if (!clientId) {
-            showToast('请选择客户端', 'error');
+            showToast('请选择应用', 'error');
             return;
         }
         
@@ -1628,7 +1628,7 @@ function getFlowStatusText(status) {
         'paused': '暂停',
         'completed': '已完成',
         'error': '异常',
-        'client_error': '客户端异常'
+        'client_error': '应用异常'
     };
     return texts[status] || status || '无';
 }
