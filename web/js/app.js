@@ -2233,7 +2233,7 @@ function showAdminCreateProductModal() {
             </div>
             <div class="modal-actions commerce-modal-actions commerce-modal-actions-compact">
                 <button type="button" class="btn-secondary commerce-btn-modal-cancel" onclick="closeModal()">取消</button>
-                <button type="submit" class="btn-primary commerce-btn-submit-create">创建商品</button>
+                <button type="submit" class="btn-primary commerce-btn-submit-create">创建</button>
             </div>
         </form>
     `;
