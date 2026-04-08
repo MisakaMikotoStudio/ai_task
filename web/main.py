@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 
-from flask import Flask, send_from_directory, jsonify, Blueprint
+from flask import Flask, send_from_directory, jsonify, Blueprint, redirect, url_for
 from werkzeug.exceptions import NotFound
 
 # 配置日志格式
@@ -59,7 +59,8 @@ def create_app(config: WebConfig) -> Flask:
 
     @web_bp.route('/admin/commerce')
     def admin_commerce():
-        return send_from_directory(static_folder, 'admin.html')
+        # 商品/订单管理已合并到 /admin 页面，旧路径重定向以兼容书签
+        return redirect(url_for('web.admin'), code=302)
 
     @web_bp.route('/<path:path>')
     def static_files(path):
