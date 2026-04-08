@@ -4792,4 +4792,253 @@ textarea:focus {
     .commerce-modal-form .commerce-modal-grid {
         grid-template-columns: 1fr;
     }
+}/* ===== 商店视图 ===== */
+.store-products-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px;
+    padding: 4px 0;
+}
+
+.store-product-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: var(--transition);
+}
+
+.store-product-card:hover {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.store-product-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+}
+
+.store-product-icon {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.store-product-icon-placeholder {
+    font-size: 48px;
+    opacity: 0.5;
+}
+
+.store-product-body {
+    padding: 16px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.store-product-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.store-product-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    flex: 1;
+}
+
+.store-product-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 4px;
+}
+
+.store-product-price {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent-primary);
+}
+
+.store-product-expire {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.store-product-actions {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 8px;
+}
+
+.store-product-actions .btn-primary {
+    flex: 1;
+    padding: 8px 12px;
+    font-size: 14px;
+}
+
+.store-product-actions .btn-secondary {
+    padding: 8px 14px;
+    font-size: 13px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    color: var(--text-secondary);
+    transition: var(--transition);
+}
+
+.store-product-actions .btn-secondary:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.store-loading-tip,
+.store-empty-tip,
+.store-error-tip {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    grid-column: 1 / -1;
+}
+
+.store-error-tip {
+    color: var(--accent-danger);
+}
+
+/* ===== 我的视图（个人中心）===== */
+.profile-section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.profile-services-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.service-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    padding: 16px 20px;
+    transition: var(--transition);
+}
+
+.service-card:hover {
+    border-color: var(--accent-primary);
+}
+
+.service-card-left {
+    flex-shrink: 0;
+}
+
+.service-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--border-radius);
+    object-fit: cover;
+}
+
+.service-card-icon-placeholder {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--border-radius);
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+}
+
+.service-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.service-card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.service-expire-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.service-expire-permanent {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.service-expire-normal {
+    background: rgba(88, 166, 255, 0.12);
+    color: var(--accent-primary);
+}
+
+.service-expire-urgent {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--accent-warning);
+}
+
+/* 订单状态徽标 */
+.order-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.order-status-badge.status-paid {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.order-status-badge.status-pending {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--accent-warning);
+}
+
+.order-status-badge.status-refunded {
+    background: rgba(163, 113, 247, 0.12);
+    color: var(--accent-purple);
+}
+
+.order-status-badge.status-failed {
+    background: rgba(248, 81, 73, 0.12);
+    color: var(--accent-danger);
+}
+
+.text-muted {
+    color: var(--text-muted);
 }

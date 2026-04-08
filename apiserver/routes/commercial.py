@@ -13,6 +13,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 from dao import get_db_session
 from dao import product_dao, order_dao
+from dao.models import to_iso_utc
 from routes.auth_plugin import skip_auth
 from service import order_service, alipay_service
 
@@ -109,6 +110,75 @@ def alipay_notify():
 
     # 支付宝要求返回字符串 "success"
     return 'success', 200
+
+
+@commercial_bp.route('/my-orders', methods=['GET'])
+def my_orders():
+    """查询当前登录用户的订单列表（分页）"""
+    user = request.user_info
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+        page_size = min(max(1, int(request.args.get('page_size', 20))), 50)
+    except (ValueError, TypeError):
+        return jsonify({'code': 400, 'message': '分页参数无效', 'data': None}), 400
+
+    orders, total = order_dao.list_orders(
+        user_id=user.id,
+        page=page,
+        page_size=page_size,
+    )
+
+    # 批量查商品名称（按 key 去重避免重复查询）
+    product_keys = list({o.product_key for o in orders})
+    products_map = {}
+    for key in product_keys:
+        product = product_dao.get_product_by_key(key=key)
+        if product:
+            products_map[key] = product.title
+
+    order_list = []
+    for order in orders:
+        od = order.to_dict()
+        od['product_title'] = products_map.get(order.product_key, order.product_key)
+        order_list.append(od)
+
+    logger.info("用户订单查询: user_id=%s, page=%s, total=%s", user.id, page, total)
+    return jsonify({'code': 200, 'message': 'ok', 'data': {
+        'orders': order_list,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+    }})
+
+
+@commercial_bp.route('/my-services', methods=['GET'])
+def my_services():
+    """查询当前登录用户正在生效的服务（已支付且未过期或永久）"""
+    user = request.user_info
+
+    active_orders = order_dao.get_user_active_orders(user_id=user.id)
+
+    # 按商品 key 去重，保留每个商品到期时间最晚（expire_at 最大）的那条
+    seen_keys: dict = {}
+    for order in active_orders:
+        key = order.product_key
+        if key not in seen_keys:
+            seen_keys[key] = order
+
+    services = []
+    for key, order in seen_keys.items():
+        product = product_dao.get_product_by_key(key=key)
+        services.append({
+            'product_key': key,
+            'product_title': product.title if product else key,
+            'product_icon': product.icon if product else None,
+            'order_id': order.id,
+            'expire_at': to_iso_utc(order.expire_at),
+            'is_permanent': order.expire_at is None,
+        })
+
+    logger.info("用户服务查询: user_id=%s, active_count=%s", user.id, len(services))
+    return jsonify({'code': 200, 'message': 'ok', 'data': services})
 
 
 def _detect_device(user_agent: str) -> str:

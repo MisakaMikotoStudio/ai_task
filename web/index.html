@@ -97,6 +97,14 @@
                         <span class="nav-icon">🛒</span>
                         <span>订单管理</span>
                     </a>
+                    <a href="#" class="nav-item user-only-nav" data-view="store" style="display:none;">
+                        <span class="nav-icon">🛍️</span>
+                        <span>商店</span>
+                    </a>
+                    <a href="#" class="nav-item user-only-nav" data-view="profile" style="display:none;">
+                        <span class="nav-icon">👤</span>
+                        <span>我的</span>
+                    </a>
                 </nav>
                 <div class="sidebar-footer">
                     <div class="sidebar-user-panel">
@@ -109,7 +117,6 @@
                             <span id="current-user-id" class="user-public-id-value"></span>
                         </div>
                     </div>
-                    <a href="shop.html" class="btn-secondary" style="display:block; text-align:center; margin-top:8px; text-decoration:none;">充值中心</a>
                     <button id="logout-btn" class="btn-logout">退出</button>
                 </div>
             </aside>
@@ -440,6 +447,68 @@
                             <button id="orders-prev-btn" class="btn-secondary btn-small" type="button" disabled>上一页</button>
                             <span id="orders-page-info" class="commerce-page-info">-</span>
                             <button id="orders-next-btn" class="btn-secondary btn-small" type="button" disabled>下一页</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 商店视图 -->
+                <div id="store-view" class="view">
+                    <div class="view-header">
+                        <h2>商店</h2>
+                    </div>
+                    <div id="store-products-grid" class="store-products-grid">
+                        <!-- 动态填充商品卡片 -->
+                    </div>
+                </div>
+
+                <!-- 我的视图 -->
+                <div id="profile-view" class="view">
+                    <div class="view-header">
+                        <h2>我的</h2>
+                    </div>
+                    <!-- 生效中的服务 -->
+                    <div class="profile-section">
+                        <div class="profile-section-title">生效中的服务</div>
+                        <div id="profile-services-list" class="profile-services-list">
+                            <!-- 动态填充 -->
+                        </div>
+                        <div id="profile-services-empty" class="empty-state" style="display:none;">
+                            <span class="empty-icon">📦</span>
+                            <p>暂无生效中的服务</p>
+                        </div>
+                    </div>
+                    <!-- 购买记录 -->
+                    <div class="profile-section" style="margin-top:24px;">
+                        <div class="profile-section-title">购买记录</div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>订单号</th>
+                                        <th>商品</th>
+                                        <th>金额</th>
+                                        <th>类型</th>
+                                        <th>状态</th>
+                                        <th>到期时间</th>
+                                        <th>购买时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="profile-orders-tbody">
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
+                            <div id="profile-orders-empty" class="empty-state" style="display:none;">
+                                <span class="empty-icon">🧾</span>
+                                <p>暂无购买记录</p>
+                            </div>
+                        </div>
+                        <div class="table-footer" id="profile-orders-footer" style="display:none;">
+                            <div id="profile-orders-total-info" class="task-pagination-summary"></div>
+                            <div class="task-pagination">
+                                <button id="profile-orders-prev-btn" class="btn-secondary btn-small" type="button">上一页</button>
+                                <span id="profile-orders-page-info" class="task-page-info"></span>
+                                <button id="profile-orders-next-btn" class="btn-secondary btn-small" type="button">下一页</button>
+                            </div>
                         </div>
                     </div>
                 </div>
