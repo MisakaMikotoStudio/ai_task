@@ -6,6 +6,7 @@
 
 import logging
 import os
+import subprocess
 import traceback
 import threading
 from typing import Optional, List
@@ -186,6 +187,8 @@ class CodeDevelopWorker(BaseWorker):
         for git_repo in self.code_git:
             work_repo_dir = os.path.join(self.work_dir, git_repo.name)
             task_branch = self._get_task_branch_name(git_repo)
+            # 使用实际当前分支，而非固定计算的分支名（agent 执行后可能已切换分支）
+            actual_branch = self._get_current_branch(work_repo_dir) or task_branch
             diff_result = git_utils.collect_remote_branch_diff_info(
                 repo_dir=work_repo_dir,
                 dev_branch=task_branch,
@@ -207,7 +210,7 @@ class CodeDevelopWorker(BaseWorker):
             )
             task_branch_merge_request.append({
                 "repo_name": git_repo.name,
-                "branch_name": task_branch,
+                "branch_name": actual_branch,
                 "latest_commitId": diff_result.commit_id,
                 "merge_url": actual_pr_url or diff_result.merge_url
             })
@@ -229,6 +232,8 @@ class CodeDevelopWorker(BaseWorker):
             work_repo_dir = os.path.join(self.work_dir, git_repo.name)
             task_branch = self._get_task_branch_name(git_repo)
             chat_branch = self._get_chat_branch_name(git_repo)
+            # 使用实际当前分支
+            actual_branch = self._get_current_branch(work_repo_dir) or chat_branch
             diff_result = git_utils.collect_remote_branch_diff_info(
                 repo_dir=work_repo_dir,
                 dev_branch=chat_branch,
@@ -250,7 +255,7 @@ class CodeDevelopWorker(BaseWorker):
             )
             chat_branch_merge_request.append({
                 "repo_name": git_repo.name,
-                "branch_name": chat_branch,
+                "branch_name": actual_branch,
                 "latest_commitId": diff_result.commit_id,
                 "merge_url": actual_pr_url or diff_result.merge_url
             })
@@ -377,7 +382,9 @@ class CodeDevelopWorker(BaseWorker):
             f"## 工作环境\n\n"
             f"- **工作目录**: `{self.work_dir}`（非 git 仓库，下面的子文件夹才是独立 git 仓库）\n"
             f"- **文档目录**: `{self.docs_dir}`\n"
-            f"- 所有仓库已切换到正确的开发分支，禁止切换或新建分支\n\n"
+            f"- 所有仓库已切换到正确的开发分支\n"
+            f"- **分支命名规则**: task 分支为 `{{branch_prefix}}{{task_id}}`，chat 分支为 `{{branch_prefix}}{{task_id}}_{{chat_id}}`\n"
+            f"- **当前 task_id**: `{self.task['task_id']}`，**chat_id**: `{self.task['chat_id']}`\n\n"
             f"### 项目仓库\n\n"
             f"{self._build_repo_info_table_for_prompt()}"
         )
@@ -418,8 +425,8 @@ class CodeDevelopWorker(BaseWorker):
 
         # ===== 5. 强制约束 =====
         constraints = [
-            "**禁止切换或新建 git 分支** — 所有仓库已在正确的开发分支，直接在当前分支开发",
-            "**禁止在主分支（main/master）上提交任何变更**",
+            "**常规开发任务禁止切换分支** — 所有仓库已在正确的开发分支，直接在当前分支开发。仅当用户需求明确要求合并分支操作时，允许切换分支",
+            "**禁止在主分支（main/master）上提交任何变更**（用户明确要求合并到默认分支的操作除外）",
             "**需求累积记录** — 更新开发文档「需求内容」章节时追加新内容，不得覆盖或删除已有需求",
             f"**强制产出开发文档** — 无论用户需求是否涉及实际代码改动（例如咨询、介绍、分析类问题），都必须创建或更新 `{self.develop_file_path}`，并将本次需求、分析过程、执行结论完整记录到文档中",
         ]
@@ -546,19 +553,34 @@ class CodeDevelopWorker(BaseWorker):
         return "\n".join(lines)
 
     def _build_repo_info_table_for_prompt(self) -> str:
-        """构建项目仓库信息表，包含目录名、说明和当前分支"""
+        """构建项目仓库信息表，包含目录名、说明、默认分支和当前分支"""
         rows = [
-            "| 仓库目录 | 说明 | 当前分支 |",
-            "|----------|------|----------|",
+            "| 仓库目录 | 说明 | 默认分支 | 分支前缀 | 当前分支 |",
+            "|----------|------|---------|---------|----------|",
         ]
         for repo in self.code_git:
             branch = self._get_chat_branch_name(repo)
             desc = repo.desc or "—"
-            rows.append(f"| `{repo.name}` | {desc} | `{branch}` |")
+            default_branch = repo.default_branch or "main"
+            rows.append(f"| `{repo.name}` | {desc} | `{default_branch}` | `{repo.branch_prefix}` | `{branch}` |")
         return "\n".join(rows)
 
     def _get_task_branch_name(self, git_repo: GitRepoConfig) -> str:
         return git_repo.branch_prefix + str(self.task['task_id'])
-    
+
     def _get_chat_branch_name(self, git_repo: GitRepoConfig) -> str:
         return self._get_task_branch_name(git_repo) + "_" + str(self.task['chat_id'])
+
+    @staticmethod
+    def _get_current_branch(repo_dir: str) -> Optional[str]:
+        """获取仓库当前所在分支名称"""
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                cwd=repo_dir, capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None

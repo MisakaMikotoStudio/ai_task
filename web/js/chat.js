@@ -13,6 +13,7 @@ const outputHtmlCache = new Map();
 let runningMessageId = null;
 let pollTimer = null;
 let mergeRequestStore = {};
+let clientConfigCache = null;
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', async () => {
@@ -31,6 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     await loadTaskInfo();
+    await loadClientConfig();
     await loadChats();
 });
 
@@ -67,6 +69,18 @@ async function loadTaskInfo() {
         console.warn('loadTaskInfo failed:', e);
         document.getElementById('sidebar-task-name').textContent = `Task ${taskId}`;
         document.getElementById('sidebar-task-id').textContent = `#${taskId}`;
+    }
+}
+
+// ===== Load client config (repos info) =====
+async function loadClientConfig() {
+    try {
+        if (!taskInfo || !taskInfo.client_id) return;
+        const res = await clientAPI.getConfig(taskInfo.client_id);
+        clientConfigCache = res.data;
+    } catch (e) {
+        console.warn('loadClientConfig failed:', e);
+        clientConfigCache = null;
     }
 }
 
@@ -426,10 +440,13 @@ function updateComposerState() {
     const hintEl = document.getElementById('composer-hint');
     const hintText = document.getElementById('composer-hint-text');
 
+    const mergeWrap = document.getElementById('merge-dropdown-wrap');
+
     if (runningMessageId) {
         box.classList.add('locked');
         input.disabled = true;
         sendBtn.style.display = 'none';
+        if (mergeWrap) mergeWrap.style.display = 'none';
         stopBtn.style.display = 'flex';
         hintEl.className = 'composer-hint warn';
         hintText.textContent = '当前有 Chat 消息正在执行，无法输入新消息';
@@ -438,6 +455,7 @@ function updateComposerState() {
         box.classList.remove('locked');
         input.disabled = false;
         sendBtn.style.display = 'flex';
+        if (mergeWrap) mergeWrap.style.display = clientConfigCache ? 'block' : 'none';
         stopBtn.style.display = 'none';
         hintEl.className = 'composer-hint';
         hintText.textContent = '尽管问，带图也行';
@@ -585,4 +603,159 @@ async function sendNewChatMessage() {
 
 function handleWelcomeInputKeydown(e) {
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendNewChatMessage(); }
+}
+
+// ===== Merge dropdown =====
+function toggleMergeDropdown(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('merge-dropdown-menu');
+    menu.classList.toggle('show');
+}
+
+function closeMergeDropdown() {
+    const menu = document.getElementById('merge-dropdown-menu');
+    if (menu) menu.classList.remove('show');
+}
+
+document.addEventListener('click', () => { closeMergeDropdown(); });
+
+function _getRepoName(url) {
+    if (!url) return '';
+    const m = url.match(/[/:]([\w.-]+?)(?:\.git)?$/);
+    return m ? m[1] : url;
+}
+
+function _buildRepoTable(repos) {
+    const lines = ['| 仓库 | 分支前缀 | 默认分支 | task 分支 | chat 分支 |', '|------|---------|---------|----------|----------|'];
+    for (const repo of repos) {
+        const name = _getRepoName(repo.url);
+        const prefix = repo.branch_prefix || 'ai_';
+        const defaultBr = repo.default_branch || 'main';
+        const taskBr = `${prefix}${taskId}`;
+        const chatBr = `${prefix}${taskId}_${currentChatId}`;
+        lines.push(`| ${name} | ${prefix} | ${defaultBr} | ${taskBr} | ${chatBr} |`);
+    }
+    return lines.join('\n');
+}
+
+function _buildMergeToTaskPrompt() {
+    if (!clientConfigCache || !clientConfigCache.repos) return null;
+    const repos = clientConfigCache.repos;
+    const repoTable = _buildRepoTable(repos);
+
+    return `# 合并 Chat 分支到 Task 分支
+
+## 背景信息
+
+- task_id: ${taskId}
+- chat_id: ${currentChatId}
+- 当前工作目录下有多个独立 git 仓库
+
+${repoTable}
+
+## 操作要求
+
+对当前工作目录下的 **每一个 git 仓库** 执行以下操作：
+
+1. **整理差异**：对比 chat 分支与 task 分支的差异
+2. **Squash 合并**：将 chat 分支相对于 task 分支的所有差异合并成 **一个 commit**，设置有意义的 commit message（概括本次 chat 的改动内容）
+3. **合并方式**：要求在 task 分支的 commit 历史上新增一个 commit，而不是产生 merge commit 记录。推荐使用 \`git checkout <task分支> && git merge --squash <chat分支> && git commit\` 的方式
+4. **推送到远端**：合并完成后推送 task 分支到远端。如果远端有新的提交，先执行 \`git pull --rebase origin <task分支>\` 再 push
+5. **关闭 PR**：如果 chat 分支在远端有对应的 PR（目标分支为 task 分支），使用 git 命令或 API 关闭该 PR，避免云端残留大量 PR。可以通过删除远端 chat 分支来自动关闭 PR：\`git push origin --delete <chat分支>\`
+6. **操作完成后**：切回 chat 分支继续工作
+
+## 注意事项
+
+- 如果 chat 分支与 task 分支没有差异，跳过该仓库
+- 每个仓库独立操作，一个失败不影响其他仓库
+- 操作过程中如遇到冲突，尝试解决；无法解决时报告错误
+`;
+}
+
+function _buildMergeToDefaultBranchPrompt() {
+    if (!clientConfigCache || !clientConfigCache.repos) return null;
+    const repos = clientConfigCache.repos;
+    const repoTable = _buildRepoTable(repos);
+
+    return `# 合并 Chat 分支到 Task 分支，再合并 Task 分支到默认分支
+
+## 背景信息
+
+- task_id: ${taskId}
+- chat_id: ${currentChatId}
+- 当前工作目录下有多个独立 git 仓库
+
+${repoTable}
+
+## 第一步：合并 Chat 分支到 Task 分支
+
+对当前工作目录下的 **每一个 git 仓库** 执行以下操作：
+
+1. **整理差异**：对比 chat 分支与 task 分支的差异
+2. **Squash 合并**：将 chat 分支相对于 task 分支的所有差异合并成 **一个 commit**，设置有意义的 commit message
+3. **合并方式**：在 task 分支的 commit 历史上新增一个 commit，而不是产生 merge commit。推荐使用 \`git checkout <task分支> && git merge --squash <chat分支> && git commit\` 的方式
+4. **推送到远端**：合并完成后推送 task 分支到远端。如果远端有新的提交，先执行 \`git pull --rebase origin <task分支>\` 再 push
+5. **关闭 PR**：如果 chat 分支在远端有对应的 PR，通过删除远端 chat 分支来关闭：\`git push origin --delete <chat分支>\`
+
+## 第二步：合并 Task 分支到默认分支
+
+在第一步全部完成后，对 **每一个 git 仓库** 继续执行：
+
+1. **切换到默认分支**：\`git checkout <默认分支>\`
+2. **拉取最新**：\`git pull origin <默认分支>\`
+3. **Rebase 合并**：将 task 分支 rebase 到默认分支上，确保 commit 历史是线性的，不产生 merge commit。推荐方式：
+   - \`git checkout <默认分支>\`
+   - \`git merge --ff-only <task分支>\`（如果 task 分支已经 rebase 过默认分支）
+   - 或者 \`git rebase <默认分支> <task分支> && git checkout <默认分支> && git merge --ff-only <task分支>\`
+4. **推送默认分支**：\`git push origin <默认分支>\`
+5. **关闭 PR**：如果 task 分支在远端有对应的 PR（目标分支为默认分支），通过删除远端 task 分支来关闭：\`git push origin --delete <task分支>\`
+6. **操作完成后**：切回 chat 分支继续工作
+
+## 注意事项
+
+- 如果分支之间没有差异，跳过对应步骤
+- 每个仓库独立操作，一个失败不影响其他仓库
+- 操作过程中如遇到冲突，尝试解决；无法解决时报告错误
+- 确保默认分支的 commit 历史是清爽的线性记录
+`;
+}
+
+async function mergeToTask() {
+    closeMergeDropdown();
+    if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
+
+    const prompt = _buildMergeToTaskPrompt();
+    if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
+
+    const btn = document.getElementById('merge-trigger-btn');
+    btn.disabled = true;
+    try {
+        await chatAPI.createMessage(taskId, currentChatId, prompt);
+        await loadMessages(currentChatId);
+        await loadChats();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function mergeToDefaultBranch() {
+    closeMergeDropdown();
+    if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
+
+    const prompt = _buildMergeToDefaultBranchPrompt();
+    if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
+
+    const btn = document.getElementById('merge-trigger-btn');
+    btn.disabled = true;
+    try {
+        await chatAPI.createMessage(taskId, currentChatId, prompt);
+        await loadMessages(currentChatId);
+        await loadChats();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
 }

@@ -143,7 +143,11 @@ const clientAPI = {
         });
     },
 
-    // 心跳
+    // 获取客户端完整配置（repos、agent 等）
+    async getConfig(id) {
+        return request(`/client/${id}/config`);
+    },
+
     // 复制客户端
     async copy(id) {
         return request(`/client/${id}/copy`, {
