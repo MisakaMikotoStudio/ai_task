@@ -398,6 +398,7 @@ class Chat(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, nullable=False, comment='所属用户ID')
     task_id = Column(Integer, nullable=False, comment='关联任务ID')
+    client_id = Column(Integer, nullable=True, default=None, comment='关联客户端ID（task_id=0时使用）')
     title = Column(String(32), nullable=False, comment='Chat标题')
     status = Column(String(20), nullable=False, default='completed', comment='Chat状态')
     sessionid = Column(String(64), nullable=True, comment='会话ID')
@@ -425,6 +426,7 @@ class Chat(Base):
         return {
             'id': self.id,
             'task_id': self.task_id,
+            'client_id': self.client_id,
             'title': self.title,
             'status': self.status,
             'status_text': self.STATUS_TEXT.get(self.status, self.status),

@@ -8,15 +8,17 @@ from typing import Optional, List, Dict
 from datetime import datetime, timezone
 
 from .connection import get_db_session
-from .models import Chat, ChatMessage, Task
+from .models import Chat, ChatMessage, Task, Client
 
 
-def create_chat(user_id: int, task_id: int, title: str, sessionid: Optional[str] = None) -> Chat:
+def create_chat(user_id: int, task_id: int, title: str, sessionid: Optional[str] = None,
+                client_id: Optional[int] = None) -> Chat:
     """创建Chat"""
     with get_db_session() as session:
         chat = Chat(
             user_id=user_id,
             task_id=task_id,
+            client_id=client_id,
             title=title,
             status=Chat.STATUS_COMPLETED,
             sessionid=sessionid,
@@ -188,10 +190,59 @@ def soft_delete_message(user_id: int, message_id: int, chat_id: int, task_id: in
         session.flush()
         return input_text
 
-def get_running_chat_messages_by_client(user_id: int, client_id: int) -> List[Dict]:
-    """获取指定客户端下需要处理的对话消息（按 task/chat 聚合）"""
+def get_standalone_chats(
+    user_id: int,
+    statuses: Optional[List[str]] = None,
+    page: int = 1,
+    page_num: int = 20
+) -> Dict:
+    """获取 task_id=0 的独立 Chat 列表（含 client 名称），支持分页和状态筛选"""
     with get_db_session() as session:
-        rows = session.query(
+        query = session.query(
+            Chat,
+            Client.name.label('client_name'),
+        ).outerjoin(
+            Client, Chat.client_id == Client.id
+        ).filter(
+            Chat.user_id == user_id,
+            Chat.task_id == 0,
+            Chat.deleted_at.is_(None),
+        )
+
+        if statuses:
+            query = query.filter(Chat.status.in_(statuses))
+
+        total = query.count()
+
+        rows = query.order_by(
+            Chat.updated_at.desc()
+        ).offset(
+            (page - 1) * page_num
+        ).limit(page_num).all()
+
+        result = []
+        for chat, client_name in rows:
+            d = chat.to_dict()
+            d['client_name'] = client_name or ''
+            result.append(d)
+        return {
+            'total': total,
+            'page': page,
+            'page_num': page_num,
+            'items': result,
+        }
+
+
+def get_running_chat_messages_by_client(user_id: int, client_id: int) -> List[Dict]:
+    """获取指定客户端下需要处理的对话消息（按 task/chat 聚合）
+    包含两类：
+    1. task_id > 0：通过 Task.client_id 关联
+    2. task_id = 0：通过 Chat.client_id 关联（独立 Chat）
+    """
+    from sqlalchemy import literal_column
+    with get_db_session() as session:
+        # 查询1：归属 task 的 chat（原有逻辑）
+        task_rows = session.query(
             Task.id.label('task_id'),
             Task.title.label('task_title'),
             Chat.id.label('chat_id'),
@@ -224,8 +275,39 @@ def get_running_chat_messages_by_client(user_id: int, client_id: int) -> List[Di
             ChatMessage.id.asc()
         ).all()
 
+        # 查询2：独立 chat（task_id=0，通过 chat.client_id 关联）
+        standalone_rows = session.query(
+            literal_column('0').label('task_id'),
+            literal_column("''").label('task_title'),
+            Chat.id.label('chat_id'),
+            Chat.title.label('chat_title'),
+            Chat.sessionid.label('chat_sessionid'),
+            ChatMessage.id.label('message_id'),
+            ChatMessage.status.label('message_status'),
+            ChatMessage.input.label('message_input'),
+            ChatMessage.output.label('message_output'),
+            ChatMessage.extra.label('message_extra'),
+            ChatMessage.created_at.label('message_created_at')
+        ).join(
+            ChatMessage, ChatMessage.chat_id == Chat.id
+        ).filter(
+            Chat.user_id == user_id,
+            Chat.task_id == 0,
+            Chat.client_id == client_id,
+            Chat.deleted_at.is_(None),
+            ChatMessage.user_id == user_id,
+            ChatMessage.deleted_at.is_(None),
+            ChatMessage.status.in_([ChatMessage.STATUS_PENDING, ChatMessage.STATUS_RUNNING])
+        ).order_by(
+            Chat.id.asc(),
+            ChatMessage.created_at.asc(),
+            ChatMessage.id.asc()
+        ).all()
+
+        all_rows = list(task_rows) + list(standalone_rows)
+
         grouped: Dict[tuple, Dict] = {}
-        for row in rows:
+        for row in all_rows:
             group_key = (row.task_id, row.chat_id)
             if group_key not in grouped:
                 grouped[group_key] = {

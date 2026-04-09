@@ -126,6 +126,11 @@ class CodeDevelopWorker(BaseWorker):
         except Exception as notify_err:
             logger.error(f"[{self.trace_id}] 异常回传失败: {notify_err}")
 
+    @property
+    def is_standalone(self) -> bool:
+        """是否为独立 Chat（task_id=0）"""
+        return int(self.task.get('task_id', 0)) == 0
+
     def before_execute(self):
         """准备执行节点逻辑 - 准备执行节点所需的环境和数据"""
         # 更新消息状态为 running
@@ -147,9 +152,14 @@ class CodeDevelopWorker(BaseWorker):
                 raise Exception(f"代码仓库 {git_repo.name} 准备失败: {git_result.message}")
         # 工作目录仓库同步(优先同步文档仓库)
         git_repos = [self.docs_git] + self.code_git
-        for git_repo in git_repos:
-            self._sync_repo(git_repo, type="task") # task分支rebase主分支
-            self._sync_repo(git_repo, type="chat") # chat分支rebase task分支
+        if self.is_standalone:
+            # 独立 Chat：跳过 task 分支，直接从默认分支创建 chat 分支
+            for git_repo in git_repos:
+                self._sync_repo(git_repo, type="chat_standalone")
+        else:
+            for git_repo in git_repos:
+                self._sync_repo(git_repo, type="task") # task分支rebase主分支
+                self._sync_repo(git_repo, type="chat") # chat分支rebase task分支
         # 文档仓库init_docs拷贝到当前目录，如果没有的话，默认使用当前clients目录下的init_docs
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
         default_init_docs_dir = os.path.join(os.path.dirname(current_file_dir), "init_docs")
@@ -169,11 +179,73 @@ class CodeDevelopWorker(BaseWorker):
             with open(self.chat_history_file_path, "w", encoding="utf-8") as f:
                 json.dump(chat_history, f, ensure_ascii=False, indent=4)
 
+    def _collect_branch_merge_requests(self, dev_branch_fn, base_branch_fn, diff_label: str = "分支") -> List[dict]:
+        """收集各代码仓库的分支差异信息并创建 PR（公共方法）
+
+        Args:
+            dev_branch_fn: 接收 git_repo 返回开发分支名的函数
+            base_branch_fn: 接收 git_repo 返回基准分支名的函数
+            diff_label: 日志中的分支类型标签（如 "task" / "chat"）
+        """
+        merge_requests: List[dict] = []
+        for git_repo in self.code_git:
+            work_repo_dir = os.path.join(self.work_dir, git_repo.name)
+            dev_branch = dev_branch_fn(git_repo)
+            base_branch = base_branch_fn(git_repo)
+            actual_branch = git_utils.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or dev_branch
+            diff_result = git_utils.collect_remote_branch_diff_info(
+                repo_dir=work_repo_dir,
+                dev_branch=dev_branch,
+                main_branch=base_branch,
+                trace_id=self.trace_id,
+            )
+            if not diff_result.success:
+                logger.warning(f"[{self.trace_id}] 检查 {diff_label} 分支差异失败: repo={git_repo.name}, {diff_result.message}")
+                continue
+            if diff_result.message == "no_diff":
+                continue
+            actual_pr_url = git_utils.create_github_pr_if_not_exists(
+                repo_url=git_repo.url,
+                token=git_repo.token,
+                head_branch=dev_branch,
+                base_branch=base_branch,
+                pr_title=dev_branch,
+                trace_id=self.trace_id,
+            )
+            merge_requests.append({
+                "repo_name": git_repo.name,
+                "branch_name": actual_branch,
+                "latest_commitId": diff_result.commit_id,
+                "merge_url": actual_pr_url or diff_result.merge_url
+            })
+        return merge_requests
+
     def after_execute(self):
         """执行完成后，保存任务执行信息"""
         task_id = self.task.get("task_id")
         chat_id = self.task.get("chat_id")
         message_id = self.task.get("chat_messages")[-1].get("id")
+
+        if self.is_standalone:
+            # ---- 独立 Chat：chat 分支 vs 默认分支（跳过 task 分支层）----
+            docs_chat_branch = self._get_chat_branch_name(self.docs_git)
+            develop_chat_doc_url = (
+                self.docs_git.get_path_prefix(docs_chat_branch)
+                + "/develop.md"
+            )
+            chat_branch_merge_request = self._collect_branch_merge_requests(
+                dev_branch_fn=self._get_chat_branch_name,
+                base_branch_fn=lambda repo: repo.default_branch,
+                diff_label="chat",
+            )
+            self.client_config.apiserver_rpc.sync_chat_msg_sync_execute(
+                task_id=task_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                develop_doc=develop_chat_doc_url,
+                merge_request=chat_branch_merge_request
+            )
+            return
 
         # -------------------- Step 1：task 分支 vs 默认主分支 --------------------
         docs_task_branch = self._get_task_branch_name(self.docs_git)
@@ -181,84 +253,28 @@ class CodeDevelopWorker(BaseWorker):
             self.docs_git.get_path_prefix(docs_task_branch)
             + "/develop.md"
         )
-
-        task_branch_merge_request: List[dict] = []
-        for git_repo in self.code_git:
-            work_repo_dir = os.path.join(self.work_dir, git_repo.name)
-            task_branch = self._get_task_branch_name(git_repo)
-            # 使用实际当前分支，而非固定计算的分支名（agent 执行后可能已切换分支）
-            actual_branch = git_utils.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or task_branch
-            diff_result = git_utils.collect_remote_branch_diff_info(
-                repo_dir=work_repo_dir,
-                dev_branch=task_branch,
-                main_branch=git_repo.default_branch,
-                trace_id=self.trace_id,
-            )
-            if not diff_result.success:
-                logger.warning(f"[{self.trace_id}] 检查 task 分支差异失败: repo={git_repo.name}, {diff_result.message}")
-                continue
-            if diff_result.message == "no_diff":
-                continue
-            actual_pr_url = git_utils.create_github_pr_if_not_exists(
-                repo_url=git_repo.url,
-                token=git_repo.token,
-                head_branch=task_branch,
-                base_branch=git_repo.default_branch,
-                pr_title=task_branch,
-                trace_id=self.trace_id,
-            )
-            task_branch_merge_request.append({
-                "repo_name": git_repo.name,
-                "branch_name": actual_branch,
-                "latest_commitId": diff_result.commit_id,
-                "merge_url": actual_pr_url or diff_result.merge_url
-            })
-
+        task_branch_merge_request = self._collect_branch_merge_requests(
+            dev_branch_fn=self._get_task_branch_name,
+            base_branch_fn=lambda repo: repo.default_branch,
+            diff_label="task",
+        )
         self.client_config.apiserver_rpc.sync_task_execute(
             task_id=task_id,
             develop_doc=develop_task_doc_url,
             merge_request=task_branch_merge_request
         )
 
-        # -------------------- Step 3：chat 分支 vs task 分支 --------------------
+        # -------------------- Step 2：chat 分支 vs task 分支 --------------------
         docs_chat_branch = self._get_chat_branch_name(self.docs_git)
         develop_chat_doc_url = (
             self.docs_git.get_path_prefix(docs_chat_branch)
             + "/develop.md"
         )
-        chat_branch_merge_request: List[dict] = []
-        for git_repo in self.code_git:
-            work_repo_dir = os.path.join(self.work_dir, git_repo.name)
-            task_branch = self._get_task_branch_name(git_repo)
-            chat_branch = self._get_chat_branch_name(git_repo)
-            # 使用实际当前分支
-            actual_branch = git_utils.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or chat_branch
-            diff_result = git_utils.collect_remote_branch_diff_info(
-                repo_dir=work_repo_dir,
-                dev_branch=chat_branch,
-                main_branch=task_branch,
-                trace_id=self.trace_id,
-            )
-            if not diff_result.success:
-                logger.warning(f"[{self.trace_id}] 检查 chat 分支差异失败: repo={git_repo.name}, {diff_result.message}")
-                continue
-            if diff_result.message == "no_diff":
-                continue
-            actual_pr_url = git_utils.create_github_pr_if_not_exists(
-                repo_url=git_repo.url,
-                token=git_repo.token,
-                head_branch=chat_branch,
-                base_branch=task_branch,
-                pr_title=chat_branch,
-                trace_id=self.trace_id,
-            )
-            chat_branch_merge_request.append({
-                "repo_name": git_repo.name,
-                "branch_name": actual_branch,
-                "latest_commitId": diff_result.commit_id,
-                "merge_url": actual_pr_url or diff_result.merge_url
-            })
-
+        chat_branch_merge_request = self._collect_branch_merge_requests(
+            dev_branch_fn=self._get_chat_branch_name,
+            base_branch_fn=self._get_task_branch_name,
+            diff_label="chat",
+        )
         self.client_config.apiserver_rpc.sync_chat_msg_sync_execute(
             task_id=task_id,
             chat_id=chat_id,
@@ -290,6 +306,7 @@ class CodeDevelopWorker(BaseWorker):
         )
 
     # git 仓库的rebase同步, type=task 代表task执行分支rebase主分支，type=chat 代表chat执行分支rebase task分支
+    # type=chat_standalone 代表独立chat分支rebase默认分支（跳过task分支层）
     def _sync_repo(self, git_repo: GitRepoConfig, type="task"):
         if type == "task":
             dev_branch = self._get_task_branch_name(git_repo)
@@ -297,6 +314,9 @@ class CodeDevelopWorker(BaseWorker):
         elif type == "chat":
             dev_branch = self._get_chat_branch_name(git_repo)
             default_branch = self._get_task_branch_name(git_repo)
+        elif type == "chat_standalone":
+            dev_branch = self._get_chat_branch_name(git_repo)
+            default_branch = git_repo.default_branch
         else:
             raise Exception(f"Invalid type: {type}")
         work_repo_dir = os.path.join(self.work_dir, git_repo.name)
@@ -376,16 +396,29 @@ class CodeDevelopWorker(BaseWorker):
         )
 
         # ===== 2. 工作环境 =====
-        sections.append(
-            f"## 工作环境\n\n"
-            f"- **工作目录**: `{self.work_dir}`（非 git 仓库，下面的子文件夹才是独立 git 仓库）\n"
-            f"- **文档目录**: `{self.docs_dir}`\n"
-            f"- 所有仓库已切换到正确的开发分支\n"
-            f"- **分支命名规则**: task 分支为 `{{branch_prefix}}{{task_id}}`，chat 分支为 `{{branch_prefix}}{{task_id}}_{{chat_id}}`\n"
-            f"- **当前 task_id**: `{self.task['task_id']}`，**chat_id**: `{self.task['chat_id']}`\n\n"
-            f"### 项目仓库\n\n"
-            f"{self._build_repo_info_table_for_prompt()}"
-        )
+        if self.is_standalone:
+            sections.append(
+                f"## 工作环境\n\n"
+                f"- **工作目录**: `{self.work_dir}`（非 git 仓库，下面的子文件夹才是独立 git 仓库）\n"
+                f"- **文档目录**: `{self.docs_dir}`\n"
+                f"- 所有仓库已切换到正确的开发分支\n"
+                f"- **模式**: 独立 Chat（不归属特定 Task），chat 分支直接基于默认分支\n"
+                f"- **分支命名规则**: chat 分支为 `{{branch_prefix}}0_{{chat_id}}`\n"
+                f"- **当前 chat_id**: `{self.task['chat_id']}`\n\n"
+                f"### 项目仓库\n\n"
+                f"{self._build_repo_info_table_for_prompt()}"
+            )
+        else:
+            sections.append(
+                f"## 工作环境\n\n"
+                f"- **工作目录**: `{self.work_dir}`（非 git 仓库，下面的子文件夹才是独立 git 仓库）\n"
+                f"- **文档目录**: `{self.docs_dir}`\n"
+                f"- 所有仓库已切换到正确的开发分支\n"
+                f"- **分支命名规则**: task 分支为 `{{branch_prefix}}{{task_id}}`，chat 分支为 `{{branch_prefix}}{{task_id}}_{{chat_id}}`\n"
+                f"- **当前 task_id**: `{self.task['task_id']}`，**chat_id**: `{self.task['chat_id']}`\n\n"
+                f"### 项目仓库\n\n"
+                f"{self._build_repo_info_table_for_prompt()}"
+            )
 
         # ===== 2.5 代码变更提示（commitId 不一致时插入）=====
         code_change_notice = self._build_code_change_notice_for_prompt()

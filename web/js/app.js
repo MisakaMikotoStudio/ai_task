@@ -292,7 +292,10 @@ function switchToView(view) {
     document.getElementById(`${view}-view`)?.classList.add('active');
 
     // 视图切换时加载对应数据
-    if (view === 'okr') {
+    if (view === 'chats') {
+        initStandaloneChatPanel();
+        loadStandaloneChatList();
+    } else if (view === 'okr') {
         loadObjectives();
         initOKREvents();
     } else if (view === 'secrets') {
@@ -2696,6 +2699,776 @@ function renderAdminOrdersTable(data) {
 
 function openTaskChat(taskId) {
     window.open(`chat.html?task_id=${taskId}`, '_blank');
+}
+
+function openStandaloneChat(chatId, clientId) {
+    window.open(`chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}`, '_blank');
+}
+
+// ===== 独立 Chat（split-panel, inline rendering） =====
+
+let scStatusFilter = ['pending', 'running', 'completed'];
+let scChatList = [];
+let scCurrentPage = 1;
+let scPageSize = 20;
+let scTotal = 0;
+let scSelectedChatId = null;
+let scSelectedClientId = null;
+let scClientsCache = [];
+let scInitialized = false;
+
+// Chat detail state
+let scMessagesCache = [];
+let scMessagesFingerprint = '';
+const scOutputHtmlCache = new Map();
+let scRunningMessageId = null;
+let scPollTimer = null;
+let scMergeRequestStore = {};
+let scClientConfigCache = null;
+
+const SC_CLIENT_CACHE_KEY = 'sc_last_client_id';
+
+// ── Init marked.js with highlight.js ──
+(function scInitMarked() {
+    if (typeof marked === 'undefined') return;
+    if (typeof markedHighlight !== 'undefined' && typeof hljs !== 'undefined') {
+        marked.use(markedHighlight.markedHighlight({
+            emptyLangClass: 'hljs',
+            langPrefix: 'hljs language-',
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    try { return hljs.highlight(code, { language: lang }).value; } catch (_) {}
+                }
+                try { return hljs.highlightAuto(code).value; } catch (_) {}
+                return '';
+            }
+        }));
+    }
+    const renderer = new marked.Renderer();
+    const defaultCodeRenderer = renderer.code.bind(renderer);
+    renderer.code = function (token) {
+        const html = defaultCodeRenderer(token);
+        const lang = (token.lang || '').split(/\s/)[0];
+        if (lang) {
+            return html.replace('<pre>', `<pre><span class="code-lang-label">${lang}</span>`);
+        }
+        return html;
+    };
+    const defaultLinkRenderer = renderer.link.bind(renderer);
+    renderer.link = function (token) {
+        const html = defaultLinkRenderer(token);
+        return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+    };
+    marked.use({ renderer, breaks: true, gfm: true });
+})();
+
+// ── Helpers ──
+function scFormatTime(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+        return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' +
+        d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function scParseMsgExtra(extra) {
+    if (!extra) return {};
+    if (typeof extra === 'string') {
+        try { return JSON.parse(extra); } catch { return {}; }
+    }
+    return extra;
+}
+
+function scRenderOutput(output) {
+    if (!output) return '';
+    if (typeof marked !== 'undefined') {
+        try { return marked.parse(output); } catch (_) {}
+    }
+    return `<p>${escapeHtml(output).replace(/\n/g, '<br>')}</p>`;
+}
+
+function scGetOutputCacheKey(msg) {
+    const updated = msg.updated_at || msg.created_at || '';
+    const outputLen = msg.output ? String(msg.output).length : 0;
+    return `${msg.id}|${msg.status}|${updated}|${outputLen}`;
+}
+
+function scRenderOutputCached(msg) {
+    if (!msg || !msg.output) return '';
+    const key = scGetOutputCacheKey(msg);
+    const cached = scOutputHtmlCache.get(key);
+    if (cached) return cached;
+    const html = scRenderOutput(msg.output);
+    scOutputHtmlCache.set(key, html);
+    if (scOutputHtmlCache.size > 1000) scOutputHtmlCache.clear();
+    return html;
+}
+
+function scAutoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+function scGetMessagesFingerprint(list) {
+    return (list || []).map(m => {
+        const updated = m.updated_at || m.created_at || '';
+        return `${m.id}:${m.status}:${updated}`;
+    }).join('|');
+}
+
+// ── Init panel ──
+function initStandaloneChatPanel() {
+    if (scInitialized) return;
+    scInitialized = true;
+
+    // 状态筛选
+    const filterEl = document.getElementById('chat-status-filter');
+    if (filterEl) {
+        filterEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const label = cb.parentElement;
+                if (cb.checked) { label.classList.add('checked'); }
+                else { label.classList.remove('checked'); }
+                scStatusFilter = Array.from(filterEl.querySelectorAll('input:checked')).map(c => c.value);
+                scCurrentPage = 1;
+                scChatList = [];
+                loadStandaloneChatList();
+            });
+        });
+    }
+
+    // 新建按钮
+    const newBtn = document.getElementById('sc-new-chat-btn');
+    if (newBtn) {
+        newBtn.addEventListener('click', () => scShowWelcome());
+    }
+
+    // 加载更多
+    const loadMoreBtn = document.getElementById('sc-load-more-btn');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', () => {
+            scCurrentPage++;
+            loadStandaloneChatList(true);
+        });
+    }
+
+    // Welcome composer: 发送按钮
+    const sendBtn = document.getElementById('sc-welcome-send-btn');
+    if (sendBtn) {
+        sendBtn.addEventListener('click', () => scSendNewChat());
+    }
+
+    // Welcome composer: Ctrl+Enter
+    const textarea = document.getElementById('sc-welcome-input');
+    if (textarea) {
+        textarea.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                scSendNewChat();
+            }
+        });
+    }
+
+    // 客户端选择变化时缓存
+    const clientSel = document.getElementById('sc-client-select');
+    if (clientSel) {
+        clientSel.addEventListener('change', () => {
+            if (clientSel.value) {
+                localStorage.setItem(SC_CLIENT_CACHE_KEY, clientSel.value);
+            }
+        });
+    }
+
+    // Detail composer: 发送按钮
+    const detailSendBtn = document.getElementById('sc-detail-send-btn');
+    if (detailSendBtn) {
+        detailSendBtn.addEventListener('click', () => scSendMessage());
+    }
+
+    // Detail composer: 终止按钮
+    const detailStopBtn = document.getElementById('sc-detail-stop-btn');
+    if (detailStopBtn) {
+        detailStopBtn.addEventListener('click', () => scTerminateMessage());
+    }
+
+    // Detail composer: Ctrl+Enter
+    const detailInput = document.getElementById('sc-detail-input');
+    if (detailInput) {
+        detailInput.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                scSendMessage();
+            }
+        });
+        detailInput.addEventListener('input', () => scAutoResize(detailInput));
+    }
+
+    // Merge default branch
+    const mergeDefaultBtn = document.getElementById('sc-merge-default-btn');
+    if (mergeDefaultBtn) {
+        mergeDefaultBtn.addEventListener('click', () => scMergeToDefaultBranch());
+    }
+
+    // Merge request modal: click overlay to close
+    const mergeModal = document.getElementById('sc-merge-modal');
+    if (mergeModal) {
+        mergeModal.addEventListener('click', (e) => {
+            if (e.target === mergeModal) scCloseMergeRequestModal();
+        });
+    }
+
+    // 加载客户端列表
+    scLoadClients();
+}
+
+// ── Clients ──
+async function scLoadClients() {
+    try {
+        const result = await activeClientAPI.list();
+        scClientsCache = result.data || [];
+    } catch (e) {
+        scClientsCache = [];
+    }
+    scRenderClientSelect();
+}
+
+function scRenderClientSelect() {
+    const sel = document.getElementById('sc-client-select');
+    if (!sel) return;
+    const lastClientId = localStorage.getItem(SC_CLIENT_CACHE_KEY) || '';
+    let html = '<option value="">-- 选择应用 --</option>';
+    for (const c of scClientsCache) {
+        const selected = String(c.id) === lastClientId ? ' selected' : '';
+        html += `<option value="${c.id}"${selected}>${escapeHtml(c.name)}</option>`;
+    }
+    sel.innerHTML = html;
+}
+
+// ── Chat list ──
+async function loadStandaloneChatList(append = false) {
+    try {
+        const res = await chatAPI.listStandaloneChats({
+            status: scStatusFilter,
+            page: scCurrentPage,
+            pageNum: scPageSize,
+        });
+        const pageData = res.data || {};
+        const items = pageData.items || [];
+        scTotal = pageData.total || 0;
+
+        if (append) {
+            scChatList = scChatList.concat(items);
+        } else {
+            scChatList = items;
+        }
+
+        scRenderChatList();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function scRenderChatList() {
+    const listEl = document.getElementById('sc-chat-list');
+    const loadMoreEl = document.getElementById('sc-load-more');
+
+    if (scChatList.length === 0) {
+        listEl.innerHTML = '<div class="sc-chat-empty">暂无 Chat</div>';
+        if (loadMoreEl) loadMoreEl.style.display = 'none';
+        return;
+    }
+
+    const statusLabels = {
+        pending: '等待',
+        running: '执行中',
+        completed: '完成',
+        terminated: '终止'
+    };
+
+    listEl.innerHTML = scChatList.map(chat => {
+        const isActive = chat.id === scSelectedChatId ? ' active' : '';
+        const safeTitle = escapeHtml(chat.title || '无标题');
+        const statusText = statusLabels[chat.status] || chat.status;
+        const clientName = escapeHtml(chat.client_name || '');
+        const timeStr = formatDateTime(chat.updated_at || chat.created_at);
+
+        return `
+        <div class="sc-chat-item${isActive}" onclick="scSelectChat(${chat.id}, ${chat.client_id || 0})" data-chat-id="${chat.id}">
+            <div class="sc-chat-item-row1">
+                <span class="sc-chat-item-id">#${chat.id}</span>
+                <span class="sc-chat-status-dot ${chat.status}"></span>
+                <span class="sc-chat-status-label ${chat.status}">${statusText}</span>
+            </div>
+            <div class="sc-chat-item-title">${safeTitle}</div>
+            <div class="sc-chat-item-meta">
+                ${clientName ? `<span>${clientName}</span>` : ''}
+                <span>${timeStr}</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    if (loadMoreEl) {
+        loadMoreEl.style.display = scChatList.length < scTotal ? '' : 'none';
+    }
+}
+
+// ── Welcome / Detail switching ──
+function scShowWelcome() {
+    scStopPolling();
+    scSelectedChatId = null;
+    scSelectedClientId = null;
+    scMessagesCache = [];
+    scRunningMessageId = null;
+
+    document.querySelectorAll('.sc-chat-item.active').forEach(el => el.classList.remove('active'));
+    document.getElementById('sc-welcome').style.display = '';
+    document.getElementById('sc-detail').style.display = 'none';
+
+    const textarea = document.getElementById('sc-welcome-input');
+    if (textarea) textarea.value = '';
+    scRenderClientSelect();
+}
+
+async function scSelectChat(chatId, clientId) {
+    scStopPolling();
+    scSelectedChatId = chatId;
+    scSelectedClientId = clientId;
+
+    // 高亮左侧
+    document.querySelectorAll('.sc-chat-item').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.chatId) === chatId);
+    });
+
+    // 切换视图
+    document.getElementById('sc-welcome').style.display = 'none';
+    document.getElementById('sc-detail').style.display = '';
+
+    // Update topbar
+    const chat = scChatList.find(c => c.id === chatId);
+    if (chat) scUpdateTopbar(chat);
+
+    // 加载客户端配置（合并按钮需要）
+    await scLoadClientConfig(clientId);
+
+    // 加载消息
+    await scLoadMessages(chatId);
+}
+
+function scUpdateTopbar(chat) {
+    document.getElementById('sc-topbar-title').textContent = chat.title || `Chat #${chat.id}`;
+    const badge = document.getElementById('sc-topbar-badge');
+    const labels = { running: '执行中', completed: '执行完成', terminated: '已终止' };
+    badge.textContent = labels[chat.status] || '';
+    badge.className = `sc-detail-topbar-badge ${chat.status || ''}`;
+}
+
+// ── Client config ──
+async function scLoadClientConfig(clientId) {
+    if (!clientId) { scClientConfigCache = null; return; }
+    try {
+        const res = await clientAPI.getConfig(clientId);
+        scClientConfigCache = res.data;
+    } catch (e) {
+        scClientConfigCache = null;
+    }
+}
+
+// ── Messages ──
+async function scLoadMessages(chatId) {
+    try {
+        const res = await chatAPI.listMessages(0, chatId);
+        scMessagesCache = res.data || [];
+        scMessagesFingerprint = scGetMessagesFingerprint(scMessagesCache);
+        scRenderFeed();
+        scUpdateComposerState();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function scRenderFeed() {
+    const feed = document.getElementById('sc-feed');
+
+    if (scMessagesCache.length === 0) {
+        feed.innerHTML = `
+            <div class="sc-feed-empty">
+                <div class="sc-feed-empty-icon">✨</div>
+                <div class="sc-feed-empty-text">开始对话</div>
+                <div class="sc-feed-empty-sub">在下方输入框输入您的问题</div>
+            </div>`;
+        return;
+    }
+
+    const statusChipMap = {
+        pending: ['pending', '等待执行'],
+        running: ['running', '执行中…'],
+        completed: ['completed', '执行完成'],
+        terminated: ['terminated', '已终止']
+    };
+
+    feed.innerHTML = scMessagesCache.map(msg => {
+        const [chipClass, chipLabel] = statusChipMap[msg.status] || ['', msg.status];
+        const extra = scParseMsgExtra(msg.extra);
+
+        // User row
+        const userRow = `
+        <div class="sc-msg-user-row">
+            <div class="sc-msg-avatar user">你</div>
+            <div class="sc-msg-body">
+                <div class="sc-msg-header">
+                    <span class="sc-msg-role">You</span>
+                    <span class="sc-msg-time">${scFormatTime(msg.created_at)}</span>
+                </div>
+                <div class="sc-msg-text">${escapeHtml(msg.input)}</div>
+            </div>
+        </div>`;
+
+        // Agent output
+        let outputHtml;
+        if (msg.output) {
+            outputHtml = `<div class="sc-msg-output">${scRenderOutputCached(msg)}</div>`;
+        } else if (msg.status === 'pending' || msg.status === 'running') {
+            outputHtml = `
+                <div class="sc-typing-indicator">
+                    <div class="sc-typing-dot"></div>
+                    <div class="sc-typing-dot"></div>
+                    <div class="sc-typing-dot"></div>
+                </div>`;
+        } else {
+            outputHtml = `<div class="sc-msg-output" style="color:var(--text-muted);font-style:italic">无输出</div>`;
+        }
+
+        // Extra buttons
+        let extraBtns = '';
+        if (extra.develop_doc) {
+            extraBtns += `<a class="sc-msg-extra-btn doc-btn" href="${escapeHtml(extra.develop_doc)}" target="_blank" rel="noopener noreferrer">📄 开发文档</a>`;
+        }
+        if (extra && extra.merge_request !== undefined) {
+            const storeKey = `sc_msg_${msg.id}`;
+            const mrData = Array.isArray(extra.merge_request) ? extra.merge_request : [];
+            scMergeRequestStore[storeKey] = mrData;
+            extraBtns += `<button class="sc-msg-extra-btn mr-btn" onclick="scShowMergeRequestModal('${storeKey}')">🔀 变更详情</button>`;
+        }
+
+        const agentRow = `
+        <div class="sc-msg-agent-row">
+            <div class="sc-msg-avatar agent">⚡</div>
+            <div class="sc-msg-body">
+                <div class="sc-msg-header">
+                    <span class="sc-msg-role">Agent</span>
+                    <span class="sc-msg-time">${scFormatTime(msg.updated_at)}</span>
+                </div>
+                ${outputHtml}
+                <div class="sc-msg-status-row">
+                    <span class="sc-msg-status-chip ${chipClass}">${chipLabel}</span>
+                    ${extraBtns}
+                </div>
+            </div>
+        </div>`;
+
+        return `<div class="sc-msg-turn">${userRow}${agentRow}</div>`;
+    }).join('');
+
+    // Scroll to bottom
+    setTimeout(() => { feed.scrollTop = feed.scrollHeight; }, 50);
+}
+
+// ── Composer state ──
+function scUpdateComposerState() {
+    const running = scMessagesCache.find(m => m.status === 'pending' || m.status === 'running');
+    scRunningMessageId = running ? running.id : null;
+
+    const box = document.getElementById('sc-detail-composer-box');
+    const input = document.getElementById('sc-detail-input');
+    const sendBtn = document.getElementById('sc-detail-send-btn');
+    const stopBtn = document.getElementById('sc-detail-stop-btn');
+    const hintEl = document.getElementById('sc-detail-hint');
+    const hintText = document.getElementById('sc-detail-hint-text');
+    const mergeDefaultBtn = document.getElementById('sc-merge-default-btn');
+    const showMerge = !!scClientConfigCache;
+
+    if (scRunningMessageId) {
+        box.classList.add('locked');
+        input.disabled = true;
+        sendBtn.style.display = 'none';
+        if (mergeDefaultBtn) mergeDefaultBtn.style.display = 'none';
+        stopBtn.style.display = 'flex';
+        hintEl.className = 'sc-detail-hint warn';
+        hintText.textContent = '当前有消息正在执行，无法输入新消息';
+        scStartPolling();
+    } else {
+        box.classList.remove('locked');
+        input.disabled = false;
+        sendBtn.style.display = 'flex';
+        if (mergeDefaultBtn) mergeDefaultBtn.style.display = showMerge ? 'flex' : 'none';
+        stopBtn.style.display = 'none';
+        hintEl.className = 'sc-detail-hint';
+        hintText.textContent = '尽管问，带图也行';
+        scStopPolling();
+    }
+
+    // Update topbar
+    const chat = scChatList.find(c => c.id === scSelectedChatId);
+    if (chat) scUpdateTopbar(chat);
+}
+
+// ── Polling ──
+function scStartPolling() {
+    if (scPollTimer) return;
+    scPollTimer = setInterval(async () => {
+        if (!scSelectedChatId) return;
+        try {
+            const res = await chatAPI.listMessages(0, scSelectedChatId);
+            const fresh = res.data || [];
+            const nextFingerprint = scGetMessagesFingerprint(fresh);
+            if (nextFingerprint !== scMessagesFingerprint) {
+                const prevRunningId = scRunningMessageId;
+                scMessagesFingerprint = nextFingerprint;
+                scMessagesCache = fresh;
+                scRenderFeed();
+                scUpdateComposerState();
+                if (prevRunningId !== scRunningMessageId) {
+                    scCurrentPage = 1;
+                    scChatList = [];
+                    await loadStandaloneChatList();
+                }
+            }
+        } catch { /* silent */ }
+    }, 3000);
+}
+
+function scStopPolling() {
+    if (scPollTimer) { clearInterval(scPollTimer); scPollTimer = null; }
+}
+
+// ── Send message (active chat) ──
+async function scSendMessage() {
+    if (!scSelectedChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
+
+    const input = document.getElementById('sc-detail-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const btn = document.getElementById('sc-detail-send-btn');
+    btn.disabled = true;
+    try {
+        await chatAPI.createMessage(0, scSelectedChatId, text);
+        input.value = '';
+        scAutoResize(input);
+        await scLoadMessages(scSelectedChatId);
+        scCurrentPage = 1;
+        scChatList = [];
+        await loadStandaloneChatList();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ── Terminate message ──
+async function scTerminateMessage() {
+    if (!scRunningMessageId || !scSelectedChatId) return;
+    const btn = document.getElementById('sc-detail-stop-btn');
+    btn.disabled = true;
+    btn.textContent = '终止中…';
+    try {
+        const res = await chatAPI.deleteMessage(0, scSelectedChatId, scRunningMessageId);
+        const inputText = res?.data?.input || '';
+        showToast('已撤销，内容已回填', 'success');
+        await scLoadMessages(scSelectedChatId);
+        scCurrentPage = 1;
+        scChatList = [];
+        await loadStandaloneChatList();
+        if (inputText) {
+            const inputEl = document.getElementById('sc-detail-input');
+            inputEl.value = inputText;
+            scAutoResize(inputEl);
+            inputEl.focus();
+            inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '⬛ 终止';
+    }
+}
+
+// ── Create new chat ──
+async function scSendNewChat() {
+    const sel = document.getElementById('sc-client-select');
+    const textarea = document.getElementById('sc-welcome-input');
+    const sendBtn = document.getElementById('sc-welcome-send-btn');
+
+    const clientId = sel ? parseInt(sel.value) : 0;
+    const inputText = textarea ? textarea.value.trim() : '';
+
+    if (!clientId) {
+        showToast('请选择一个应用', 'error');
+        return;
+    }
+    if (!inputText) {
+        showToast('请输入内容', 'error');
+        return;
+    }
+
+    localStorage.setItem(SC_CLIENT_CACHE_KEY, String(clientId));
+    sendBtn.disabled = true;
+    try {
+        const res = await chatAPI.createStandaloneChatWithMessage(inputText, clientId);
+        const newChatId = res.data.chat.id;
+        scCurrentPage = 1;
+        scChatList = [];
+        await loadStandaloneChatList();
+        await scSelectChat(newChatId, clientId);
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        sendBtn.disabled = false;
+    }
+}
+
+// ── Delete chat ──
+async function deleteStandaloneChat(chatId) {
+    if (!confirm('确定要删除这个 Chat 吗？')) return;
+    try {
+        await chatAPI.deleteChat(0, chatId);
+        showToast('删除成功', 'success');
+        if (scSelectedChatId === chatId) {
+            scShowWelcome();
+        }
+        scCurrentPage = 1;
+        scChatList = [];
+        loadStandaloneChatList();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+// ── Merge actions ──
+function _scGetRepoName(url) {
+    if (!url) return '';
+    const m = url.match(/[/:]([\w.-]+?)(?:\.git)?$/);
+    return m ? m[1] : url;
+}
+
+function _scBuildRepoTable(repos) {
+    const lines = ['| 仓库 | 分支前缀 | 默认分支 | chat 分支 |', '|------|---------|---------|----------|'];
+    for (const repo of repos) {
+        const name = _scGetRepoName(repo.url);
+        const prefix = repo.branch_prefix || 'ai_';
+        const defaultBr = repo.default_branch || 'main';
+        const chatBr = `${prefix}0_${scSelectedChatId}`;
+        lines.push(`| ${name} | ${prefix} | ${defaultBr} | ${chatBr} |`);
+    }
+    return lines.join('\n');
+}
+
+function _scBuildMergeToDefaultBranchPrompt() {
+    if (!scClientConfigCache || !scClientConfigCache.repos) return null;
+    const repos = scClientConfigCache.repos;
+    const repoTable = _scBuildRepoTable(repos);
+
+    return `# 合并 Chat 分支到默认分支
+
+## 背景信息
+
+- chat_id: ${scSelectedChatId}
+- 当前工作目录下有多个独立 git 仓库
+- 本 Chat 不归属特定 Task，直接合并到默认分支
+
+${repoTable}
+
+## 操作步骤
+
+对当前工作目录下的 **每一个 git 仓库** 执行以下操作：
+
+1. **整理差异**：对比 chat 分支与默认分支的差异
+2. **Rebase 合并**：将 chat 分支 rebase 到默认分支上，确保 commit 历史是线性的。推荐方式：
+   - \`git rebase origin/<默认分支> <chat分支>\`
+   - \`git checkout <默认分支>\`
+   - \`git merge --ff-only <chat分支>\`
+3. **推送默认分支**：\`git push origin <默认分支>\`
+4. **关闭 PR**：如果 chat 分支在远端有对应的 PR，通过删除远端 chat 分支来关闭：\`git push origin --delete <chat分支>\`
+5. **操作完成后**：切回 chat 分支继续工作
+
+## 注意事项
+
+- 如果 chat 分支与默认分支没有差异，跳过该仓库
+- 每个仓库独立操作，一个失败不影响其他仓库
+- 操作过程中如遇到冲突，尝试解决；无法解决时报告错误
+- 确保默认分支的 commit 历史是清爽的线性记录
+`;
+}
+
+async function scMergeToDefaultBranch() {
+    if (!scSelectedChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
+
+    const prompt = _scBuildMergeToDefaultBranchPrompt();
+    if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
+
+    const btn = document.getElementById('sc-merge-default-btn');
+    btn.disabled = true;
+    try {
+        await chatAPI.createMessage(0, scSelectedChatId, prompt);
+        await scLoadMessages(scSelectedChatId);
+        scCurrentPage = 1;
+        scChatList = [];
+        await loadStandaloneChatList();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ── Merge request modal ──
+function scShowMergeRequestModal(storeKey) {
+    const body = document.getElementById('sc-merge-body');
+    const data = scMergeRequestStore[storeKey];
+    const list = Array.isArray(data) ? data : [];
+
+    if (list.length === 0) {
+        body.innerHTML = '<div class="sc-mr-empty">暂无变更记录</div>';
+        document.getElementById('sc-merge-modal').classList.add('active');
+        return;
+    }
+
+    body.innerHTML = `
+        <table class="sc-mr-table">
+            <thead>
+                <tr><th>项目</th><th>分支</th><th>提交</th><th>PR</th></tr>
+            </thead>
+            <tbody>
+                ${list.map(item => {
+                    const repoName = item.repo_name || '';
+                    const branchName = item.branch_name || '';
+                    const commitId = item.latest_commitId || '';
+                    const mergeUrl = item.merge_url || '';
+                    const prLinks = mergeUrl
+                        ? `<a href="${escapeHtml(mergeUrl)}" target="_blank" rel="noopener noreferrer">PR</a>`
+                        : '';
+                    const commitShort = commitId ? commitId.substring(0, 12) : '';
+                    return `
+                        <tr>
+                            <td>${escapeHtml(repoName)}</td>
+                            <td><code>${escapeHtml(branchName || '-')}</code></td>
+                            <td>${commitShort ? `<code>${escapeHtml(commitShort)}</code>` : '-'}</td>
+                            <td>${prLinks || '-'}</td>
+                        </tr>`;
+                }).join('')}
+            </tbody>
+        </table>`;
+
+    document.getElementById('sc-merge-modal').classList.add('active');
+}
+
+function scCloseMergeRequestModal() {
+    document.getElementById('sc-merge-modal').classList.remove('active');
 }
 
 // ===== 商店 =====

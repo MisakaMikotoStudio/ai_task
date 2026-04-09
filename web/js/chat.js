@@ -14,6 +14,8 @@ let runningMessageId = null;
 let pollTimer = null;
 let mergeRequestStore = {};
 let clientConfigCache = null;
+let isStandaloneMode = false; // task_id=0 模式
+let standaloneClientId = null; // 独立 chat 的 client_id
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', async () => {
@@ -26,14 +28,43 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const params = new URLSearchParams(window.location.search);
     taskId = parseInt(params.get('task_id'));
-    if (!taskId) {
+    if (isNaN(taskId) && !params.has('task_id')) {
         showToast('缺少 task_id 参数', 'error');
         return;
     }
 
-    await loadTaskInfo();
-    await loadClientConfig();
-    await loadChats();
+    isStandaloneMode = (taskId === 0);
+
+    // Embed mode: hide sidebar when loaded inside an iframe
+    const isEmbed = params.get('embed') === '1';
+    if (isEmbed) {
+        document.querySelector('.chat-page')?.classList.add('embed-mode');
+        // 有 chat_id 时直接显示 active-view，避免 welcome 页面闪烁
+        if (params.get('chat_id')) {
+            document.getElementById('welcome-view').style.display = 'none';
+            document.getElementById('active-view').style.display = 'flex';
+        }
+    }
+
+    if (isStandaloneMode) {
+        // 独立 Chat 模式
+        standaloneClientId = parseInt(params.get('client_id')) || null;
+        const initialChatId = parseInt(params.get('chat_id')) || null;
+        await loadStandaloneInfo();
+        await loadClientConfig();
+        await loadChats();
+        if (initialChatId) {
+            await selectChat(initialChatId);
+        }
+    } else {
+        if (!taskId) {
+            showToast('缺少 task_id 参数', 'error');
+            return;
+        }
+        await loadTaskInfo();
+        await loadClientConfig();
+        await loadChats();
+    }
 });
 
 // ===== Helpers =====
@@ -46,6 +77,32 @@ function formatTime(dateStr) {
     }
     return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' +
         d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ===== Standalone info =====
+async function loadStandaloneInfo() {
+    document.getElementById('sidebar-task-name').textContent = '独立 Chat';
+    document.getElementById('sidebar-task-id').textContent = '#-';
+    document.title = 'Chat · 独立模式';
+
+    if (standaloneClientId) {
+        try {
+            const res = await clientAPI.getConfig(standaloneClientId);
+            const clientName = res.data?.name || '';
+            if (clientName) {
+                document.getElementById('sidebar-client-name').textContent = clientName;
+                document.getElementById('sidebar-client-link').style.display = 'inline-flex';
+            }
+        } catch (e) {
+            console.warn('loadStandaloneInfo client failed:', e);
+        }
+    }
+
+    // 隐藏文档和变更详情区域（独立 Chat 无 task extra）
+    const docsEl = document.getElementById('sidebar-docs');
+    docsEl.innerHTML = '<div class="sidebar-doc-empty">暂无文档</div>';
+    const gpEl = document.getElementById('sidebar-gitpush');
+    gpEl.innerHTML = '<div class="gitpush-empty">暂无推送记录</div>';
 }
 
 // ===== Task info =====
@@ -75,8 +132,14 @@ async function loadTaskInfo() {
 // ===== Load client config (repos info) =====
 async function loadClientConfig() {
     try {
-        if (!taskInfo || !taskInfo.client_id) return;
-        const res = await clientAPI.getConfig(taskInfo.client_id);
+        let configClientId = null;
+        if (isStandaloneMode) {
+            configClientId = standaloneClientId;
+        } else {
+            configClientId = taskInfo?.client_id;
+        }
+        if (!configClientId) return;
+        const res = await clientAPI.getConfig(configClientId);
         clientConfigCache = res.data;
     } catch (e) {
         console.warn('loadClientConfig failed:', e);
@@ -122,8 +185,14 @@ function renderSidebarExtra(info) {
 // ===== Chat list =====
 async function loadChats() {
     try {
-        const res = await chatAPI.listChats(taskId);
-        chatsCache = res.data || [];
+        let res;
+        if (isStandaloneMode) {
+            res = await chatAPI.listStandaloneChats();
+        } else {
+            res = await chatAPI.listChats(taskId);
+        }
+        const raw = res.data || [];
+        chatsCache = Array.isArray(raw) ? raw : (raw.items || []);
         renderChatList();
 
         if (chatsCache.length === 0) {
@@ -154,6 +223,9 @@ function renderChatList() {
         const active = chat.id === currentChatId ? 'active' : '';
         const st = chat.status || 'completed';
         const preview = chat.title || `Chat #${chat.id}`;
+        const clientInfo = (isStandaloneMode && chat.client_name)
+            ? `<span class="chat-status-label" style="margin-left:auto;">${escapeHtml(chat.client_name)}</span>`
+            : '';
 
         return `
         <div class="chat-item ${active}" onclick="selectChat(${chat.id})">
@@ -161,6 +233,7 @@ function renderChatList() {
                 <span class="chat-item-id">#${chat.id}</span>
                 <span class="chat-status-dot ${st}"></span>
                 <span class="chat-status-label ${st}">${statusLabel[st] || st}</span>
+                ${clientInfo}
             </div>
             <div class="chat-item-row2">${escapeHtml(preview)}</div>
         </div>`;
@@ -458,7 +531,8 @@ function updateComposerState() {
         box.classList.remove('locked');
         input.disabled = false;
         sendBtn.style.display = 'flex';
-        if (mergeTaskBtn) mergeTaskBtn.style.display = showMerge ? 'flex' : 'none';
+        // 独立 Chat 模式：隐藏"合并到 Task"按钮
+        if (mergeTaskBtn) mergeTaskBtn.style.display = (showMerge && !isStandaloneMode) ? 'flex' : 'none';
         if (mergeDefaultBtn) mergeDefaultBtn.style.display = showMerge ? 'flex' : 'none';
         stopBtn.style.display = 'none';
         hintEl.className = 'composer-hint';
@@ -588,11 +662,21 @@ async function sendNewChatMessage() {
     const text = input.value.trim();
     if (!text) return;
 
+    if (isStandaloneMode && !standaloneClientId) {
+        showToast('未指定应用，无法发送', 'error');
+        return;
+    }
+
     const btn = document.getElementById('welcome-send-btn');
     btn.disabled = true;
 
     try {
-        const res = await chatAPI.createChatWithMessage(taskId, text);
+        let res;
+        if (isStandaloneMode) {
+            res = await chatAPI.createStandaloneChatWithMessage(text, standaloneClientId);
+        } else {
+            res = await chatAPI.createChatWithMessage(taskId, text);
+        }
         input.value = '';
         autoResize(input);
         const chatId = res.data.chat.id;
@@ -617,6 +701,17 @@ function _getRepoName(url) {
 }
 
 function _buildRepoTable(repos) {
+    if (isStandaloneMode) {
+        const lines = ['| 仓库 | 分支前缀 | 默认分支 | chat 分支 |', '|------|---------|---------|----------|'];
+        for (const repo of repos) {
+            const name = _getRepoName(repo.url);
+            const prefix = repo.branch_prefix || 'ai_';
+            const defaultBr = repo.default_branch || 'main';
+            const chatBr = `${prefix}0_${currentChatId}`;
+            lines.push(`| ${name} | ${prefix} | ${defaultBr} | ${chatBr} |`);
+        }
+        return lines.join('\n');
+    }
     const lines = ['| 仓库 | 分支前缀 | 默认分支 | task 分支 | chat 分支 |', '|------|---------|---------|----------|----------|'];
     for (const repo of repos) {
         const name = _getRepoName(repo.url);
@@ -667,6 +762,40 @@ function _buildMergeToDefaultBranchPrompt() {
     if (!clientConfigCache || !clientConfigCache.repos) return null;
     const repos = clientConfigCache.repos;
     const repoTable = _buildRepoTable(repos);
+
+    // 独立 Chat 模式：直接从 chat 分支合并到默认分支，跳过 task 分支
+    if (isStandaloneMode) {
+        return `# 合并 Chat 分支到默认分支
+
+## 背景信息
+
+- chat_id: ${currentChatId}
+- 当前工作目录下有多个独立 git 仓库
+- 本 Chat 不归属特定 Task，直接合并到默认分支
+
+${repoTable}
+
+## 操作步骤
+
+对当前工作目录下的 **每一个 git 仓库** 执行以下操作：
+
+1. **整理差异**：对比 chat 分支与默认分支的差异
+2. **Rebase 合并**：将 chat 分支 rebase 到默认分支上，确保 commit 历史是线性的。推荐方式：
+   - \`git rebase origin/<默认分支> <chat分支>\`
+   - \`git checkout <默认分支>\`
+   - \`git merge --ff-only <chat分支>\`
+3. **推送默认分支**：\`git push origin <默认分支>\`
+4. **关闭 PR**：如果 chat 分支在远端有对应的 PR，通过删除远端 chat 分支来关闭：\`git push origin --delete <chat分支>\`
+5. **操作完成后**：切回 chat 分支继续工作
+
+## 注意事项
+
+- 如果 chat 分支与默认分支没有差异，跳过该仓库
+- 每个仓库独立操作，一个失败不影响其他仓库
+- 操作过程中如遇到冲突，尝试解决；无法解决时报告错误
+- 确保默认分支的 commit 历史是清爽的线性记录
+`;
+    }
 
     return `# 合并 Chat 分支到 Task 分支，再合并 Task 分支到默认分支
 

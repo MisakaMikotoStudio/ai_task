@@ -472,6 +472,25 @@ const chatAPI = {
         });
     },
 
+    // 独立 Chat（task_id=0）
+    async listStandaloneChats(params = {}) {
+        const query = new URLSearchParams();
+        if (Array.isArray(params.status) && params.status.length > 0) {
+            query.set('status', params.status.join(','));
+        }
+        if (params.page !== undefined) query.set('page', String(params.page));
+        if (params.pageNum !== undefined) query.set('pageNum', String(params.pageNum));
+        const qs = query.toString();
+        return request(`/chat/standalone/chats${qs ? `?${qs}` : ''}`);
+    },
+
+    async createStandaloneChatWithMessage(input, clientId, extra = {}) {
+        return request('/chat/standalone/messages', {
+            method: 'POST',
+            body: JSON.stringify({ input, client_id: clientId, extra })
+        });
+    },
+
     async updateChatStatus(taskId, chatId, status) {
         return request(`/chat/task/${taskId}/chats/${chatId}/status`, {
             method: 'PATCH',

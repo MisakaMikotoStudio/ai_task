@@ -9,12 +9,82 @@ from flask import Blueprint, request, jsonify
 from dao.models import Chat, ChatMessage
 from dao.chat_dao import (
     create_chat, get_chats_by_task, get_chat_by_id, update_chat_status, soft_delete_chat,
-    create_chat_message, get_messages_by_chat, get_running_message, 
-    soft_delete_message, update_message, update_chat_sessionid, get_message_by_id
+    create_chat_message, get_messages_by_chat, get_running_message,
+    soft_delete_message, update_message, update_chat_sessionid, get_message_by_id,
+    get_standalone_chats
 )
 from dao.task_dao import get_task_by_id
+from dao.client_dao import get_client_by_id
 
 chat_bp = Blueprint('chat', __name__)
+
+
+# ===== 独立 Chat（task_id=0）接口 =====
+
+@chat_bp.route('/standalone/chats', methods=['GET'])
+def list_standalone_chats():
+    """获取独立Chat列表（task_id=0），支持分页和状态筛选"""
+    page = int(request.args.get('page', 1))
+    page_num = int(request.args.get('pageNum', 20))
+    status_param = (request.args.get('status') or '').strip()
+    statuses = [s.strip() for s in status_param.split(',') if s.strip()] if status_param else None
+
+    data = get_standalone_chats(
+        user_id=request.user_info.user_id,
+        statuses=statuses,
+        page=page,
+        page_num=page_num,
+    )
+    return jsonify({'code': 200, 'message': '获取成功', 'data': data})
+
+
+@chat_bp.route('/standalone/messages', methods=['POST'])
+def create_standalone_chat_and_message_api():
+    """自动创建独立Chat并发送消息（task_id=0）"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    input_text = data.get('input', '').strip()
+    if not input_text:
+        return jsonify({'code': 400, 'message': '输入内容不能为空'}), 400
+
+    client_id = data.get('client_id')
+    if not client_id:
+        return jsonify({'code': 400, 'message': '必须选择一个应用'}), 400
+
+    if not get_client_by_id(client_id=client_id, user_id=request.user_info.user_id):
+        return jsonify({'code': 400, 'message': '应用不存在'}), 400
+
+    title = input_text[:32]
+    extra = data.get('extra', {})
+
+    chat = create_chat(
+        user_id=request.user_info.user_id,
+        task_id=0,
+        title=title,
+        client_id=int(client_id),
+    )
+    msg = create_chat_message(
+        user_id=request.user_info.user_id,
+        task_id=0,
+        chat_id=chat.id,
+        input_text=input_text,
+        extra=extra,
+    )
+    update_chat_status(user_id=request.user_info.user_id, chat_id=chat.id, task_id=0, status='pending')
+
+    return jsonify({
+        'code': 201,
+        'message': '创建成功',
+        'data': {
+            'chat': chat.to_dict(),
+            'message': msg.to_dict()
+        }
+    }), 201
+
+
+# ===== 原有 Task Chat 接口 =====
 
 @chat_bp.route('/task/<int:task_id>/chats', methods=['GET'])
 def list_chats(task_id):
