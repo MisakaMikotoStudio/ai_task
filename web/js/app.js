@@ -2213,7 +2213,7 @@ function showAdminCreateProductModal() {
                         </select>
                     </div>
                 </div>
-                <div class="commerce-modal-field commerce-modal-field-span">
+                <div class="commerce-modal-field">
                     <label class="commerce-modal-label">封面图</label>
                     <input type="hidden" name="icon" id="admin-product-icon-url" value="">
                     <input type="file" id="admin-product-icon-file" class="commerce-file-input-hidden" accept="image/jpeg,image/png,image/gif,image/webp">
@@ -2225,8 +2225,14 @@ function showAdminCreateProductModal() {
                         <img id="admin-product-icon-preview-img" alt="封面预览">
                     </div>
                 </div>
+                <div class="commerce-modal-field">
+                    <label class="commerce-modal-label" for="admin-product-renew">支持续费</label>
+                    <select id="admin-product-renew" name="support_continue" class="commerce-modal-select">
+                        <option value="0" selected>否</option>
+                        <option value="1">是</option>
+                    </select>
+                </div>
             </div>
-            <label class="commerce-modal-checkbox commerce-modal-checkbox-block"><input type="checkbox" name="support_continue"> 支持续费</label>
             <div class="commerce-modal-field commerce-modal-field-span commerce-modal-desc-block">
                 <label class="commerce-modal-label" for="admin-product-desc">商品描述</label>
                 <textarea id="admin-product-desc" name="desc" class="commerce-desc-textarea" rows="4" maxlength="${COMMERCE_MAX_DESC_LEN}" placeholder="支持换行，前台按原格式展示"></textarea>
@@ -2318,7 +2324,7 @@ function showAdminCreateProductModal() {
                 desc,
                 price: pr.value,
                 expire_time: expireSeconds,
-                support_continue: form.querySelector('[name=support_continue]').checked,
+                support_continue: form.querySelector('[name=support_continue]').value === '1',
                 icon,
             };
             try {
