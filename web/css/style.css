@@ -4745,11 +4745,6 @@ textarea:focus {
     box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
 }
 
-.commerce-modal-checkbox-block {
-    margin-top: 12px;
-    margin-bottom: 4px;
-}
-
 .commerce-modal-actions-compact {
     margin-top: 18px;
     padding-top: 14px;
@@ -4759,15 +4754,31 @@ textarea:focus {
     flex-wrap: wrap;
 }
 
-.commerce-btn-modal-cancel {
+.commerce-modal-actions-compact .btn-secondary,
+.commerce-modal-actions-compact .btn-primary {
+    width: auto;
     padding: 7px 16px !important;
     font-size: 13px !important;
 }
 
 .commerce-btn-submit-create {
-    padding: 7px 18px !important;
-    font-size: 13px !important;
     font-weight: 600;
+}
+
+.commerce-modal-select {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 10px 12px;
+    font-size: 14px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.commerce-modal-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
 }
 
 @media (max-width: 520px) {
