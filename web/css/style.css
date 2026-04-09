@@ -3763,6 +3763,11 @@ textarea:focus {
     white-space: nowrap;
     flex-shrink: 0;
 }
+.config-btn-group {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
 .config-section-header {
     display: flex;
     align-items: center;

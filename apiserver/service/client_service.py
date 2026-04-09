@@ -856,3 +856,92 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='payments', data=payments_data)
     if oss_data:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='oss', data=oss_data)
+
+
+def generate_default_database(user_id: int, config) -> dict:
+    """
+    在默认数据库实例上为用户创建一个新数据库。
+
+    数据库命名规则：{user_id}_app_{version}，version 从 1 开始递增，
+    直到找到一个不存在的数据库名称。
+
+    Args:
+        user_id: 用户 ID
+        config: DefaultDatabaseConfig 对象
+
+    Returns:
+        dict: 数据库配置信息 {db_type, host, port, username, password, db_name}
+
+    Raises:
+        ClientSaveError: 功能未启用或创建失败
+    """
+    import pymysql
+
+    if not config.enabled:
+        raise ClientSaveError('默认数据库功能未启用，请联系管理员配置')
+
+    admin_conn = None
+    try:
+        admin_conn = pymysql.connect(
+            host=config.url,
+            port=config.port,
+            user=config.admin_username,
+            password=config.admin_password,
+            connect_timeout=10,
+        )
+        cursor = admin_conn.cursor()
+
+        # 查询已存在的数据库列表
+        cursor.execute("SHOW DATABASES")
+        existing_dbs = {row[0] for row in cursor.fetchall()}
+
+        # 生成数据库名称：{user_id}_app_{version}
+        version = 1
+        while True:
+            db_name = f"{user_id}_app_{version}"
+            if db_name not in existing_dbs:
+                break
+            version += 1
+            if version > 9999:
+                raise ClientSaveError('数据库名称生成失败：版本号超出上限')
+
+        # 创建数据库
+        cursor.execute(
+            f"CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+        )
+
+        # 授权应用账号访问新数据库
+        app_username = config.app_username
+        app_password = config.app_password
+        if app_username:
+            cursor.execute(
+                f"GRANT ALL PRIVILEGES ON `{db_name}`.* TO %s@'%%'",
+                (app_username,)
+            )
+            cursor.execute("FLUSH PRIVILEGES")
+
+        admin_conn.commit()
+
+        logger.info(
+            "Default database created: db_name=%s, user_id=%s, host=%s",
+            db_name, user_id, config.url,
+        )
+
+        return {
+            'db_type': 'mysql',
+            'host': config.url,
+            'port': config.port,
+            'username': app_username or config.admin_username,
+            'password': app_password or config.admin_password,
+            'db_name': db_name,
+        }
+
+    except pymysql.Error as e:
+        logger.error(
+            "Failed to create default database: user_id=%s, error=%s",
+            user_id, str(e),
+        )
+        raise ClientSaveError(f'创建数据库失败：{str(e)}')
+    finally:
+        if admin_conn:
+            admin_conn.close()

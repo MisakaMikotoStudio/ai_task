@@ -155,6 +155,13 @@ const clientAPI = {
         return request(`/client/${id}/copy`, {
             method: 'POST'
         });
+    },
+
+    // 生成默认数据库
+    async generateDefaultDatabase() {
+        return request('/client/generate-default-database', {
+            method: 'POST'
+        });
     }
 };
 
@@ -241,6 +248,13 @@ const adminClientAPI = {
     },
     async copy(id) {
         return request(`/admin/clients/${id}/copy`, {
+            method: 'POST'
+        });
+    },
+
+    // 生成默认数据库
+    async generateDefaultDatabase() {
+        return request('/client/generate-default-database', {
             method: 'POST'
         });
     }
