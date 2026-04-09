@@ -81,6 +81,29 @@ def get_clients_by_user(user_id: int) -> List[dict]:
         return result
 
 
+def count_cloud_deploy_clients(user_id: int, exclude_client_id: Optional[int] = None) -> int:
+    """
+    统计用户未删除的云部署客户端数量
+
+    Args:
+        user_id: 用户 ID
+        exclude_client_id: 排除的客户端 ID（用于编辑场景，排除当前正在编辑的客户端）
+
+    Returns:
+        云部署客户端数量
+    """
+    with get_db_session() as session:
+        query = (session.query(Client)
+                 .filter(
+                     Client.user_id == user_id,
+                     Client.official_cloud_deploy == 1,
+                     Client.deleted_at.is_(None),
+                 ))
+        if exclude_client_id is not None:
+            query = query.filter(Client.id != exclude_client_id)
+        return query.count()
+
+
 def get_client_by_id(client_id: int, user_id: int) -> Optional[Client]:
     """
     获取指定客户端
