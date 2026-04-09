@@ -382,6 +382,11 @@ class CodeDevelopWorker(BaseWorker):
             f"{self._build_repo_info_table_for_prompt()}"
         )
 
+        # ===== 2.5 代码变更提示（commitId 不一致时插入）=====
+        code_change_notice = self._build_code_change_notice_for_prompt()
+        if code_change_notice:
+            sections.append(code_change_notice)
+
         # ===== 3. 对话历史（存在时强制最先阅读）=====
         if has_chat_history:
             sections.append(
@@ -475,6 +480,70 @@ class CodeDevelopWorker(BaseWorker):
         sections.append(f"## 执行步骤\n\n{numbered_steps}")
 
         return "\n\n---\n\n".join(sections) + "\n"
+
+    def _build_code_change_notice_for_prompt(self) -> str:
+        """检查当前分支 commitId 与最后一条消息的 commitId 是否一致，不一致则生成变更提示"""
+        # 从历史消息中找到最近一条包含 merge_request 的已完成消息
+        last_commit_map = {}  # repo_name -> latest_commitId
+        for msg in reversed(self.task.get("chat_messages", [])[:-1]):
+            extra = msg.get("extra") or {}
+            merge_request_list = extra.get("merge_request", [])
+            if merge_request_list:
+                for item in merge_request_list:
+                    repo_name = item.get("repo_name")
+                    commit_id = item.get("latest_commitId")
+                    if repo_name and commit_id:
+                        last_commit_map[repo_name] = commit_id
+                break  # 只取最近一条有 merge_request 的消息
+
+        if not last_commit_map:
+            return ""  # 无历史 commitId 记录，无需比较
+
+        # 获取每个代码仓库当前本地 HEAD commitId
+        changed_repos = []
+        current_commit_map = {}
+        for git_repo in self.code_git:
+            work_repo_dir = os.path.join(self.work_dir, git_repo.name)
+            result = git_utils.get_local_head_commit_id(
+                repo_dir=work_repo_dir,
+                trace_id=self.trace_id,
+            )
+            if not result.success:
+                logger.warning(f"[{self.trace_id}] 获取 {git_repo.name} HEAD commit 失败: {result.message}")
+                continue
+            current_commit_id = result.commit_id
+            current_commit_map[git_repo.name] = current_commit_id
+
+            last_commit_id = last_commit_map.get(git_repo.name)
+            if last_commit_id and last_commit_id != current_commit_id:
+                changed_repos.append({
+                    "repo_name": git_repo.name,
+                    "previous_commit_id": last_commit_id,
+                    "current_commit_id": current_commit_id,
+                })
+
+        if not changed_repos:
+            return ""
+
+        # 构建变更提示
+        lines = [
+            "## 代码变更提示\n",
+            "**注意：自上次对话执行以来，以下仓库的代码已发生变更：**\n",
+            "| 仓库 | 上次commitId | 当前commitId |",
+            "|------|-------------|-------------|",
+        ]
+        for item in changed_repos:
+            lines.append(
+                f"| `{item['repo_name']}` | `{item['previous_commit_id'][:12]}` | `{item['current_commit_id'][:12]}` |"
+            )
+        lines.append("")
+        lines.append("各项目当前最新commitId：\n")
+        for repo_name, commit_id in current_commit_map.items():
+            lines.append(f"- `{repo_name}`: `{commit_id[:12]}`")
+        lines.append("")
+        lines.append("请注意代码可能已被其他任务或手动修改，开发时应基于当前最新代码状态进行。")
+
+        return "\n".join(lines)
 
     def _build_repo_info_table_for_prompt(self) -> str:
         """构建项目仓库信息表，包含目录名、说明和当前分支"""
