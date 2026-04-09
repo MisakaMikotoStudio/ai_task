@@ -23,38 +23,19 @@ chat_bp = Blueprint('chat', __name__)
 
 @chat_bp.route('/standalone/chats', methods=['GET'])
 def list_standalone_chats():
-    """获取独立Chat列表（task_id=0）"""
-    chats = get_standalone_chats(user_id=request.user_info.user_id)
-    return jsonify({'code': 200, 'message': '获取成功', 'data': chats})
+    """获取独立Chat列表（task_id=0），支持分页和状态筛选"""
+    page = int(request.args.get('page', 1))
+    page_num = int(request.args.get('pageNum', 20))
+    status_param = (request.args.get('status') or '').strip()
+    statuses = [s.strip() for s in status_param.split(',') if s.strip()] if status_param else None
 
-
-@chat_bp.route('/standalone/chats', methods=['POST'])
-def create_standalone_chat_api():
-    """创建独立Chat（task_id=0，需要指定client_id）"""
-    data = request.get_json()
-    if not data:
-        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
-
-    title = data.get('title', '').strip()
-    if not title:
-        return jsonify({'code': 400, 'message': '标题不能为空'}), 400
-    if len(title) > 32:
-        return jsonify({'code': 400, 'message': '标题最多32个字符'}), 400
-
-    client_id = data.get('client_id')
-    if not client_id:
-        return jsonify({'code': 400, 'message': '必须选择一个应用'}), 400
-
-    if not get_client_by_id(client_id=client_id, user_id=request.user_info.user_id):
-        return jsonify({'code': 400, 'message': '应用不存在'}), 400
-
-    chat = create_chat(
+    data = get_standalone_chats(
         user_id=request.user_info.user_id,
-        task_id=0,
-        title=title,
-        client_id=int(client_id),
+        statuses=statuses,
+        page=page,
+        page_num=page_num,
     )
-    return jsonify({'code': 201, 'message': 'Chat创建成功', 'data': chat.to_dict()}), 201
+    return jsonify({'code': 200, 'message': '获取成功', 'data': data})
 
 
 @chat_bp.route('/standalone/messages', methods=['POST'])
@@ -169,7 +150,7 @@ def delete_chat_api(task_id, chat_id):
 @chat_bp.route('/task/<int:task_id>/messages', methods=['POST'])
 def create_chat_and_message_api(task_id):
     """自动创建Chat并发送消息（Chat标题取输入内容前32字符）"""
-    if task_id != 0 and not get_task_by_id(task_id=task_id, user_id=request.user_info.user_id):
+    if not get_task_by_id(task_id=task_id, user_id=request.user_info.user_id):
         return jsonify({'code': 400, 'message': '任务不存在'}), 400
 
     data = request.get_json()

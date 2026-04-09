@@ -190,11 +190,15 @@ def soft_delete_message(user_id: int, message_id: int, chat_id: int, task_id: in
         session.flush()
         return input_text
 
-def get_standalone_chats(user_id: int) -> List[Dict]:
-    """获取 task_id=0 的独立 Chat 列表（含 client 名称）"""
-    from sqlalchemy import literal
+def get_standalone_chats(
+    user_id: int,
+    statuses: Optional[List[str]] = None,
+    page: int = 1,
+    page_num: int = 20
+) -> Dict:
+    """获取 task_id=0 的独立 Chat 列表（含 client 名称），支持分页和状态筛选"""
     with get_db_session() as session:
-        rows = session.query(
+        query = session.query(
             Chat,
             Client.name.label('client_name'),
         ).outerjoin(
@@ -203,14 +207,30 @@ def get_standalone_chats(user_id: int) -> List[Dict]:
             Chat.user_id == user_id,
             Chat.task_id == 0,
             Chat.deleted_at.is_(None),
-        ).order_by(Chat.updated_at.desc()).all()
+        )
+
+        if statuses:
+            query = query.filter(Chat.status.in_(statuses))
+
+        total = query.count()
+
+        rows = query.order_by(
+            Chat.updated_at.desc()
+        ).offset(
+            (page - 1) * page_num
+        ).limit(page_num).all()
 
         result = []
         for chat, client_name in rows:
             d = chat.to_dict()
             d['client_name'] = client_name or ''
             result.append(d)
-        return result
+        return {
+            'total': total,
+            'page': page,
+            'page_num': page_num,
+            'items': result,
+        }
 
 
 def get_running_chat_messages_by_client(user_id: int, client_id: int) -> List[Dict]:

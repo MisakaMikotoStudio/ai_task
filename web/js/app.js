@@ -293,8 +293,8 @@ function switchToView(view) {
 
     // 视图切换时加载对应数据
     if (view === 'chats') {
-        loadStandaloneChats();
-        initStandaloneChatFilter();
+        initStandaloneChatPanel();
+        loadStandaloneChatList();
     } else if (view === 'okr') {
         loadObjectives();
         initOKREvents();
@@ -2705,156 +2705,216 @@ function openStandaloneChat(chatId, clientId) {
     window.open(`chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}`, '_blank');
 }
 
-// ===== 独立 Chat 列表 =====
+// ===== 独立 Chat（split-panel） =====
 
-let standaloneChatStatusFilter = ['pending', 'running', 'completed'];
-let standaloneChatFilterInitialized = false;
+let scStatusFilter = ['pending', 'running', 'completed'];
+let scChatList = [];        // 当前已加载的 chat 列表
+let scCurrentPage = 1;
+let scPageSize = 20;
+let scTotal = 0;
+let scSelectedChatId = null; // 当前右侧展示的 chatId
+let scClientsCache = [];     // 客户端列表缓存
+let scInitialized = false;
 
-function initStandaloneChatFilter() {
-    const statusFilter = document.getElementById('chat-status-filter');
-    if (!statusFilter || statusFilter.dataset.initialized === 'true') return;
+const SC_CLIENT_CACHE_KEY = 'sc_last_client_id';
 
-    const checkboxes = statusFilter.querySelectorAll('input[type="checkbox"]');
-    checkboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', () => {
-            const label = checkbox.parentElement;
-            if (checkbox.checked) {
-                label.classList.add('checked');
-            } else {
-                label.classList.remove('checked');
-            }
-            standaloneChatStatusFilter = Array.from(checkboxes)
-                .filter(cb => cb.checked)
-                .map(cb => cb.value);
-            loadStandaloneChats();
+function initStandaloneChatPanel() {
+    if (scInitialized) return;
+    scInitialized = true;
+
+    // 状态筛选
+    const filterEl = document.getElementById('chat-status-filter');
+    if (filterEl) {
+        filterEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const label = cb.parentElement;
+                if (cb.checked) { label.classList.add('checked'); }
+                else { label.classList.remove('checked'); }
+                scStatusFilter = Array.from(filterEl.querySelectorAll('input:checked')).map(c => c.value);
+                scCurrentPage = 1;
+                scChatList = [];
+                loadStandaloneChatList();
+            });
         });
-    });
-    statusFilter.dataset.initialized = 'true';
-
-    // 新建 Chat 按钮
-    const addBtn = document.getElementById('add-standalone-chat-btn');
-    if (addBtn && addBtn.dataset.initialized !== 'true') {
-        addBtn.addEventListener('click', () => showStandaloneChatCreateModal());
-        addBtn.dataset.initialized = 'true';
-    }
-}
-
-async function loadStandaloneChats() {
-    try {
-        const res = await chatAPI.listStandaloneChats();
-        let chats = res.data || [];
-
-        // 前端状态筛选
-        if (standaloneChatStatusFilter.length > 0) {
-            chats = chats.filter(c => standaloneChatStatusFilter.includes(c.status));
-        }
-
-        renderStandaloneChats(chats);
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
-}
-
-function renderStandaloneChats(chats) {
-    const tbody = document.getElementById('chats-table-body');
-    const emptyState = document.getElementById('chats-empty');
-
-    if (chats.length === 0) {
-        tbody.innerHTML = '';
-        emptyState.classList.add('show');
-        return;
     }
 
-    emptyState.classList.remove('show');
-
-    const statusLabels = {
-        pending: '等待执行',
-        running: '正在执行',
-        completed: '执行完成',
-        terminated: '被终止'
-    };
-
-    tbody.innerHTML = chats.map(chat => {
-        const safeTitle = escapeHtml(chat.title || '');
-        const statusText = statusLabels[chat.status] || chat.status;
-        const clientName = escapeHtml(chat.client_name || '-');
-        const clientId = chat.client_id || '-';
-
-        return `
-        <tr>
-            <td><span class="task-id">${chat.id}</span></td>
-            <td class="task-title-cell" title="${safeTitle}">
-                <span class="task-title-text">${safeTitle}</span>
-            </td>
-            <td>
-                <span class="status-badge status-${chat.status}">${statusText}</span>
-            </td>
-            <td>${clientName}</td>
-            <td>${clientId}</td>
-            <td class="time-display">${formatDateTime(chat.created_at)}</td>
-            <td class="task-actions-cell">
-                <div class="task-actions">
-                    <button class="btn-action btn-chat" onclick="openStandaloneChat(${chat.id}, ${chat.client_id || 0})">Chat</button>
-                    <button class="btn-action btn-delete" onclick="deleteStandaloneChat(${chat.id})">删除</button>
-                </div>
-            </td>
-        </tr>`;
-    }).join('');
-}
-
-async function deleteStandaloneChat(chatId) {
-    if (!confirm('确定要删除这个 Chat 吗？')) return;
-    try {
-        await chatAPI.deleteChat(0, chatId);
-        showToast('删除成功', 'success');
-        loadStandaloneChats();
-    } catch (error) {
-        showToast(error.message, 'error');
+    // 新建按钮 -> 切回 welcome
+    const newBtn = document.getElementById('sc-new-chat-btn');
+    if (newBtn) {
+        newBtn.addEventListener('click', () => scShowWelcome());
     }
+
+    // 加载更多
+    const loadMoreBtn = document.getElementById('sc-load-more-btn');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', () => {
+            scCurrentPage++;
+            loadStandaloneChatList(true);
+        });
+    }
+
+    // 发送按钮
+    const sendBtn = document.getElementById('sc-welcome-send-btn');
+    if (sendBtn) {
+        sendBtn.addEventListener('click', () => scSendNewChat());
+    }
+
+    // Ctrl+Enter 快捷键
+    const textarea = document.getElementById('sc-welcome-input');
+    if (textarea) {
+        textarea.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                scSendNewChat();
+            }
+        });
+    }
+
+    // 加载客户端列表
+    scLoadClients();
 }
 
-async function showStandaloneChatCreateModal() {
-    // 获取客户端列表
-    let clients = [];
+async function scLoadClients() {
     try {
         const result = await activeClientAPI.list();
-        clients = result.data || [];
+        scClientsCache = result.data || [];
+    } catch (e) {
+        scClientsCache = [];
+    }
+    scRenderClientSelect();
+}
+
+function scRenderClientSelect() {
+    const sel = document.getElementById('sc-client-select');
+    if (!sel) return;
+
+    const lastClientId = localStorage.getItem(SC_CLIENT_CACHE_KEY) || '';
+
+    let html = '<option value="">-- 请选择应用 --</option>';
+    for (const c of scClientsCache) {
+        const selected = String(c.id) === lastClientId ? ' selected' : '';
+        html += `<option value="${c.id}"${selected}>${escapeHtml(c.name)} (ID: ${c.id})</option>`;
+    }
+    sel.innerHTML = html;
+
+    // 保存选择变化
+    sel.addEventListener('change', () => {
+        if (sel.value) {
+            localStorage.setItem(SC_CLIENT_CACHE_KEY, sel.value);
+        }
+    });
+}
+
+async function loadStandaloneChatList(append = false) {
+    try {
+        const res = await chatAPI.listStandaloneChats({
+            status: scStatusFilter,
+            page: scCurrentPage,
+            pageNum: scPageSize,
+        });
+        const pageData = res.data || {};
+        const items = pageData.items || [];
+        scTotal = pageData.total || 0;
+
+        if (append) {
+            scChatList = scChatList.concat(items);
+        } else {
+            scChatList = items;
+        }
+
+        scRenderChatList();
     } catch (error) {
-        showToast('获取应用列表失败', 'error');
+        showToast(error.message, 'error');
+    }
+}
+
+function scRenderChatList() {
+    const listEl = document.getElementById('sc-chat-list');
+    const loadMoreEl = document.getElementById('sc-load-more');
+
+    if (scChatList.length === 0) {
+        listEl.innerHTML = '<div class="sc-chat-empty">暂无 Chat</div>';
+        if (loadMoreEl) loadMoreEl.style.display = 'none';
         return;
     }
 
-    const clientOptions = clients.map(c =>
-        `<option value="${c.id}">${escapeHtml(c.name)} (ID: ${c.id})</option>`
-    ).join('');
+    const statusLabels = {
+        pending: '等待',
+        running: '执行中',
+        completed: '完成',
+        terminated: '终止'
+    };
 
-    const content = `
-        <div class="form-group" style="margin-bottom: 14px;">
-            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;">选择应用 <span style="color:var(--accent-danger)">*</span></label>
-            <select id="standalone-chat-client" style="width:100%;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:7px;color:var(--text-primary);font-size:14px;">
-                <option value="">-- 请选择应用 --</option>
-                ${clientOptions}
-            </select>
-        </div>
-        <div class="form-group" style="margin-bottom: 14px;">
-            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;">输入内容</label>
-            <textarea id="standalone-chat-input" rows="4" placeholder="输入消息内容，发送后自动创建 Chat..." style="width:100%;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:7px;color:var(--text-primary);font-size:14px;resize:vertical;min-height:80px;"></textarea>
-        </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
-            <button class="btn-secondary" onclick="closeModal()">取消</button>
-            <button class="btn-primary" onclick="submitStandaloneChat()">发送</button>
-        </div>
-    `;
+    listEl.innerHTML = scChatList.map(chat => {
+        const isActive = chat.id === scSelectedChatId ? ' active' : '';
+        const safeTitle = escapeHtml(chat.title || '无标题');
+        const statusText = statusLabels[chat.status] || chat.status;
+        const clientName = escapeHtml(chat.client_name || '');
+        const timeStr = formatDateTime(chat.updated_at || chat.created_at);
 
-    openModal('新建 Chat', content);
+        return `
+        <div class="sc-chat-item${isActive}" onclick="scSelectChat(${chat.id}, ${chat.client_id || 0})" data-chat-id="${chat.id}">
+            <div class="sc-chat-item-row1">
+                <span class="sc-chat-item-id">#${chat.id}</span>
+                <span class="sc-chat-status-dot ${chat.status}"></span>
+                <span class="sc-chat-status-label ${chat.status}">${statusText}</span>
+            </div>
+            <div class="sc-chat-item-title">${safeTitle}</div>
+            <div class="sc-chat-item-meta">
+                ${clientName ? `<span>${clientName}</span>` : ''}
+                <span>${timeStr}</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    // 加载更多按钮
+    if (loadMoreEl) {
+        const loaded = scChatList.length;
+        loadMoreEl.style.display = loaded < scTotal ? '' : 'none';
+    }
 }
 
-async function submitStandaloneChat() {
-    const clientSelect = document.getElementById('standalone-chat-client');
-    const inputEl = document.getElementById('standalone-chat-input');
+function scShowWelcome() {
+    scSelectedChatId = null;
+    // 取消左侧选中
+    document.querySelectorAll('.sc-chat-item.active').forEach(el => el.classList.remove('active'));
 
-    const clientId = clientSelect ? parseInt(clientSelect.value) : 0;
-    const inputText = inputEl ? inputEl.value.trim() : '';
+    document.getElementById('sc-welcome').style.display = '';
+    document.getElementById('sc-chat-frame').style.display = 'none';
+
+    // 清空输入
+    const textarea = document.getElementById('sc-welcome-input');
+    if (textarea) textarea.value = '';
+
+    // 重新渲染客户端选择
+    scRenderClientSelect();
+}
+
+function scSelectChat(chatId, clientId) {
+    scSelectedChatId = chatId;
+    // 高亮左侧项
+    document.querySelectorAll('.sc-chat-item').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.chatId) === chatId);
+    });
+
+    // 隐藏 welcome，显示 iframe
+    document.getElementById('sc-welcome').style.display = 'none';
+    const frame = document.getElementById('sc-chat-frame');
+    frame.style.display = '';
+    const frameUrl = `chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}`;
+    // 只在 URL 变化时重新加载
+    if (!frame.src || !frame.src.endsWith(frameUrl)) {
+        frame.src = frameUrl;
+    }
+}
+
+async function scSendNewChat() {
+    const sel = document.getElementById('sc-client-select');
+    const textarea = document.getElementById('sc-welcome-input');
+    const sendBtn = document.getElementById('sc-welcome-send-btn');
+
+    const clientId = sel ? parseInt(sel.value) : 0;
+    const inputText = textarea ? textarea.value.trim() : '';
 
     if (!clientId) {
         showToast('请选择一个应用', 'error');
@@ -2865,14 +2925,37 @@ async function submitStandaloneChat() {
         return;
     }
 
+    // 缓存最近选择的应用
+    localStorage.setItem(SC_CLIENT_CACHE_KEY, String(clientId));
+
+    sendBtn.disabled = true;
     try {
         const res = await chatAPI.createStandaloneChatWithMessage(inputText, clientId);
-        closeModal();
-        showToast('Chat 创建成功', 'success');
-        loadStandaloneChats();
-        // 打开新创建的 chat
-        const chatId = res.data.chat.id;
-        openStandaloneChat(chatId, clientId);
+        const newChatId = res.data.chat.id;
+
+        // 刷新列表并选中
+        scCurrentPage = 1;
+        scChatList = [];
+        await loadStandaloneChatList();
+        scSelectChat(newChatId, clientId);
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        sendBtn.disabled = false;
+    }
+}
+
+async function deleteStandaloneChat(chatId) {
+    if (!confirm('确定要删除这个 Chat 吗？')) return;
+    try {
+        await chatAPI.deleteChat(0, chatId);
+        showToast('删除成功', 'success');
+        if (scSelectedChatId === chatId) {
+            scShowWelcome();
+        }
+        scCurrentPage = 1;
+        scChatList = [];
+        loadStandaloneChatList();
     } catch (error) {
         showToast(error.message, 'error');
     }

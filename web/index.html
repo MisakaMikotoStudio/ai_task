@@ -4,7 +4,358 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=21">
+    <link rel="stylesheet" href="css/style.css?v=22">
+    <style>
+    /* ===== Standalone Chat Split-Panel ===== */
+    .chats-split-view.active {
+        display: flex !important;
+        height: 100vh;
+        overflow: hidden;
+        margin: -24px;
+    }
+
+    /* -- Left sidebar -- */
+    .sc-sidebar {
+        width: 300px;
+        min-width: 260px;
+        max-width: 300px;
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .sc-sidebar-header {
+        padding: 14px 12px 10px;
+        border-bottom: 1px solid var(--border-color);
+        flex-shrink: 0;
+    }
+
+    .sc-sidebar-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+
+    .sc-sidebar-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0;
+    }
+
+    .sc-new-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-tertiary);
+        color: var(--accent-primary);
+        font-size: 18px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: var(--transition);
+        line-height: 1;
+    }
+
+    .sc-new-btn:hover {
+        background: rgba(88, 166, 255, 0.15);
+        border-color: rgba(88, 166, 255, 0.4);
+    }
+
+    .sc-filter-row {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+
+    .sc-filter-tag {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: var(--transition);
+        user-select: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .sc-filter-tag input { display: none; }
+
+    .sc-filter-tag.checked {
+        background: rgba(88, 166, 255, 0.12);
+        border-color: rgba(88, 166, 255, 0.35);
+        color: var(--accent-primary);
+    }
+
+    .sc-filter-tag:hover {
+        border-color: rgba(88, 166, 255, 0.4);
+    }
+
+    /* -- Chat list -- */
+    .sc-chat-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px;
+    }
+
+    .sc-chat-list::-webkit-scrollbar { width: 3px; }
+    .sc-chat-list::-webkit-scrollbar-track { background: transparent; }
+    .sc-chat-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+
+    .sc-chat-item {
+        padding: 10px 10px;
+        border-radius: 7px;
+        cursor: pointer;
+        transition: var(--transition);
+        margin-bottom: 2px;
+        border: 1px solid transparent;
+    }
+
+    .sc-chat-item:hover { background: var(--bg-tertiary); }
+
+    .sc-chat-item.active {
+        background: var(--bg-card);
+        border-color: var(--border-color);
+    }
+
+    .sc-chat-item-row1 {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+    }
+
+    .sc-chat-item-id {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-family: 'Courier New', monospace;
+    }
+
+    .sc-chat-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .sc-chat-status-dot.pending { background: var(--text-muted); }
+    .sc-chat-status-dot.running {
+        background: var(--accent-warning);
+        box-shadow: 0 0 4px var(--accent-warning);
+        animation: sc-pulse 1.5s infinite;
+    }
+    .sc-chat-status-dot.completed { background: var(--accent-success); }
+    .sc-chat-status-dot.terminated { background: var(--accent-danger); }
+
+    @keyframes sc-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+
+    .sc-chat-status-label {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    .sc-chat-status-label.running { color: var(--accent-warning); }
+    .sc-chat-status-label.completed { color: var(--accent-success); }
+    .sc-chat-status-label.terminated { color: var(--accent-danger); }
+
+    .sc-chat-item-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-height: 1.4;
+    }
+
+    .sc-chat-item.active .sc-chat-item-title { color: var(--text-primary); }
+
+    .sc-chat-item-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 3px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .sc-chat-empty {
+        padding: 24px 12px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .sc-load-more {
+        padding: 6px;
+        flex-shrink: 0;
+    }
+
+    .sc-load-more-btn {
+        width: 100%;
+        padding: 6px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-muted);
+        font-size: 12px;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+
+    .sc-load-more-btn:hover {
+        color: var(--accent-primary);
+        border-color: rgba(88, 166, 255, 0.4);
+    }
+
+    /* -- Right: main area -- */
+    .sc-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--bg-primary);
+    }
+
+    .sc-welcome {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0 24px 80px;
+        gap: 28px;
+    }
+
+    .sc-welcome-center {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        text-align: center;
+    }
+
+    .sc-welcome-icon { font-size: 36px; opacity: 0.25; }
+    .sc-welcome-title { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+    .sc-welcome-sub { font-size: 13px; color: var(--text-muted); }
+
+    .sc-welcome-composer {
+        width: 100%;
+        max-width: 600px;
+    }
+
+    .sc-client-select-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .sc-client-label {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+    }
+
+    .sc-client-select {
+        flex: 1;
+        padding: 7px 10px;
+        border-radius: 7px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: 13px;
+        outline: none;
+        transition: var(--transition);
+    }
+
+    .sc-client-select:focus {
+        border-color: var(--accent-primary);
+    }
+
+    .sc-composer-box {
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        background: var(--bg-secondary);
+        overflow: hidden;
+        transition: var(--transition);
+    }
+
+    .sc-composer-box:focus-within {
+        border-color: var(--accent-primary);
+    }
+
+    .sc-composer-textarea {
+        width: 100%;
+        border: none;
+        background: transparent;
+        color: var(--text-primary);
+        font-size: 14px;
+        padding: 12px 14px 4px;
+        resize: none;
+        outline: none;
+        line-height: 1.5;
+        font-family: inherit;
+        box-sizing: border-box;
+    }
+
+    .sc-composer-footer {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 6px 10px 8px;
+    }
+
+    .sc-composer-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-right: auto;
+    }
+
+    .sc-send-btn {
+        padding: 5px 16px;
+        border-radius: 6px;
+        border: none;
+        background: var(--accent-primary);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+
+    .sc-send-btn:hover {
+        filter: brightness(1.15);
+    }
+
+    .sc-send-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* -- Chat iframe -- */
+    .sc-chat-frame {
+        flex: 1;
+        width: 100%;
+        border: none;
+    }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -154,66 +505,63 @@
                     </div>
                 </div>
 
-                <!-- Chat列表视图 -->
-                <div id="chats-view" class="view">
-                    <div class="view-header tasks-header">
-                        <div class="view-header-left">
-                            <h2>Chat列表</h2>
+                <!-- Chat列表视图（split-panel） -->
+                <div id="chats-view" class="view chats-split-view">
+                    <!-- 左侧：Chat 列表 -->
+                    <aside class="sc-sidebar">
+                        <div class="sc-sidebar-header">
+                            <div class="sc-sidebar-title-row">
+                                <h3 class="sc-sidebar-title">Chat</h3>
+                                <button class="sc-new-btn" id="sc-new-chat-btn" title="新建 Chat">+</button>
+                            </div>
+                            <div class="sc-filter-row" id="chat-status-filter">
+                                <label class="sc-filter-tag checked"><input type="checkbox" value="pending" checked>等待</label>
+                                <label class="sc-filter-tag checked"><input type="checkbox" value="running" checked>执行中</label>
+                                <label class="sc-filter-tag checked"><input type="checkbox" value="completed" checked>完成</label>
+                                <label class="sc-filter-tag"><input type="checkbox" value="terminated">终止</label>
+                            </div>
                         </div>
-                        <div class="view-header-right tasks-toolbar">
-                            <div class="filter-group task-filter-group">
-                                <span class="filter-label">状态筛选：</span>
-                                <div class="status-filter-btns" id="chat-status-filter">
-                                    <label class="filter-btn checked">
-                                        <input type="checkbox" value="pending" checked> 等待执行
-                                    </label>
-                                    <label class="filter-btn checked">
-                                        <input type="checkbox" value="running" checked> 正在执行
-                                    </label>
-                                    <label class="filter-btn checked">
-                                        <input type="checkbox" value="completed" checked> 执行完成
-                                    </label>
-                                    <label class="filter-btn">
-                                        <input type="checkbox" value="terminated"> 被终止
-                                    </label>
+                        <div class="sc-chat-list" id="sc-chat-list">
+                            <div class="sc-chat-empty">暂无 Chat</div>
+                        </div>
+                        <div class="sc-load-more" id="sc-load-more" style="display:none;">
+                            <button class="sc-load-more-btn" id="sc-load-more-btn">加载更多</button>
+                        </div>
+                    </aside>
+
+                    <!-- 右侧：Chat 详情 / 新建 -->
+                    <main class="sc-main">
+                        <!-- 新建 Chat 欢迎页（默认显示） -->
+                        <div class="sc-welcome" id="sc-welcome">
+                            <div class="sc-welcome-center">
+                                <div class="sc-welcome-icon">✨</div>
+                                <div class="sc-welcome-title">有什么可以帮你的？</div>
+                                <div class="sc-welcome-sub">选择应用，输入问题，即可开始对话</div>
+                            </div>
+                            <div class="sc-welcome-composer">
+                                <div class="sc-client-select-row">
+                                    <label class="sc-client-label">应用</label>
+                                    <select class="sc-client-select" id="sc-client-select">
+                                        <option value="">加载中...</option>
+                                    </select>
+                                </div>
+                                <div class="sc-composer-box">
+                                    <textarea
+                                        class="sc-composer-textarea"
+                                        id="sc-welcome-input"
+                                        placeholder="输入消息，发送后自动创建 Chat..."
+                                        rows="3"
+                                    ></textarea>
+                                    <div class="sc-composer-footer">
+                                        <span class="sc-composer-hint">Ctrl+Enter 发送</span>
+                                        <button class="sc-send-btn" id="sc-welcome-send-btn">发送</button>
+                                    </div>
                                 </div>
                             </div>
-                            <button id="add-standalone-chat-btn" class="btn-primary">
-                                <span>+</span> 新建 Chat
-                            </button>
                         </div>
-                    </div>
-                    <div class="table-container task-table-container">
-                        <table class="data-table tasks-table">
-                            <colgroup>
-                                <col style="width: 70px;">
-                                <col>
-                                <col style="width: 100px;">
-                                <col style="width: 120px;">
-                                <col style="width: 70px;">
-                                <col style="width: 160px;">
-                                <col style="width: 100px;">
-                            </colgroup>
-                            <thead>
-                                <tr>
-                                    <th>ChatID</th>
-                                    <th>标题</th>
-                                    <th>状态</th>
-                                    <th>应用名称</th>
-                                    <th>应用ID</th>
-                                    <th>创建时间</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="chats-table-body">
-                                <!-- 动态填充 -->
-                            </tbody>
-                        </table>
-                        <div id="chats-empty" class="empty-state">
-                            <span class="empty-icon">💬</span>
-                            <p>暂无独立Chat</p>
-                        </div>
-                    </div>
+                        <!-- 已有 Chat 详情（iframe） -->
+                        <iframe class="sc-chat-frame" id="sc-chat-frame" style="display:none;" frameborder="0"></iframe>
+                    </main>
                 </div>
 
                 <!-- 任务列表视图 -->
