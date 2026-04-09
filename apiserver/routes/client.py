@@ -23,8 +23,6 @@ from service.client_service import (
     save_client,
     ClientSaveError,
     update_client_heartbeat,
-    save_all_infrastructure,
-    InfraConfigError,
 )
 from dao.heartbeat_dao import get_heartbeats_by_user
 from dao.chat_dao import get_running_chat_messages_by_client
@@ -522,42 +520,3 @@ def get_client_startup_config():
         'invalid_ids': invalid_ids,
     })
 
-
-# ============================================================
-# 基础设施配置路由（云服务器、域名、数据库、支付、对象存储）
-# ============================================================
-
-@client_bp.route('/<int:client_id>/infrastructure', methods=['PUT'])
-def save_infrastructure_api(client_id):
-    """
-    统一保存全量基础设施配置（云服务器、域名、数据库、支付、对象存储）
-
-    Request Body:
-        {
-            "servers":   {"test": {"name":"root","password":"xxx","ip":"1.2.3.4"}, "prod": {...}},
-            "domains":   {"test": ["test.example.com"], "prod": [...]},
-            "databases": {"test": [{...}], "prod": [...]},
-            "payments":  {"test": {...}, "prod": {...}},
-            "oss":       {"test": {...}, "prod": {...}}
-        }
-
-    Response:
-        成功 (200): {"code": 200, "message": "保存成功"}
-        失败 (400): {"code": 400, "message": "错误信息（含SSH校验失败）"}
-    """
-    user_id = request.user_info.user_id
-    if not get_client_by_id(client_id=client_id, user_id=user_id):
-        return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
-
-    body = request.get_json(silent=True) or {}
-
-    try:
-        save_all_infrastructure(
-            client_id=client_id,
-            user_id=user_id,
-            data=body,
-        )
-    except InfraConfigError as e:
-        return jsonify({'code': 400, 'message': e.message}), 400
-
-    return jsonify({'code': 200, 'message': '保存成功'})

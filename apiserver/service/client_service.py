@@ -303,6 +303,11 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
         # 目前只有环境变量出现变更的时候，才有可能影响到客户端的执行版本号，所以这里直接调用 increment_client_version
         increment_client_version(cid, user_id)
 
+    # 保存基础设施配置（若 data 中含 infrastructure 字段）
+    infra_data = data.get('infrastructure')
+    if infra_data and isinstance(infra_data, dict):
+        save_all_infrastructure(client_id=cid, user_id=user_id, data=infra_data)
+
     return cid
 
 
@@ -544,12 +549,9 @@ def save_client_env_vars(client_id: int, env_items: List[dict], *, user_id: int)
 SSH_CHECK_TIMEOUT = 5  # SSH 连通性检查超时秒数
 
 
-class InfraConfigError(Exception):
+class InfraConfigError(ClientSaveError):
     """基础设施配置校验或操作失败"""
-
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
+    pass
 
 
 def check_ssh_connectivity(ip: str, username: str, password: str) -> Tuple[bool, str]:

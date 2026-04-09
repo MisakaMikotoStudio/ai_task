@@ -894,14 +894,24 @@ async function wizardSaveAll() {
         }
     }
 
+    // 构建基础设施配置
+    const infrastructure = {
+        servers: cfgServersByEnv,
+        domains: cfgDomainsByEnv,
+        databases: cfgDatabasesByEnv,
+        payments: cfgPaymentsByEnv,
+        oss: cfgOssByEnv,
+    };
+
     try {
-        // 4. 创建或更新应用基本信息（含仓库、环境变量）
+        // 4. 一次性创建或更新应用（基本信息 + 仓库 + 环境变量 + 基础设施）
         if (cfgClientId === null) {
             const result = await activeClientAPI.create(name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
                 env_vars: envVars,
+                infrastructure,
             });
             cfgClientId = result.data.id;
         } else {
@@ -910,21 +920,9 @@ async function wizardSaveAll() {
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
                 env_vars: envVars,
+                infrastructure,
             });
         }
-
-        // 5. 统一保存基础设施配置（需要 clientId）
-        const hasAnyServer = Object.values(cfgServersByEnv).some(s => s.ip);
-        if (hasAnyServer) {
-            showToast('正在校验 SSH 连通性，请稍候...', 'success');
-        }
-        await infraAPI.saveAll(cfgClientId, {
-            servers: cfgServersByEnv,
-            domains: cfgDomainsByEnv,
-            databases: cfgDatabasesByEnv,
-            payments: cfgPaymentsByEnv,
-            oss: cfgOssByEnv,
-        });
 
         showToast('应用配置保存成功', 'success');
         cfgResetClientConfigState();

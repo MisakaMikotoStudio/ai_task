@@ -117,19 +117,21 @@ const clientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
         });
     },
 
-    // 更新（可选 repos、env_vars 全量同步）
+    // 更新（可选 repos、env_vars、infrastructure 全量同步）
     async update(id, name, options = {}) {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -156,16 +158,6 @@ const clientAPI = {
     }
 };
 
-// 基础设施配置 API
-const infraAPI = {
-    // 统一保存全量基础设施配置（服务器含 SSH 校验）
-    async saveAll(clientId, data) {
-        return request(`/client/${clientId}/infrastructure`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    }
-};
 
 // 秘钥API
 const secretAPI = {
@@ -224,6 +216,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request('/admin/clients', {
             method: 'POST',
             body: JSON.stringify(body)
@@ -235,6 +228,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request(`/admin/clients/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
