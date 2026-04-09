@@ -731,6 +731,10 @@ async function openClientConfig(id, mode) {
         backToClients();
     };
 
+    // 取消 / 保存按钮
+    document.getElementById('wizard-cancel-btn').onclick = () => wizardCancel();
+    document.getElementById('wizard-save-btn').onclick = () => wizardSaveAll();
+
     // 加载 Agent 列表
     let agentOptions = ['claude sdk', 'claude cli'];
     try {
@@ -802,27 +806,20 @@ async function openClientConfig(id, mode) {
 // ---- 向导步骤导航 ----
 
 function wizardGoToStep(stepIndex) {
+    // 切换前先同步当前步骤的 DOM 数据到内存
+    wizardSyncCurrentStepFromDOM(cfgCurrentStep);
     cfgCurrentStep = stepIndex;
-    wizardUpdateFlowBar();
+    wizardUpdateSidebar();
     wizardShowStepPanel(stepIndex);
     wizardRenderStepContent(stepIndex);
-    wizardUpdateFooter(stepIndex);
+    wizardUpdateHeaderActions();
 }
 
-function wizardUpdateFlowBar() {
-    const nodes = document.querySelectorAll('.wizard-step-node');
-    nodes.forEach((node, idx) => {
-        node.classList.remove('active', 'done');
-        if (idx < cfgCurrentStep) node.classList.add('done');
-        else if (idx === cfgCurrentStep) node.classList.add('active');
-        // 仅允许已完成步骤或当前步骤跳转（编辑模式允许任意跳转）
-        node.onclick = null;
-        if (cfgClientId !== null || idx <= cfgCurrentStep) {
-            node.style.cursor = 'pointer';
-            node.onclick = () => wizardGoToStep(idx);
-        } else {
-            node.style.cursor = 'default';
-        }
+function wizardUpdateSidebar() {
+    const tabs = document.querySelectorAll('.wizard-sidebar-tab');
+    tabs.forEach((tab, idx) => {
+        tab.classList.toggle('active', idx === cfgCurrentStep);
+        tab.onclick = () => wizardGoToStep(idx);
     });
 }
 
@@ -846,86 +843,139 @@ function wizardRenderStepContent(stepIndex) {
     }
 }
 
-function wizardUpdateFooter(stepIndex) {
+function wizardUpdateHeaderActions() {
     const isView = (cfgClientMode === 'view');
-    const prevBtn = document.getElementById('wizard-prev-btn');
-    const skipBtn = document.getElementById('wizard-skip-btn');
-    const nextBtn = document.getElementById('wizard-next-btn');
-    const finishBtn = document.getElementById('wizard-finish-btn');
-
-    const isFirst = stepIndex === 0;
-    const isLast = stepIndex === WIZARD_STEPS.length - 1;
-    const step = WIZARD_STEPS[stepIndex];
-
-    prevBtn.style.display = isFirst ? 'none' : '';
-    prevBtn.onclick = () => wizardGoToStep(stepIndex - 1);
-
-    // 跳过按钮：可跳过且非查看模式
-    skipBtn.style.display = (!step.required && !isView && !isLast) ? '' : 'none';
-    skipBtn.onclick = () => wizardGoToStep(stepIndex + 1);
-
-    // 下一步 / 完成
-    if (isLast) {
-        nextBtn.style.display = 'none';
-        finishBtn.style.display = isView ? 'none' : '';
-        finishBtn.onclick = () => wizardFinish();
-    } else {
-        nextBtn.style.display = isView ? 'none' : '';
-        finishBtn.style.display = 'none';
-        nextBtn.textContent = '下一步 →';
-        nextBtn.onclick = () => wizardHandleNextStep(stepIndex);
-    }
-
-    // 查看模式只显示返回
-    if (isView) {
-        prevBtn.style.display = '';
-        prevBtn.textContent = isFirst ? '← 返回列表' : '← 上一步';
-        if (isFirst) prevBtn.onclick = () => { cfgResetClientConfigState(); backToClients(); };
-    }
+    const actionsDiv = document.getElementById('wizard-header-actions');
+    if (actionsDiv) actionsDiv.style.display = isView ? 'none' : '';
 }
 
-// ---- 各步骤处理 ----
-
-async function wizardHandleNextStep(stepIndex) {
-    // 步骤校验并保存
-    const err = await wizardSaveCurrentStep(stepIndex);
-    if (err) {
-        showToast(err, 'error');
-        return;
-    }
-    if (stepIndex < WIZARD_STEPS.length - 1) {
-        wizardGoToStep(stepIndex + 1);
-    }
-}
-
-async function wizardSaveCurrentStep(stepIndex) {
+// 在切换 tab 前，同步当前步骤的 DOM 输入到内存状态
+function wizardSyncCurrentStepFromDOM(stepIndex) {
     switch (stepIndex) {
-        case 0: return await wizardSaveBasicStep();
-        case 1: return null; // 环境变量暂存，最终保存时提交
-        case 2: return wizardValidateRepos();
-        case 3: return await wizardSaveServerStep();
-        case 4: return await wizardSaveDomainStep();
-        case 5: return await wizardSaveDatabaseStep();
-        case 6: return await wizardSavePaymentStep();
-        case 7: return await wizardSaveOssStep();
-        default: return null;
+        case 1: wizardSyncEnvVarsFromDOM(); break;
+        case 3: wizardSyncServerFromDOM(); break;
+        case 4: wizardSyncDomainsFromDOM(); break;
+        case 6: wizardSyncPaymentFromDOM(); break;
+        case 7: wizardSyncOssFromDOM(); break;
     }
 }
 
-async function wizardFinish() {
-    // 完成前先保存最后一步（对象存储），然后保存环境变量（统一在finish时提交）
-    const ossErr = await wizardSaveOssStep();
-    if (ossErr) { showToast(ossErr, 'error'); return; }
+// ---- 取消 / 保存 ----
 
-    // 保存环境变量
-    if (cfgClientId !== null) {
-        const envVarsErr = await wizardSaveEnvVars();
-        if (envVarsErr) { showToast(envVarsErr, 'error'); return; }
-    }
-
-    showToast('应用配置完成', 'success');
+function wizardCancel() {
     cfgResetClientConfigState();
     backToClients();
+}
+
+async function wizardSaveAll() {
+    // 先同步当前步骤 DOM 数据
+    wizardSyncCurrentStepFromDOM(cfgCurrentStep);
+
+    // 1. 验证基本信息
+    const name = document.getElementById('cfg-client-name').value.trim();
+    const agent = document.getElementById('cfg-client-agent').value;
+    const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
+    if (!name) { showToast('应用名称不能为空', 'error'); wizardGoToStep(0); return; }
+    if (name.length > 16) { showToast('应用名称最多 16 个字符', 'error'); wizardGoToStep(0); return; }
+
+    // 2. 验证代码仓库
+    const reposErr = wizardValidateReposOnly();
+    if (reposErr) { showToast(reposErr, 'error'); wizardGoToStep(2); return; }
+
+    // 3. 验证环境变量
+    const envVarsErr = wizardValidateEnvVars();
+    if (envVarsErr) { showToast(envVarsErr, 'error'); wizardGoToStep(1); return; }
+
+    // 构建仓库数据
+    const repos = cfgReposList.map(r => ({
+        desc: (r.desc || '').trim(),
+        url: (r.url || '').trim(),
+        token: r.token,
+        default_branch: r.default_branch || '',
+        branch_prefix: r.branch_prefix || 'ai_',
+        docs_repo: !!r.docs_repo
+    }));
+
+    // 构建环境变量数据
+    const envVars = [];
+    for (const envKey of ['test', 'prod']) {
+        const items = cfgEnvVarsByEnv[envKey] || [];
+        for (const ev of items) {
+            const key = (ev.key || '').trim();
+            const value = (ev.value == null ? '' : String(ev.value));
+            envVars.push({ key, value, env: envKey });
+        }
+    }
+
+    try {
+        // 4. 创建或更新应用基本信息（含仓库、环境变量）
+        if (cfgClientId === null) {
+            const result = await activeClientAPI.create(name, {
+                agent,
+                official_cloud_deploy: officialCloudDeploy,
+                repos,
+                env_vars: envVars,
+            });
+            cfgClientId = result.data.id;
+        } else {
+            await activeClientAPI.update(cfgClientId, name, {
+                agent,
+                official_cloud_deploy: officialCloudDeploy,
+                repos,
+                env_vars: envVars,
+            });
+        }
+
+        // 5. 保存基础设施配置（需要 clientId）
+        const hasAnyServer = Object.values(cfgServersByEnv).some(s => s.ip);
+        if (hasAnyServer) {
+            showToast('正在校验 SSH 连通性，请稍候...', 'success');
+            await infraAPI.saveServers(cfgClientId, cfgServersByEnv);
+        }
+        await infraAPI.saveDomains(cfgClientId, cfgDomainsByEnv);
+        await infraAPI.saveDatabases(cfgClientId, cfgDatabasesByEnv);
+        await infraAPI.savePayments(cfgClientId, cfgPaymentsByEnv);
+        await infraAPI.saveOss(cfgClientId, cfgOssByEnv);
+
+        showToast('应用配置保存成功', 'success');
+        cfgResetClientConfigState();
+        backToClients();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// 纯前端验证仓库（不调用 API）
+function wizardValidateReposOnly() {
+    if (!cfgReposList.length) return '请至少添加一个代码仓库';
+    let docs = 0;
+    for (let i = 0; i < cfgReposList.length; i++) {
+        const r = cfgReposList[i];
+        const n = i + 1;
+        if (!(r.url || '').trim()) return `仓库 #${n} 的 URL 不能为空`;
+        if (!(r.desc || '').trim()) return `仓库 #${n} 的简介不能为空`;
+        if (String(r.url).trim().startsWith('http') && !(r.token || '').trim()) {
+            return `仓库 #${n} 使用 HTTP 地址时必须填写 Token`;
+        }
+        if (r.docs_repo) docs++;
+    }
+    if (docs === 0) return '请指定一个文档仓库（单选）';
+    if (docs > 1) return '只能指定一个文档仓库';
+    return null;
+}
+
+// 纯前端验证环境变量
+function wizardValidateEnvVars() {
+    for (const envKey of ['test', 'prod']) {
+        const items = cfgEnvVarsByEnv[envKey] || [];
+        for (const ev of items) {
+            const key = (ev.key || '').trim();
+            const value = (ev.value == null ? '' : String(ev.value));
+            if (!key) return `环境 ${envKey} 中存在空变量名`;
+            if (!value) return `环境 ${envKey} 变量 ${key} 的值不能为空`;
+        }
+    }
+    return null;
 }
 
 // ---- Step 0: 基本信息 ----
@@ -936,29 +986,6 @@ function wizardRenderBasicStep(isView) {
     document.querySelectorAll('#wizard-step-0 input, #wizard-step-0 select').forEach(el => {
         el.disabled = isView;
     });
-}
-
-async function wizardSaveBasicStep() {
-    const name = document.getElementById('cfg-client-name').value.trim();
-    const agent = document.getElementById('cfg-client-agent').value;
-    const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
-
-    if (!name) return '应用名称不能为空';
-    if (name.length > 16) return '应用名称最多 16 个字符';
-
-    try {
-        if (cfgClientId === null) {
-            // 新建：先创建基本信息，仓库随后保存
-            const result = await activeClientAPI.create(name, { agent, official_cloud_deploy: officialCloudDeploy });
-            cfgClientId = result.data.id;
-            showToast('应用创建成功，继续配置其他信息', 'success');
-        } else {
-            await activeClientAPI.update(cfgClientId, name, { agent, official_cloud_deploy: officialCloudDeploy });
-        }
-        return null;
-    } catch (e) {
-        return e.message;
-    }
 }
 
 // ---- Step 1: 环境变量 ----
@@ -1034,33 +1061,6 @@ function cfgDeleteEnvVar(idx) {
     wizardRenderEnvVarsList();
 }
 
-async function wizardSaveEnvVars() {
-    // 先同步 DOM 中的当前环境值
-    wizardSyncEnvVarsFromDOM();
-
-    // 构建全量 env_vars 列表（合并所有环境）
-    const envVars = [];
-    for (const envKey of ['test', 'prod']) {
-        const items = cfgEnvVarsByEnv[envKey] || [];
-        for (const ev of items) {
-            const key = (ev.key || '').trim();
-            const value = (ev.value == null ? '' : String(ev.value));
-            if (!key) return `环境 ${envKey} 中存在空变量名`;
-            if (!value) return `环境 ${envKey} 变量 ${key} 的值不能为空`;
-            envVars.push({ key, value, env: envKey });
-        }
-    }
-    try {
-        await activeClientAPI.update(cfgClientId, document.getElementById('cfg-client-name').value.trim(), {
-            agent: document.getElementById('cfg-client-agent').value,
-            official_cloud_deploy: parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0,
-            env_vars: envVars,
-        });
-        return null;
-    } catch (e) {
-        return e.message;
-    }
-}
 
 // ---- Step 2: 代码仓库 ----
 
@@ -1158,40 +1158,7 @@ function cfgRemoveRepo(index) {
 }
 
 function wizardValidateRepos() {
-    if (!cfgReposList.length) return '请至少添加一个代码仓库';
-    let docs = 0;
-    for (let i = 0; i < cfgReposList.length; i++) {
-        const r = cfgReposList[i];
-        const n = i + 1;
-        if (!(r.url || '').trim()) return `仓库 #${n} 的 URL 不能为空`;
-        if (!(r.desc || '').trim()) return `仓库 #${n} 的简介不能为空`;
-        if (String(r.url).trim().startsWith('http') && !(r.token || '').trim()) {
-            return `仓库 #${n} 使用 HTTP 地址时必须填写 Token`;
-        }
-        if (r.docs_repo) docs++;
-    }
-    if (docs === 0) return '请指定一个文档仓库（单选）';
-    if (docs > 1) return '只能指定一个文档仓库';
-
-    // 保存仓库配置
-    const repos = cfgReposList.map(r => ({
-        desc: (r.desc || '').trim(),
-        url: (r.url || '').trim(),
-        token: r.token,
-        default_branch: r.default_branch || '',
-        branch_prefix: r.branch_prefix || 'ai_',
-        docs_repo: !!r.docs_repo
-    }));
-
-    if (cfgClientId !== null) {
-        const name = document.getElementById('cfg-client-name').value.trim();
-        activeClientAPI.update(cfgClientId, name, {
-            agent: document.getElementById('cfg-client-agent').value,
-            official_cloud_deploy: parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0,
-            repos,
-        }).catch(e => console.warn('仓库保存失败', e));
-    }
-    return null;
+    return wizardValidateReposOnly();
 }
 
 // ---- Step 3: 云服务器 ----
@@ -1228,22 +1195,6 @@ function wizardSyncServerFromDOM() {
     };
 }
 
-async function wizardSaveServerStep() {
-    if (cfgClientId === null) return null;
-    wizardSyncServerFromDOM();
-
-    // 如果两个环境都未填 ip，则跳过
-    const hasAnyIp = Object.values(cfgServersByEnv).some(s => s.ip);
-    if (!hasAnyIp) return null;
-
-    try {
-        showToast('正在校验 SSH 连通性，请稍候...', 'success');
-        await infraAPI.saveServers(cfgClientId, cfgServersByEnv);
-        return null;
-    } catch (e) {
-        return e.message;
-    }
-}
 
 // ---- Step 4: 域名 ----
 
@@ -1301,14 +1252,6 @@ function cfgDeleteDomain(idx) {
     wizardRenderDomainList();
 }
 
-async function wizardSaveDomainStep() {
-    if (cfgClientId === null) return null;
-    wizardSyncDomainsFromDOM();
-    try {
-        await infraAPI.saveDomains(cfgClientId, cfgDomainsByEnv);
-        return null;
-    } catch (e) { return e.message; }
-}
 
 // ---- Step 5: 数据库 ----
 
@@ -1399,13 +1342,6 @@ function cfgDeleteDatabase(idx) {
     wizardRenderDatabaseList();
 }
 
-async function wizardSaveDatabaseStep() {
-    if (cfgClientId === null) return null;
-    try {
-        await infraAPI.saveDatabases(cfgClientId, cfgDatabasesByEnv);
-        return null;
-    } catch (e) { return e.message; }
-}
 
 // ---- Step 6: 支付 ----
 
@@ -1452,14 +1388,6 @@ function wizardSyncPaymentFromDOM() {
     };
 }
 
-async function wizardSavePaymentStep() {
-    if (cfgClientId === null) return null;
-    wizardSyncPaymentFromDOM();
-    try {
-        await infraAPI.savePayments(cfgClientId, cfgPaymentsByEnv);
-        return null;
-    } catch (e) { return e.message; }
-}
 
 // ---- Step 7: 对象存储 ----
 
@@ -1502,14 +1430,6 @@ function wizardSyncOssFromDOM() {
     };
 }
 
-async function wizardSaveOssStep() {
-    if (cfgClientId === null) return null;
-    wizardSyncOssFromDOM();
-    try {
-        await infraAPI.saveOss(cfgClientId, cfgOssByEnv);
-        return null;
-    } catch (e) { return e.message; }
-}
 
 // 兼容旧代码的 showAddTaskModal 别名
 function showAddTaskModal() {
