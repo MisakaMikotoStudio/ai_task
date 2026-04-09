@@ -2156,7 +2156,7 @@ function renderAdminProductCard(p) {
         ? '<span class="commerce-badge commerce-product-offline">已下架</span>'
         : '<span class="commerce-badge commerce-product-online">上架中</span>';
     const actionHtml = offline
-        ? '<span class="commerce-muted">—</span>'
+        ? `<button type="button" class="commerce-online-btn btn-online-product" data-id="${p.id}">上架</button>`
         : `<button type="button" class="commerce-offline-btn btn-offline-product" data-id="${p.id}">下架</button>`;
     const validity = p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久';
     const renew = p.support_continue ? '支持续费' : '不支持续费';
@@ -2360,6 +2360,21 @@ async function loadAdminProducts() {
                     showToast('已下架', 'success');
                 } catch (err) {
                     showToast(`下架失败：${err.message}`, 'error');
+                }
+            });
+        });
+
+        root.querySelectorAll('.btn-online-product').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const productId = Number(btn.dataset.id);
+                if (!productId) return;
+                if (!confirm('确认上架该商品？前台将重新展示。')) return;
+                try {
+                    await adminCommerceAPI.onlineProduct(productId);
+                    await loadAdminProducts();
+                    showToast('已上架', 'success');
+                } catch (err) {
+                    showToast(`上架失败：${err.message}`, 'error');
                 }
             });
         });
