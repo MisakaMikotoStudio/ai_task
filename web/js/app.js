@@ -2489,7 +2489,7 @@ function renderStoreProductCard(product) {
         ? `有效期 ${Math.round(product.expire_time / 86400)} 天`
         : '永久有效';
     const renewBtn = product.support_continue
-        ? `<button class="store-buy-btn btn-secondary btn-small" data-id="${product.id}" data-type="renew">续费</button>`
+        ? `<button class="store-buy-btn btn-primary" data-id="${product.id}" data-type="renew">续费</button>`
         : '';
     return `
 <div class="store-product-card">

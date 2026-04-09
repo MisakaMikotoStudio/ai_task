@@ -4864,28 +4864,13 @@ textarea:focus {
     padding: 12px 16px;
     border-top: 1px solid var(--border-color);
     display: flex;
+    justify-content: flex-end;
     gap: 8px;
 }
 
 .store-product-actions .btn-primary {
-    flex: 1;
-    padding: 8px 12px;
-    font-size: 14px;
-}
-
-.store-product-actions .btn-secondary {
-    padding: 8px 14px;
+    padding: 6px 18px;
     font-size: 13px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    color: var(--text-secondary);
-    transition: var(--transition);
-}
-
-.store-product-actions .btn-secondary:hover {
-    color: var(--text-primary);
-    border-color: var(--accent-primary);
 }
 
 .store-loading-tip,
