@@ -9,12 +9,101 @@ from flask import Blueprint, request, jsonify
 from dao.models import Chat, ChatMessage
 from dao.chat_dao import (
     create_chat, get_chats_by_task, get_chat_by_id, update_chat_status, soft_delete_chat,
-    create_chat_message, get_messages_by_chat, get_running_message, 
-    soft_delete_message, update_message, update_chat_sessionid, get_message_by_id
+    create_chat_message, get_messages_by_chat, get_running_message,
+    soft_delete_message, update_message, update_chat_sessionid, get_message_by_id,
+    get_standalone_chats
 )
 from dao.task_dao import get_task_by_id
+from dao.client_dao import get_client_by_id
 
 chat_bp = Blueprint('chat', __name__)
+
+
+# ===== 独立 Chat（task_id=0）接口 =====
+
+@chat_bp.route('/standalone/chats', methods=['GET'])
+def list_standalone_chats():
+    """获取独立Chat列表（task_id=0）"""
+    chats = get_standalone_chats(user_id=request.user_info.user_id)
+    return jsonify({'code': 200, 'message': '获取成功', 'data': chats})
+
+
+@chat_bp.route('/standalone/chats', methods=['POST'])
+def create_standalone_chat_api():
+    """创建独立Chat（task_id=0，需要指定client_id）"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    title = data.get('title', '').strip()
+    if not title:
+        return jsonify({'code': 400, 'message': '标题不能为空'}), 400
+    if len(title) > 32:
+        return jsonify({'code': 400, 'message': '标题最多32个字符'}), 400
+
+    client_id = data.get('client_id')
+    if not client_id:
+        return jsonify({'code': 400, 'message': '必须选择一个应用'}), 400
+
+    if not get_client_by_id(client_id=client_id, user_id=request.user_info.user_id):
+        return jsonify({'code': 400, 'message': '应用不存在'}), 400
+
+    chat = create_chat(
+        user_id=request.user_info.user_id,
+        task_id=0,
+        title=title,
+        client_id=int(client_id),
+    )
+    return jsonify({'code': 201, 'message': 'Chat创建成功', 'data': chat.to_dict()}), 201
+
+
+@chat_bp.route('/standalone/messages', methods=['POST'])
+def create_standalone_chat_and_message_api():
+    """自动创建独立Chat并发送消息（task_id=0）"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    input_text = data.get('input', '').strip()
+    if not input_text:
+        return jsonify({'code': 400, 'message': '输入内容不能为空'}), 400
+
+    client_id = data.get('client_id')
+    if not client_id:
+        return jsonify({'code': 400, 'message': '必须选择一个应用'}), 400
+
+    if not get_client_by_id(client_id=client_id, user_id=request.user_info.user_id):
+        return jsonify({'code': 400, 'message': '应用不存在'}), 400
+
+    title = input_text[:32]
+    extra = data.get('extra', {})
+
+    chat = create_chat(
+        user_id=request.user_info.user_id,
+        task_id=0,
+        title=title,
+        client_id=int(client_id),
+    )
+    msg = create_chat_message(
+        user_id=request.user_info.user_id,
+        task_id=0,
+        chat_id=chat.id,
+        input_text=input_text,
+        extra=extra,
+    )
+    update_chat_status(user_id=request.user_info.user_id, chat_id=chat.id, task_id=0, status='pending')
+
+    return jsonify({
+        'code': 201,
+        'message': '创建成功',
+        'data': {
+            'chat': chat.to_dict(),
+            'message': msg.to_dict()
+        }
+    }), 201
+
+
+# ===== 原有 Task Chat 接口 =====
 
 @chat_bp.route('/task/<int:task_id>/chats', methods=['GET'])
 def list_chats(task_id):
@@ -80,7 +169,7 @@ def delete_chat_api(task_id, chat_id):
 @chat_bp.route('/task/<int:task_id>/messages', methods=['POST'])
 def create_chat_and_message_api(task_id):
     """自动创建Chat并发送消息（Chat标题取输入内容前32字符）"""
-    if not get_task_by_id(task_id=task_id, user_id=request.user_info.user_id):
+    if task_id != 0 and not get_task_by_id(task_id=task_id, user_id=request.user_info.user_id):
         return jsonify({'code': 400, 'message': '任务不存在'}), 400
 
     data = request.get_json()

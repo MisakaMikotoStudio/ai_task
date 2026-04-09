@@ -472,6 +472,25 @@ const chatAPI = {
         });
     },
 
+    // 独立 Chat（task_id=0）
+    async listStandaloneChats() {
+        return request('/chat/standalone/chats');
+    },
+
+    async createStandaloneChat(title, clientId) {
+        return request('/chat/standalone/chats', {
+            method: 'POST',
+            body: JSON.stringify({ title, client_id: clientId })
+        });
+    },
+
+    async createStandaloneChatWithMessage(input, clientId, extra = {}) {
+        return request('/chat/standalone/messages', {
+            method: 'POST',
+            body: JSON.stringify({ input, client_id: clientId, extra })
+        });
+    },
+
     async updateChatStatus(taskId, chatId, status) {
         return request(`/chat/task/${taskId}/chats/${chatId}/status`, {
             method: 'PATCH',

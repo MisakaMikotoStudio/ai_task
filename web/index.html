@@ -77,6 +77,10 @@
                         <span class="nav-icon">✅</span>
                         <span>待办事项</span>
                     </a>
+                    <a href="#" class="nav-item" data-view="chats">
+                        <span class="nav-icon">💬</span>
+                        <span>Chat列表</span>
+                    </a>
                     <a href="#" class="nav-item" data-view="tasks">
                         <span class="nav-icon">📋</span>
                         <span>任务列表</span>
@@ -146,6 +150,68 @@
                         <div id="todos-empty" class="empty-state">
                             <span class="empty-icon">✅</span>
                             <p>暂无待办事项</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat列表视图 -->
+                <div id="chats-view" class="view">
+                    <div class="view-header tasks-header">
+                        <div class="view-header-left">
+                            <h2>Chat列表</h2>
+                        </div>
+                        <div class="view-header-right tasks-toolbar">
+                            <div class="filter-group task-filter-group">
+                                <span class="filter-label">状态筛选：</span>
+                                <div class="status-filter-btns" id="chat-status-filter">
+                                    <label class="filter-btn checked">
+                                        <input type="checkbox" value="pending" checked> 等待执行
+                                    </label>
+                                    <label class="filter-btn checked">
+                                        <input type="checkbox" value="running" checked> 正在执行
+                                    </label>
+                                    <label class="filter-btn checked">
+                                        <input type="checkbox" value="completed" checked> 执行完成
+                                    </label>
+                                    <label class="filter-btn">
+                                        <input type="checkbox" value="terminated"> 被终止
+                                    </label>
+                                </div>
+                            </div>
+                            <button id="add-standalone-chat-btn" class="btn-primary">
+                                <span>+</span> 新建 Chat
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container task-table-container">
+                        <table class="data-table tasks-table">
+                            <colgroup>
+                                <col style="width: 70px;">
+                                <col>
+                                <col style="width: 100px;">
+                                <col style="width: 120px;">
+                                <col style="width: 70px;">
+                                <col style="width: 160px;">
+                                <col style="width: 100px;">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>ChatID</th>
+                                    <th>标题</th>
+                                    <th>状态</th>
+                                    <th>应用名称</th>
+                                    <th>应用ID</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="chats-table-body">
+                                <!-- 动态填充 -->
+                            </tbody>
+                        </table>
+                        <div id="chats-empty" class="empty-state">
+                            <span class="empty-icon">💬</span>
+                            <p>暂无独立Chat</p>
                         </div>
                     </div>
                 </div>

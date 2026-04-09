@@ -292,7 +292,10 @@ function switchToView(view) {
     document.getElementById(`${view}-view`)?.classList.add('active');
 
     // 视图切换时加载对应数据
-    if (view === 'okr') {
+    if (view === 'chats') {
+        loadStandaloneChats();
+        initStandaloneChatFilter();
+    } else if (view === 'okr') {
         loadObjectives();
         initOKREvents();
     } else if (view === 'secrets') {
@@ -2696,6 +2699,183 @@ function renderAdminOrdersTable(data) {
 
 function openTaskChat(taskId) {
     window.open(`chat.html?task_id=${taskId}`, '_blank');
+}
+
+function openStandaloneChat(chatId, clientId) {
+    window.open(`chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}`, '_blank');
+}
+
+// ===== 独立 Chat 列表 =====
+
+let standaloneChatStatusFilter = ['pending', 'running', 'completed'];
+let standaloneChatFilterInitialized = false;
+
+function initStandaloneChatFilter() {
+    const statusFilter = document.getElementById('chat-status-filter');
+    if (!statusFilter || statusFilter.dataset.initialized === 'true') return;
+
+    const checkboxes = statusFilter.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            const label = checkbox.parentElement;
+            if (checkbox.checked) {
+                label.classList.add('checked');
+            } else {
+                label.classList.remove('checked');
+            }
+            standaloneChatStatusFilter = Array.from(checkboxes)
+                .filter(cb => cb.checked)
+                .map(cb => cb.value);
+            loadStandaloneChats();
+        });
+    });
+    statusFilter.dataset.initialized = 'true';
+
+    // 新建 Chat 按钮
+    const addBtn = document.getElementById('add-standalone-chat-btn');
+    if (addBtn && addBtn.dataset.initialized !== 'true') {
+        addBtn.addEventListener('click', () => showStandaloneChatCreateModal());
+        addBtn.dataset.initialized = 'true';
+    }
+}
+
+async function loadStandaloneChats() {
+    try {
+        const res = await chatAPI.listStandaloneChats();
+        let chats = res.data || [];
+
+        // 前端状态筛选
+        if (standaloneChatStatusFilter.length > 0) {
+            chats = chats.filter(c => standaloneChatStatusFilter.includes(c.status));
+        }
+
+        renderStandaloneChats(chats);
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function renderStandaloneChats(chats) {
+    const tbody = document.getElementById('chats-table-body');
+    const emptyState = document.getElementById('chats-empty');
+
+    if (chats.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.classList.add('show');
+        return;
+    }
+
+    emptyState.classList.remove('show');
+
+    const statusLabels = {
+        pending: '等待执行',
+        running: '正在执行',
+        completed: '执行完成',
+        terminated: '被终止'
+    };
+
+    tbody.innerHTML = chats.map(chat => {
+        const safeTitle = escapeHtml(chat.title || '');
+        const statusText = statusLabels[chat.status] || chat.status;
+        const clientName = escapeHtml(chat.client_name || '-');
+        const clientId = chat.client_id || '-';
+
+        return `
+        <tr>
+            <td><span class="task-id">${chat.id}</span></td>
+            <td class="task-title-cell" title="${safeTitle}">
+                <span class="task-title-text">${safeTitle}</span>
+            </td>
+            <td>
+                <span class="status-badge status-${chat.status}">${statusText}</span>
+            </td>
+            <td>${clientName}</td>
+            <td>${clientId}</td>
+            <td class="time-display">${formatDateTime(chat.created_at)}</td>
+            <td class="task-actions-cell">
+                <div class="task-actions">
+                    <button class="btn-action btn-chat" onclick="openStandaloneChat(${chat.id}, ${chat.client_id || 0})">Chat</button>
+                    <button class="btn-action btn-delete" onclick="deleteStandaloneChat(${chat.id})">删除</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function deleteStandaloneChat(chatId) {
+    if (!confirm('确定要删除这个 Chat 吗？')) return;
+    try {
+        await chatAPI.deleteChat(0, chatId);
+        showToast('删除成功', 'success');
+        loadStandaloneChats();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function showStandaloneChatCreateModal() {
+    // 获取客户端列表
+    let clients = [];
+    try {
+        const result = await activeClientAPI.list();
+        clients = result.data || [];
+    } catch (error) {
+        showToast('获取应用列表失败', 'error');
+        return;
+    }
+
+    const clientOptions = clients.map(c =>
+        `<option value="${c.id}">${escapeHtml(c.name)} (ID: ${c.id})</option>`
+    ).join('');
+
+    const content = `
+        <div class="form-group" style="margin-bottom: 14px;">
+            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;">选择应用 <span style="color:var(--accent-danger)">*</span></label>
+            <select id="standalone-chat-client" style="width:100%;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:7px;color:var(--text-primary);font-size:14px;">
+                <option value="">-- 请选择应用 --</option>
+                ${clientOptions}
+            </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;">输入内容</label>
+            <textarea id="standalone-chat-input" rows="4" placeholder="输入消息内容，发送后自动创建 Chat..." style="width:100%;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:7px;color:var(--text-primary);font-size:14px;resize:vertical;min-height:80px;"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+            <button class="btn-secondary" onclick="closeModal()">取消</button>
+            <button class="btn-primary" onclick="submitStandaloneChat()">发送</button>
+        </div>
+    `;
+
+    openModal('新建 Chat', content);
+}
+
+async function submitStandaloneChat() {
+    const clientSelect = document.getElementById('standalone-chat-client');
+    const inputEl = document.getElementById('standalone-chat-input');
+
+    const clientId = clientSelect ? parseInt(clientSelect.value) : 0;
+    const inputText = inputEl ? inputEl.value.trim() : '';
+
+    if (!clientId) {
+        showToast('请选择一个应用', 'error');
+        return;
+    }
+    if (!inputText) {
+        showToast('请输入内容', 'error');
+        return;
+    }
+
+    try {
+        const res = await chatAPI.createStandaloneChatWithMessage(inputText, clientId);
+        closeModal();
+        showToast('Chat 创建成功', 'success');
+        loadStandaloneChats();
+        // 打开新创建的 chat
+        const chatId = res.data.chat.id;
+        openStandaloneChat(chatId, clientId);
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
 }
 
 // ===== 商店 =====
