@@ -114,7 +114,7 @@ class CodeDevelopWorker(BaseWorker):
             task_id = self.task.get("task_id")
             chat_id = self.task.get("chat_id")
             chat_messages = self.task.get("chat_messages")
-            if task_id and chat_id and chat_messages:
+            if task_id is not None and chat_id and chat_messages:
                 message_id = chat_messages[-1].get("id")
                 self.client_config.apiserver_rpc.agent_reply_chat_msg(
                     task_id=int(task_id),
