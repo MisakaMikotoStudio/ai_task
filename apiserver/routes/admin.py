@@ -26,10 +26,12 @@ from flask import Blueprint, request, jsonify, current_app
 
 from dao import get_db_session
 from dao import product_dao, order_dao
+from dao import permission_dao
 from dao.secret_dao import get_user_secrets, create_user_secret, delete_user_secret
 from dao.client_dao import get_clients_by_user, delete_client, check_client_name_exists
 from dao.heartbeat_dao import get_heartbeats_by_user
 
+from dao.models import PermissionConfig
 from service import oss_service, order_service
 from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_client, ClientSaveError
 
@@ -453,3 +455,147 @@ def admin_copy_client(client_id: int):
         'message': '客户端复制成功',
         'data': payload,
     }), 201
+
+
+# ========== 权限配置管理（admin 专用） ==========
+
+MAX_PERMISSION_KEY_LEN = 64
+MAX_PERMISSION_PRODUCT_KEY_LEN = 64
+
+
+@admin_bp.route('/permissions', methods=['GET'])
+@require_admin
+def list_permissions():
+    """获取所有权限配置，按 key 分组返回三层结构"""
+    configs = permission_dao.get_all_configs()
+    # 按 key 分组
+    grouped = {}
+    for c in configs:
+        if c.key not in grouped:
+            grouped[c.key] = {
+                'key': c.key,
+                'type': c.type,
+                'products': [],
+            }
+        grouped[c.key]['products'].append({
+            'id': c.id,
+            'product_key': c.product_key,
+            'config_detail': c.config_detail or {},
+            'created_at': c.to_dict()['created_at'],
+            'updated_at': c.to_dict()['updated_at'],
+        })
+    return jsonify({'code': 200, 'message': 'ok', 'data': list(grouped.values())})
+
+
+@admin_bp.route('/permission', methods=['POST'])
+@require_admin
+def create_permission():
+    """新增权限配置"""
+    data = request.get_json(silent=True) or {}
+
+    key = (data.get('key') or '').strip()
+    perm_type = (data.get('type') or '').strip()
+    product_key = (data.get('product_key') or '').strip()
+    config_detail = data.get('config_detail')
+
+    if not key or not perm_type or not product_key:
+        return jsonify({'code': 400, 'message': 'key、type、product_key 为必填项', 'data': None}), 400
+
+    if len(key) > MAX_PERMISSION_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', key):
+        return jsonify({'code': 400, 'message': 'key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if perm_type not in PermissionConfig.VALID_TYPES:
+        return jsonify({
+            'code': 400,
+            'message': f'type 仅支持: {", ".join(PermissionConfig.VALID_TYPES)}',
+            'data': None,
+        }), 400
+
+    if len(product_key) > MAX_PERMISSION_PRODUCT_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', product_key):
+        return jsonify({'code': 400, 'message': 'product_key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    # count_limit 类型必须有 limit 字段
+    if perm_type == PermissionConfig.TYPE_COUNT_LIMIT:
+        if not config_detail or not isinstance(config_detail, dict) or 'limit' not in config_detail:
+            return jsonify({'code': 400, 'message': 'count_limit 类型必须在 config_detail 中包含 limit 字段', 'data': None}), 400
+        limit_val = config_detail.get('limit')
+        if not isinstance(limit_val, int) or limit_val <= 0:
+            return jsonify({'code': 400, 'message': 'limit 必须为正整数', 'data': None}), 400
+
+    # 检查重复
+    if permission_dao.check_duplicate(key=key, product_key=product_key):
+        return jsonify({'code': 409, 'message': f'权限配置 key="{key}" + product_key="{product_key}" 已存在', 'data': None}), 409
+
+    with get_db_session():
+        config = permission_dao.create_config(
+            key=key,
+            type=perm_type,
+            product_key=product_key,
+            config_detail=config_detail,
+        )
+
+    return jsonify({'code': 200, 'message': 'ok', 'data': config.to_dict()})
+
+
+@admin_bp.route('/permission/<int:config_id>', methods=['PUT'])
+@require_admin
+def update_permission(config_id: int):
+    """更新权限配置"""
+    data = request.get_json(silent=True) or {}
+
+    key = (data.get('key') or '').strip()
+    perm_type = (data.get('type') or '').strip()
+    product_key = (data.get('product_key') or '').strip()
+    config_detail = data.get('config_detail')
+
+    if not key or not perm_type or not product_key:
+        return jsonify({'code': 400, 'message': 'key、type、product_key 为必填项', 'data': None}), 400
+
+    if len(key) > MAX_PERMISSION_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', key):
+        return jsonify({'code': 400, 'message': 'key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if perm_type not in PermissionConfig.VALID_TYPES:
+        return jsonify({
+            'code': 400,
+            'message': f'type 仅支持: {", ".join(PermissionConfig.VALID_TYPES)}',
+            'data': None,
+        }), 400
+
+    if len(product_key) > MAX_PERMISSION_PRODUCT_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', product_key):
+        return jsonify({'code': 400, 'message': 'product_key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if perm_type == PermissionConfig.TYPE_COUNT_LIMIT:
+        if not config_detail or not isinstance(config_detail, dict) or 'limit' not in config_detail:
+            return jsonify({'code': 400, 'message': 'count_limit 类型必须在 config_detail 中包含 limit 字段', 'data': None}), 400
+        limit_val = config_detail.get('limit')
+        if not isinstance(limit_val, int) or limit_val <= 0:
+            return jsonify({'code': 400, 'message': 'limit 必须为正整数', 'data': None}), 400
+
+    # 检查重复（排除自身）
+    if permission_dao.check_duplicate(key=key, product_key=product_key, exclude_id=config_id):
+        return jsonify({'code': 409, 'message': f'权限配置 key="{key}" + product_key="{product_key}" 已存在', 'data': None}), 409
+
+    with get_db_session():
+        config = permission_dao.update_config(
+            config_id=config_id,
+            key=key,
+            type=perm_type,
+            product_key=product_key,
+            config_detail=config_detail,
+        )
+
+    if not config:
+        return jsonify({'code': 404, 'message': '权限配置不存在', 'data': None}), 404
+
+    return jsonify({'code': 200, 'message': 'ok', 'data': config.to_dict()})
+
+
+@admin_bp.route('/permission/<int:config_id>', methods=['DELETE'])
+@require_admin
+def delete_permission(config_id: int):
+    """删除权限配置（软删除）"""
+    with get_db_session():
+        ok = permission_dao.soft_delete_config(config_id=config_id)
+    if not ok:
+        return jsonify({'code': 404, 'message': '权限配置不存在', 'data': None}), 404
+    return jsonify({'code': 200, 'message': 'ok', 'data': None})
