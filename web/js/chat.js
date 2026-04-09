@@ -186,7 +186,8 @@ async function loadChats() {
         } else {
             res = await chatAPI.listChats(taskId);
         }
-        chatsCache = res.data || [];
+        const raw = res.data || [];
+        chatsCache = Array.isArray(raw) ? raw : (raw.items || []);
         renderChatList();
 
         if (chatsCache.length === 0) {
