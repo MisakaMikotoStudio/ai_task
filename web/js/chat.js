@@ -39,6 +39,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isEmbed = params.get('embed') === '1';
     if (isEmbed) {
         document.querySelector('.chat-page')?.classList.add('embed-mode');
+        // 有 chat_id 时直接显示 active-view，避免 welcome 页面闪烁
+        if (params.get('chat_id')) {
+            document.getElementById('welcome-view').style.display = 'none';
+            document.getElementById('active-view').style.display = 'flex';
+        }
     }
 
     if (isStandaloneMode) {
