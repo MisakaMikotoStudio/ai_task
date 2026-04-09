@@ -1260,52 +1260,27 @@
                             <button class="btn-back" id="client-config-back-btn">← 返回</button>
                             <h2 id="client-config-title">应用配置</h2>
                         </div>
-                    </div>
-
-                    <!-- 步骤流程节点图 -->
-                    <div class="wizard-flow-bar" id="wizard-flow-bar">
-                        <div class="wizard-step-node" data-step="0">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">基本信息</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="1">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">环境变量</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="2">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">代码仓库</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="3">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">云服务器</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="4">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">域名</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="5">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">数据库</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="6">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">支付</div>
-                        </div>
-                        <div class="wizard-step-connector"></div>
-                        <div class="wizard-step-node" data-step="7">
-                            <div class="wizard-step-dot"></div>
-                            <div class="wizard-step-label">对象存储</div>
+                        <div class="view-header-right wizard-header-actions" id="wizard-header-actions">
+                            <button type="button" class="btn-secondary" id="wizard-cancel-btn">取消</button>
+                            <button type="button" class="btn-primary" id="wizard-save-btn">保存</button>
                         </div>
                     </div>
 
-                    <!-- 向导步骤内容 -->
+                    <!-- 左右布局：左侧tab导航 + 右侧内容 -->
+                    <div class="wizard-layout">
+                        <!-- 左侧纵向tab栏 -->
+                        <div class="wizard-sidebar" id="wizard-sidebar">
+                            <div class="wizard-sidebar-tab active" data-step="0">基本信息</div>
+                            <div class="wizard-sidebar-tab" data-step="1">环境变量</div>
+                            <div class="wizard-sidebar-tab" data-step="2">代码仓库</div>
+                            <div class="wizard-sidebar-tab" data-step="3">云服务器</div>
+                            <div class="wizard-sidebar-tab" data-step="4">域名</div>
+                            <div class="wizard-sidebar-tab" data-step="5">数据库</div>
+                            <div class="wizard-sidebar-tab" data-step="6">支付</div>
+                            <div class="wizard-sidebar-tab" data-step="7">对象存储</div>
+                        </div>
+
+                    <!-- 右侧步骤内容 -->
                     <div class="wizard-body">
                         <!-- Step 0: 基本信息 -->
                         <div id="wizard-step-0" class="wizard-step-panel active">
@@ -1544,18 +1519,7 @@
                             </div>
                         </div>
                     </div>
-
-                    <!-- 向导底部操作栏 -->
-                    <div class="wizard-footer" id="wizard-footer">
-                        <div class="wizard-footer-left">
-                            <button type="button" class="btn-secondary" id="wizard-prev-btn">← 上一步</button>
-                        </div>
-                        <div class="wizard-footer-right">
-                            <button type="button" class="btn-secondary" id="wizard-skip-btn">跳过</button>
-                            <button type="button" class="btn-primary" id="wizard-next-btn">下一步 →</button>
-                            <button type="button" class="btn-success" id="wizard-finish-btn" style="display:none;">完成</button>
-                        </div>
-                    </div>
+                    </div><!-- /.wizard-layout -->
                 </div>
 
                 <!-- 秘钥视图 -->
@@ -1773,7 +1737,7 @@
     <script src="js/api.js?v=11"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=25"></script>
+    <script src="js/app.js?v=26"></script>
 </body>
 </html>
 
