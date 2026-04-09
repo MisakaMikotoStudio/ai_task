@@ -313,6 +313,29 @@ const adminCommerceAPI = {
     }
 };
 
+const adminPermissionAPI = {
+    async list() {
+        return request('/admin/permissions');
+    },
+    async create(data) {
+        return request('/admin/permission', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    async update(id, data) {
+        return request(`/admin/permission/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    async remove(id) {
+        return request(`/admin/permission/${id}`, {
+            method: 'DELETE'
+        });
+    }
+};
+
 // 任务API
 const taskAPI = {
     // 获取列表
