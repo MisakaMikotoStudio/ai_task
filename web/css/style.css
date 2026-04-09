@@ -4404,7 +4404,7 @@ textarea:focus {
 }
 
 #products-view .commerce-product-card-media {
-    height: 120px;
+    aspect-ratio: 3 / 2;
     background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-card));
     display: flex;
     align-items: center;
@@ -4736,7 +4736,7 @@ textarea:focus {
 .commerce-icon-preview img {
     width: 100%;
     max-width: 250px;
-    aspect-ratio: 5 / 2;
+    aspect-ratio: 3 / 2;
     border-radius: 8px;
     border: 1px solid var(--border-color);
     object-fit: cover;
@@ -4831,7 +4831,7 @@ textarea:focus {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 120px;
+    aspect-ratio: 3 / 2;
     background: var(--bg-tertiary);
     overflow: hidden;
 }
@@ -5172,7 +5172,7 @@ textarea:focus {
     position: relative;
     width: 100%;
     max-width: 500px;
-    aspect-ratio: 5 / 2;
+    aspect-ratio: 3 / 2;
     overflow: hidden;
     border-radius: 8px;
     border: 1px solid var(--border-color);
@@ -5228,4 +5228,9 @@ textarea:focus {
     gap: 10px;
     padding: 14px 20px;
     border-top: 1px solid var(--border-color);
+}
+
+.image-crop-footer .btn-primary,
+.image-crop-footer .btn-secondary {
+    width: auto;
 }

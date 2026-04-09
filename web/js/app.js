@@ -2188,7 +2188,7 @@ function renderAdminProductCard(p) {
 }
 
 /* ===== 图片裁剪工具 ===== */
-const CROP_ASPECT = 5 / 2;
+const CROP_ASPECT = 3 / 2;
 const CROP_OUTPUT_WIDTH = 600;
 const CROP_OUTPUT_HEIGHT = Math.round(CROP_OUTPUT_WIDTH / CROP_ASPECT);
 const CROP_JPEG_QUALITY = 0.85;
