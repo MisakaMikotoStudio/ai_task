@@ -6,7 +6,6 @@
 
 import logging
 import os
-import subprocess
 import traceback
 import threading
 from typing import Optional, List
@@ -188,7 +187,7 @@ class CodeDevelopWorker(BaseWorker):
             work_repo_dir = os.path.join(self.work_dir, git_repo.name)
             task_branch = self._get_task_branch_name(git_repo)
             # 使用实际当前分支，而非固定计算的分支名（agent 执行后可能已切换分支）
-            actual_branch = self._get_current_branch(work_repo_dir) or task_branch
+            actual_branch = git_utils.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or task_branch
             diff_result = git_utils.collect_remote_branch_diff_info(
                 repo_dir=work_repo_dir,
                 dev_branch=task_branch,
@@ -233,7 +232,7 @@ class CodeDevelopWorker(BaseWorker):
             task_branch = self._get_task_branch_name(git_repo)
             chat_branch = self._get_chat_branch_name(git_repo)
             # 使用实际当前分支
-            actual_branch = self._get_current_branch(work_repo_dir) or chat_branch
+            actual_branch = git_utils.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or chat_branch
             diff_result = git_utils.collect_remote_branch_diff_info(
                 repo_dir=work_repo_dir,
                 dev_branch=chat_branch,
@@ -357,8 +356,7 @@ class CodeDevelopWorker(BaseWorker):
         rebase_in_progress = os.path.exists(os.path.join(work_repo_dir, '.git', 'rebase-merge')) or \
                              os.path.exists(os.path.join(work_repo_dir, '.git', 'rebase-apply'))
         if rebase_in_progress:
-            import subprocess
-            subprocess.run(['git', 'rebase', '--abort'], cwd=work_repo_dir, timeout=30, capture_output=True)
+            git_utils.abort_rebase(repo_dir=work_repo_dir, trace_id=self.trace_id)
             raise Exception(f"Agent 未能完成 rebase 冲突解决，已自动 abort")
 
     def _build_development_prompt(self) -> str:
@@ -571,16 +569,3 @@ class CodeDevelopWorker(BaseWorker):
     def _get_chat_branch_name(self, git_repo: GitRepoConfig) -> str:
         return self._get_task_branch_name(git_repo) + "_" + str(self.task['chat_id'])
 
-    @staticmethod
-    def _get_current_branch(repo_dir: str) -> Optional[str]:
-        """获取仓库当前所在分支名称"""
-        try:
-            result = subprocess.run(
-                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                cwd=repo_dir, capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception:
-            pass
-        return None

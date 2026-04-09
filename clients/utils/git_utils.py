@@ -693,6 +693,40 @@ def get_local_head_commit_id(
     return GitResult(success=True, commit_id=result.message.strip())
 
 
+def get_current_branch(
+    repo_dir: str,
+    timeout_cmd: int = 30,
+    trace_id: Optional[str] = None,
+) -> Optional[str]:
+    """获取仓库当前所在分支名称，失败返回 None。"""
+    err = _validate_repo_dir(repo_dir)
+    if err:
+        return None
+    result = _run_git_command(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_dir,
+        timeout=timeout_cmd,
+        trace_id=trace_id,
+    )
+    if result.success and result.message:
+        return result.message.strip()
+    return None
+
+
+def abort_rebase(
+    repo_dir: str,
+    timeout_cmd: int = 30,
+    trace_id: Optional[str] = None,
+) -> GitResult:
+    """中止正在进行的 rebase 操作。"""
+    return _run_git_command(
+        ["git", "rebase", "--abort"],
+        cwd=repo_dir,
+        timeout=timeout_cmd,
+        trace_id=trace_id,
+    )
+
+
 def create_github_pr_if_not_exists(
     repo_url: str,
     token: Optional[str],
