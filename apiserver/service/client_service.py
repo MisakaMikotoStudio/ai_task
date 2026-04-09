@@ -16,6 +16,7 @@ from dao.client_dao import (
     apply_client_repo_sync,
     check_client_name_exists,
     check_client_name_exists_exclude,
+    count_cloud_deploy_clients,
     create_client,
     get_client_by_id,
     get_client_env_vars,
@@ -26,6 +27,7 @@ from dao.client_dao import (
 )
 from dao.heartbeat_dao import get_heartbeat, get_heartbeats_by_user, add_heartbeat, update_heartbeat
 from dao.models import ClientEnvVar, ClientRepo
+from service import permission_service
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +276,20 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
     name = data['name']
     agent = data['agent']
     official_cloud_deploy = data['official_cloud_deploy']
+
+    # 云部署应用数量限制校验
+    if official_cloud_deploy == 1:
+        current_count = count_cloud_deploy_clients(
+            user_id=user_id,
+            exclude_client_id=client_id,
+        )
+        result = permission_service.check(
+            user_id=user_id,
+            key='official_cloud_client_count',
+            params=current_count,
+        )
+        if not result.passed:
+            raise ClientSaveError(result.message)
 
     if client_id is None:
         if check_client_name_exists(user_id, name):
