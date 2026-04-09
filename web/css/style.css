@@ -4175,6 +4175,21 @@ textarea:focus {
     background: rgba(248, 81, 73, 0.25);
 }
 
+#products-view .commerce-online-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+#products-view .commerce-online-btn:hover {
+    background: rgba(63, 185, 80, 0.25);
+}
+
 #orders-view .commerce-refund-btn {
     padding: 5px 12px;
     font-size: 12px;
@@ -4507,7 +4522,8 @@ textarea:focus {
     font-size: 12px;
 }
 
-#products-view .commerce-product-card .commerce-offline-btn {
+#products-view .commerce-product-card .commerce-offline-btn,
+#products-view .commerce-product-card .commerce-online-btn {
     width: 100%;
     justify-content: center;
     padding: 8px 14px;
