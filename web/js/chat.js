@@ -440,13 +440,16 @@ function updateComposerState() {
     const hintEl = document.getElementById('composer-hint');
     const hintText = document.getElementById('composer-hint-text');
 
-    const mergeWrap = document.getElementById('merge-dropdown-wrap');
+    const mergeTaskBtn = document.getElementById('merge-to-task-btn');
+    const mergeDefaultBtn = document.getElementById('merge-to-default-btn');
+    const showMerge = !!clientConfigCache;
 
     if (runningMessageId) {
         box.classList.add('locked');
         input.disabled = true;
         sendBtn.style.display = 'none';
-        if (mergeWrap) mergeWrap.style.display = 'none';
+        if (mergeTaskBtn) mergeTaskBtn.style.display = 'none';
+        if (mergeDefaultBtn) mergeDefaultBtn.style.display = 'none';
         stopBtn.style.display = 'flex';
         hintEl.className = 'composer-hint warn';
         hintText.textContent = '当前有 Chat 消息正在执行，无法输入新消息';
@@ -455,7 +458,8 @@ function updateComposerState() {
         box.classList.remove('locked');
         input.disabled = false;
         sendBtn.style.display = 'flex';
-        if (mergeWrap) mergeWrap.style.display = clientConfigCache ? 'block' : 'none';
+        if (mergeTaskBtn) mergeTaskBtn.style.display = showMerge ? 'flex' : 'none';
+        if (mergeDefaultBtn) mergeDefaultBtn.style.display = showMerge ? 'flex' : 'none';
         stopBtn.style.display = 'none';
         hintEl.className = 'composer-hint';
         hintText.textContent = '尽管问，带图也行';
@@ -605,20 +609,7 @@ function handleWelcomeInputKeydown(e) {
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendNewChatMessage(); }
 }
 
-// ===== Merge dropdown =====
-function toggleMergeDropdown(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('merge-dropdown-menu');
-    menu.classList.toggle('show');
-}
-
-function closeMergeDropdown() {
-    const menu = document.getElementById('merge-dropdown-menu');
-    if (menu) menu.classList.remove('show');
-}
-
-document.addEventListener('click', () => { closeMergeDropdown(); });
-
+// ===== Merge actions =====
 function _getRepoName(url) {
     if (!url) return '';
     const m = url.match(/[/:]([\w.-]+?)(?:\.git)?$/);
@@ -721,13 +712,12 @@ ${repoTable}
 }
 
 async function mergeToTask() {
-    closeMergeDropdown();
     if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
 
     const prompt = _buildMergeToTaskPrompt();
     if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
 
-    const btn = document.getElementById('merge-trigger-btn');
+    const btn = document.getElementById('merge-to-task-btn');
     btn.disabled = true;
     try {
         await chatAPI.createMessage(taskId, currentChatId, prompt);
@@ -741,13 +731,12 @@ async function mergeToTask() {
 }
 
 async function mergeToDefaultBranch() {
-    closeMergeDropdown();
     if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
 
     const prompt = _buildMergeToDefaultBranchPrompt();
     if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
 
-    const btn = document.getElementById('merge-trigger-btn');
+    const btn = document.getElementById('merge-to-default-btn');
     btn.disabled = true;
     try {
         await chatAPI.createMessage(taskId, currentChatId, prompt);
