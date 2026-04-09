@@ -13,7 +13,7 @@ const currentUsername = document.getElementById('current-username');
 
 // 管理后台与主应用共用 index.html：pathname 以 /admin 结尾时为管理后台（与后端 Flask 路由 /admin 一致）
 const ADMIN_PAGE = /\/admin\/?$/.test(window.location.pathname);
-const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders']);
+const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders', 'permissions']);
 
 function getUrlBasePrefix() {
     // 把 /admin 或 /index.html 去掉，得到类似 "/v1" 的前缀（若无则返回 ""）
@@ -121,10 +121,11 @@ function showMainPage() {
 
     // 管理后台：仅 应用 / 秘钥 / 商品管理 / 订单管理（由 initNavigation 隐藏其余 nav）
     if (ADMIN_PAGE) {
-        document.querySelectorAll('.nav-item[data-view=”products”], .nav-item[data-view=”orders”]').forEach((el) => {
+        document.querySelectorAll('.nav-item[data-view=”products”], .nav-item[data-view=”orders”], .nav-item[data-view=”permissions”]').forEach((el) => {
             el.style.display = '';
         });
         initAdminCommerce();
+        initAdminPermissions();
         initSecrets();
         initClientSearch();
         loadClients();
@@ -303,6 +304,8 @@ function switchToView(view) {
         loadAdminOrders(1);
     } else if (view === 'store') {
         loadStoreProducts();
+    } else if (view === 'permissions') {
+        loadAdminPermissions();
     } else if (view === 'profile') {
         loadProfileUserInfo();
         loadMyServices();
@@ -3080,6 +3083,232 @@ function renderAdminOrdersTable(data) {
 
 function openTaskChat(taskId) {
     window.open(`chat.html?task_id=${taskId}`, '_blank');
+}
+
+// ===== 权限配置管理（admin） =====
+
+let _permEditId = null; // null=新增, number=编辑
+
+function initAdminPermissions() {
+    const openBtn = document.getElementById('open-create-permission-btn');
+    if (openBtn && openBtn.dataset.bound !== 'true') {
+        openBtn.addEventListener('click', () => showPermissionModal(null));
+        openBtn.dataset.bound = 'true';
+    }
+
+    const closeBtn = document.getElementById('close-permission-modal');
+    if (closeBtn && closeBtn.dataset.bound !== 'true') {
+        closeBtn.addEventListener('click', hidePermissionModal);
+        closeBtn.dataset.bound = 'true';
+    }
+
+    const cancelBtn = document.getElementById('cancel-permission-btn');
+    if (cancelBtn && cancelBtn.dataset.bound !== 'true') {
+        cancelBtn.addEventListener('click', hidePermissionModal);
+        cancelBtn.dataset.bound = 'true';
+    }
+
+    const typeSelect = document.getElementById('perm-type');
+    if (typeSelect && typeSelect.dataset.bound !== 'true') {
+        typeSelect.addEventListener('change', () => {
+            const limitGroup = document.getElementById('perm-limit-group');
+            limitGroup.style.display = typeSelect.value === 'count_limit' ? '' : 'none';
+        });
+        typeSelect.dataset.bound = 'true';
+    }
+
+    const form = document.getElementById('permission-form');
+    if (form && form.dataset.bound !== 'true') {
+        form.addEventListener('submit', handlePermissionSubmit);
+        form.dataset.bound = 'true';
+    }
+}
+
+function showPermissionModal(editItem) {
+    _permEditId = editItem ? editItem.id : null;
+    const modal = document.getElementById('permission-modal');
+    const title = document.getElementById('permission-modal-title');
+    const keyInput = document.getElementById('perm-key');
+    const typeSelect = document.getElementById('perm-type');
+    const productKeyInput = document.getElementById('perm-product-key');
+    const limitInput = document.getElementById('perm-limit');
+    const limitGroup = document.getElementById('perm-limit-group');
+
+    title.textContent = editItem ? '编辑权限配置' : '新增权限配置';
+
+    if (editItem) {
+        keyInput.value = editItem.key || '';
+        typeSelect.value = editItem.type || 'subscribed';
+        productKeyInput.value = editItem.product_key || '';
+        const detail = editItem.config_detail || {};
+        limitInput.value = detail.limit != null ? detail.limit : '';
+    } else {
+        keyInput.value = '';
+        typeSelect.value = 'subscribed';
+        productKeyInput.value = '';
+        limitInput.value = '';
+    }
+
+    limitGroup.style.display = typeSelect.value === 'count_limit' ? '' : 'none';
+    modal.style.display = '';
+}
+
+function hidePermissionModal() {
+    document.getElementById('permission-modal').style.display = 'none';
+    _permEditId = null;
+}
+
+async function handlePermissionSubmit(e) {
+    e.preventDefault();
+    const key = document.getElementById('perm-key').value.trim();
+    const type = document.getElementById('perm-type').value;
+    const productKey = document.getElementById('perm-product-key').value.trim();
+    const limitVal = document.getElementById('perm-limit').value.trim();
+
+    if (!key || !type || !productKey) {
+        alert('请填写所有必填项');
+        return;
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(key)) {
+        alert('权限 Key 仅允许字母、数字、下划线、短横线');
+        return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(productKey)) {
+        alert('产品 Key 仅允许字母、数字、下划线、短横线');
+        return;
+    }
+
+    const payload = { key, type, product_key: productKey };
+
+    if (type === 'count_limit') {
+        const limit = parseInt(limitVal, 10);
+        if (!limit || limit <= 0) {
+            alert('count_limit 类型必须填写正整数的数量上限');
+            return;
+        }
+        payload.config_detail = { limit };
+    } else {
+        payload.config_detail = {};
+    }
+
+    const saveBtn = document.getElementById('save-permission-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+
+    try {
+        let res;
+        if (_permEditId) {
+            res = await adminPermissionAPI.update(_permEditId, payload);
+        } else {
+            res = await adminPermissionAPI.create(payload);
+        }
+        if (res.code === 200 || res.code === 201) {
+            hidePermissionModal();
+            loadAdminPermissions();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (err) {
+        alert(err.message || '请求失败');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+    }
+}
+
+async function loadAdminPermissions() {
+    const container = document.getElementById('permissions-list');
+    if (!container) return;
+    container.innerHTML = '<p class="perm-loading">加载中…</p>';
+
+    try {
+        const res = await adminPermissionAPI.list();
+        if (res.code !== 200) {
+            container.innerHTML = `<p class="perm-empty">加载失败: ${res.message || '未知错误'}</p>`;
+            return;
+        }
+        const groups = res.data || [];
+        if (groups.length === 0) {
+            container.innerHTML = '<p class="perm-empty">暂无权限配置，点击右上角「新增配置」添加</p>';
+            return;
+        }
+        container.innerHTML = groups.map(renderPermissionGroup).join('');
+
+        // 绑定操作按钮
+        container.querySelectorAll('.perm-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = JSON.parse(btn.dataset.item);
+                showPermissionModal(item);
+            });
+        });
+        container.querySelectorAll('.perm-delete-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = parseInt(btn.dataset.id, 10);
+                if (!confirm('确定删除该权限配置？')) return;
+                try {
+                    const res = await adminPermissionAPI.remove(id);
+                    if (res.code === 200) {
+                        loadAdminPermissions();
+                    } else {
+                        alert(res.message || '删除失败');
+                    }
+                } catch (err) {
+                    alert(err.message || '删除失败');
+                }
+            });
+        });
+    } catch (err) {
+        container.innerHTML = `<p class="perm-empty">加载失败: ${err.message || '网络错误'}</p>`;
+    }
+}
+
+function renderPermissionGroup(group) {
+    const typeLabel = group.type === 'count_limit' ? '总量限制' : '订阅限制';
+    const typeBadge = group.type === 'count_limit'
+        ? '<span class="perm-type-badge perm-type-count">count_limit</span>'
+        : '<span class="perm-type-badge perm-type-sub">subscribed</span>';
+
+    const productRows = (group.products || []).map(p => {
+        const detail = p.config_detail || {};
+        const limitText = detail.limit != null ? `上限: ${detail.limit}` : '-';
+        const itemData = JSON.stringify({
+            id: p.id,
+            key: group.key,
+            type: group.type,
+            product_key: p.product_key,
+            config_detail: detail,
+        }).replace(/"/g, '&quot;');
+
+        return `<tr>
+            <td>${escapeHTML(p.product_key)}</td>
+            <td>${group.type === 'count_limit' ? limitText : '<span class="perm-text-muted">不适用</span>'}</td>
+            <td class="perm-actions-cell">
+                <button type="button" class="perm-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
+                <button type="button" class="perm-delete-btn perm-action-btn perm-action-danger" data-id="${p.id}" title="删除">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="perm-group-card">
+        <div class="perm-group-header">
+            <div class="perm-group-title">
+                <span class="perm-key-label">${escapeHTML(group.key)}</span>
+                ${typeBadge}
+            </div>
+            <span class="perm-type-desc">${typeLabel}</span>
+        </div>
+        <table class="perm-table">
+            <thead><tr><th>产品 Key</th><th>配置详情</th><th>操作</th></tr></thead>
+            <tbody>${productRows || '<tr><td colspan="3" class="perm-text-muted">暂无产品配置</td></tr>'}</tbody>
+        </table>
+    </div>`;
+}
+
+function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
 }
 
 // ===== 商店 =====
