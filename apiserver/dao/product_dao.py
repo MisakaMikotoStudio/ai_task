@@ -75,3 +75,12 @@ def soft_delete_product(product_id: int) -> bool:
             .filter(Product.id == product_id, Product.deleted_at.is_(None))
             .update({'deleted_at': now}))
     return rows > 0
+
+
+def restore_product(product_id: int) -> bool:
+    """恢复上架：仅处理当前已下架的商品"""
+    session = get_session()
+    rows = (session.query(Product)
+            .filter(Product.id == product_id, Product.deleted_at.isnot(None))
+            .update({'deleted_at': None}))
+    return rows > 0

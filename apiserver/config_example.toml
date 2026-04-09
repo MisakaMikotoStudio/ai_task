@@ -55,3 +55,10 @@ region = "ap-guangzhou"
 bucket = "your-bucket-1234567890"
 # 公开访问域名前缀
 base_url = "https://your-bucket-1234567890.cos.ap-guangzhou.myqcloud.com"
+# ⚠️  Bucket 配置要求：
+#   商品图片上传后会通过 PutObjectACL 设置为"公有读"权限。
+#   请确保腾讯云 COS 控制台中该 Bucket 满足以下条件：
+#   1. 【权限管理 → 公有读写 / Block Public Access】中，「阻止公有ACL（BlockPublicAcls）」
+#      选项必须处于关闭状态，否则 PutObjectACL 调用会返回 400 AccessDenied，导致上传失败。
+#   2. Bucket 本身的访问权限建议保持「私有读写」；单个对象（product/icon/）的 ACL 会
+#      被代码显式设置为「公有读」，在控制台表现为「公有读私有写」而非「继承权限」。

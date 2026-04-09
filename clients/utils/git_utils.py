@@ -673,6 +673,26 @@ def collect_remote_branch_diff_info(
         return GitResult(success=False, message=f"操作异常: {str(e)}")
 
 
+def get_local_head_commit_id(
+    repo_dir: str,
+    timeout_cmd: int = 30,
+    trace_id: Optional[str] = None,
+) -> GitResult:
+    """获取本地仓库当前 HEAD 的 commit ID。"""
+    err = _validate_repo_dir(repo_dir)
+    if err:
+        return err
+    result = _run_git_command(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_dir,
+        timeout=timeout_cmd,
+        trace_id=trace_id,
+    )
+    if not result.success:
+        return GitResult(success=False, message=f"获取 HEAD commit ID 失败: {result.message}")
+    return GitResult(success=True, commit_id=result.message.strip())
+
+
 def create_github_pr_if_not_exists(
     repo_url: str,
     token: Optional[str],

@@ -4,8 +4,10 @@
 订单 DAO - 纯数据库操作
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
+
+from sqlalchemy import or_
 
 from .connection import get_session
 from .models import Order
@@ -61,6 +63,20 @@ def mark_order_refunded(out_trade_no: str) -> bool:
                     Order.status == Order.STATUS_PAID)
             .update({'status': Order.STATUS_REFUNDED}))
     return rows > 0
+
+
+def get_user_active_orders(user_id: int) -> List[Order]:
+    """获取用户当前有效的服务订单（已支付且未过期或永久有效），按商品 key 排序后取每个商品到期最晚的订单"""
+    session = get_session()
+    now = datetime.now(timezone.utc)
+    return (session.query(Order)
+            .filter(
+                Order.user_id == user_id,
+                Order.status == Order.STATUS_PAID,
+                or_(Order.expire_at.is_(None), Order.expire_at > now)
+            )
+            .order_by(Order.product_key, Order.expire_at.desc())
+            .all())
 
 
 def list_orders(page: int = 1, page_size: int = 20,

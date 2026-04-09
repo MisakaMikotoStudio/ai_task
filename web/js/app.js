@@ -121,11 +121,9 @@ function showMainPage() {
 
     // 管理后台：仅 应用 / 秘钥 / 商品管理 / 订单管理（由 initNavigation 隐藏其余 nav）
     if (ADMIN_PAGE) {
-        document.querySelectorAll('.nav-item[data-view="products"], .nav-item[data-view="orders"]').forEach((el) => {
+        document.querySelectorAll('.nav-item[data-view=”products”], .nav-item[data-view=”orders”]').forEach((el) => {
             el.style.display = '';
         });
-        const rechargeLink = document.querySelector('.sidebar-footer a[href="shop.html"]');
-        if (rechargeLink) rechargeLink.style.display = 'none';
         initAdminCommerce();
         initSecrets();
         initClientSearch();
@@ -133,6 +131,11 @@ function showMainPage() {
         loadSecrets();
         return;
     }
+
+    // 普通用户：显示商店和我的导航项
+    document.querySelectorAll('.user-only-nav').forEach((el) => {
+        el.style.display = '';
+    });
 
     // 初始化任务筛选控件
     initTaskFilter();
@@ -146,6 +149,11 @@ function showMainPage() {
     // 初始化客户端搜索
     initClientSearch();
 
+    // 初始化商店和个人中心
+    initStore();
+    initProfile();
+    initUserPanel();
+
     // 加载数据
     loadClients();
     loadTasks();
@@ -158,27 +166,27 @@ async function loadUserInfo() {
     if (user) {
         currentUsername.textContent = user.name;
     }
-    const idWrap = document.getElementById('current-user-id-wrap');
-    const idEl = document.getElementById('current-user-id');
-    if (!idWrap || !idEl) return;
     try {
         const resp = await userAPI.me();
         const u = resp && resp.data;
-        if (u && u.user_id != null) {
-            idEl.textContent = String(u.user_id);
-            idWrap.removeAttribute('hidden');
-            if (u.name) setCurrentUser({ user_id: u.user_id, name: u.name });
-        } else {
-            idWrap.setAttribute('hidden', '');
+        if (u) {
+            if (u.name) {
+                currentUsername.textContent = u.name;
+                setCurrentUser({ user_id: u.user_id, name: u.name });
+            }
         }
     } catch {
-        if (user && user.user_id != null) {
-            idEl.textContent = String(user.user_id);
-            idWrap.removeAttribute('hidden');
-        } else {
-            idWrap.setAttribute('hidden', '');
-        }
+        // 使用 localStorage 缓存值即可，无需额外处理
     }
+}
+
+function initUserPanel() {
+    const panel = document.getElementById('sidebar-user-panel');
+    if (!panel || ADMIN_PAGE) return;
+    panel.addEventListener('click', () => {
+        switchToView('profile');
+        window.location.hash = '/profile';
+    });
 }
 
 function logout() {
@@ -220,9 +228,7 @@ function initNavigation() {
     if (ADMIN_PAGE) {
         navItems.forEach((item) => {
             const view = item.dataset.view;
-            if (!ADMIN_ALLOWED_VIEWS.has(view)) {
-                item.style.display = 'none';
-            }
+            item.style.display = ADMIN_ALLOWED_VIEWS.has(view) ? '' : 'none';
         });
     }
     
@@ -295,6 +301,12 @@ function switchToView(view) {
         loadAdminProducts();
     } else if (view === 'orders') {
         loadAdminOrders(1);
+    } else if (view === 'store') {
+        loadStoreProducts();
+    } else if (view === 'profile') {
+        loadProfileUserInfo();
+        loadMyServices();
+        loadMyOrders(1);
     }
 }
 
@@ -2142,7 +2154,7 @@ function renderAdminProductCard(p) {
         ? '<span class="commerce-badge commerce-product-offline">已下架</span>'
         : '<span class="commerce-badge commerce-product-online">上架中</span>';
     const actionHtml = offline
-        ? '<span class="commerce-muted">—</span>'
+        ? `<button type="button" class="commerce-online-btn btn-online-product" data-id="${p.id}">上架</button>`
         : `<button type="button" class="commerce-offline-btn btn-offline-product" data-id="${p.id}">下架</button>`;
     const validity = p.expire_time ? `${Math.round(p.expire_time / 86400)} 天` : '永久';
     const renew = p.support_continue ? '支持续费' : '不支持续费';
@@ -2173,25 +2185,245 @@ function renderAdminProductCard(p) {
 </article>`;
 }
 
+/* ===== 图片裁剪工具 ===== */
+const CROP_ASPECT = 3 / 2;
+const CROP_OUTPUT_WIDTH = 600;
+const CROP_OUTPUT_HEIGHT = Math.round(CROP_OUTPUT_WIDTH / CROP_ASPECT);
+const CROP_JPEG_QUALITY = 0.85;
+
+function openImageCropDialog(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('读取文件失败'));
+        reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('无法加载图片'));
+            img.onload = () => _showCropUI(img, resolve, reject);
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function _showCropUI(sourceImg, resolve, reject) {
+    const overlay = document.createElement('div');
+    overlay.className = 'image-crop-overlay';
+    overlay.innerHTML = `
+        <div class="image-crop-dialog">
+            <div class="image-crop-header">
+                <h4>裁剪封面图</h4>
+                <button type="button" class="image-crop-close">&times;</button>
+            </div>
+            <div class="image-crop-body">
+                <p class="image-crop-hint">拖拽图片调整位置，滑块控制缩放</p>
+                <div class="image-crop-canvas-wrap" id="crop-viewport">
+                    <img id="crop-source-img" alt="">
+                </div>
+                <div class="image-crop-zoom-row">
+                    <span class="image-crop-zoom-label">缩放</span>
+                    <input type="range" class="image-crop-zoom-slider" id="crop-zoom-slider"
+                           min="100" max="300" value="100" step="1">
+                </div>
+            </div>
+            <div class="image-crop-footer">
+                <button type="button" class="btn-secondary" id="crop-cancel-btn">取消</button>
+                <button type="button" class="btn-primary" id="crop-confirm-btn">确认裁剪</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const viewport = overlay.querySelector('#crop-viewport');
+    const imgEl = overlay.querySelector('#crop-source-img');
+    const zoomSlider = overlay.querySelector('#crop-zoom-slider');
+    const cancelBtn = overlay.querySelector('#crop-cancel-btn');
+    const closeBtn = overlay.querySelector('.image-crop-close');
+    const confirmBtn = overlay.querySelector('#crop-confirm-btn');
+
+    imgEl.src = sourceImg.src;
+
+    let scale = 1;
+    let imgX = 0;
+    let imgY = 0;
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartImgX = 0;
+    let dragStartImgY = 0;
+
+    function getViewportRect() {
+        return viewport.getBoundingClientRect();
+    }
+
+    function fitInitialScale() {
+        const vr = getViewportRect();
+        const vw = vr.width;
+        const vh = vr.height;
+        const iw = sourceImg.naturalWidth;
+        const ih = sourceImg.naturalHeight;
+        const scaleToFitW = vw / iw;
+        const scaleToFitH = vh / ih;
+        const minFit = Math.max(scaleToFitW, scaleToFitH);
+        scale = minFit;
+        zoomSlider.min = Math.round(minFit * 100);
+        zoomSlider.max = Math.round(Math.max(minFit * 3, 3) * 100);
+        zoomSlider.value = Math.round(scale * 100);
+        imgX = (vw - iw * scale) / 2;
+        imgY = (vh - ih * scale) / 2;
+    }
+
+    function clampPosition() {
+        const vr = getViewportRect();
+        const vw = vr.width;
+        const vh = vr.height;
+        const iw = sourceImg.naturalWidth * scale;
+        const ih = sourceImg.naturalHeight * scale;
+        if (iw <= vw) {
+            imgX = (vw - iw) / 2;
+        } else {
+            imgX = Math.min(0, Math.max(vw - iw, imgX));
+        }
+        if (ih <= vh) {
+            imgY = (vh - ih) / 2;
+        } else {
+            imgY = Math.min(0, Math.max(vh - ih, imgY));
+        }
+    }
+
+    function render() {
+        imgEl.style.width = (sourceImg.naturalWidth * scale) + 'px';
+        imgEl.style.height = (sourceImg.naturalHeight * scale) + 'px';
+        imgEl.style.left = imgX + 'px';
+        imgEl.style.top = imgY + 'px';
+    }
+
+    function update() {
+        clampPosition();
+        render();
+    }
+
+    function onPointerDown(e) {
+        if (e.button && e.button !== 0) return;
+        isDragging = true;
+        dragStartX = e.clientX ?? e.touches[0].clientX;
+        dragStartY = e.clientY ?? e.touches[0].clientY;
+        dragStartImgX = imgX;
+        dragStartImgY = imgY;
+        e.preventDefault();
+    }
+
+    function onPointerMove(e) {
+        if (!isDragging) return;
+        const cx = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : dragStartX);
+        const cy = e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : dragStartY);
+        imgX = dragStartImgX + (cx - dragStartX);
+        imgY = dragStartImgY + (cy - dragStartY);
+        update();
+    }
+
+    function onPointerUp() {
+        isDragging = false;
+    }
+
+    viewport.addEventListener('mousedown', onPointerDown);
+    viewport.addEventListener('touchstart', onPointerDown, { passive: false });
+    document.addEventListener('mousemove', onPointerMove);
+    document.addEventListener('touchmove', onPointerMove, { passive: false });
+    document.addEventListener('mouseup', onPointerUp);
+    document.addEventListener('touchend', onPointerUp);
+
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const vr = getViewportRect();
+        const oldScale = scale;
+        const delta = e.deltaY > 0 ? -0.03 : 0.03;
+        const minScale = parseInt(zoomSlider.min) / 100;
+        const maxScale = parseInt(zoomSlider.max) / 100;
+        scale = Math.min(maxScale, Math.max(minScale, scale + delta));
+        const pointerX = e.clientX - vr.left;
+        const pointerY = e.clientY - vr.top;
+        imgX = pointerX - (pointerX - imgX) * (scale / oldScale);
+        imgY = pointerY - (pointerY - imgY) * (scale / oldScale);
+        zoomSlider.value = Math.round(scale * 100);
+        update();
+    }, { passive: false });
+
+    zoomSlider.addEventListener('input', () => {
+        const vr = getViewportRect();
+        const oldScale = scale;
+        scale = parseInt(zoomSlider.value) / 100;
+        const cx = vr.width / 2;
+        const cy = vr.height / 2;
+        imgX = cx - (cx - imgX) * (scale / oldScale);
+        imgY = cy - (cy - imgY) * (scale / oldScale);
+        update();
+    });
+
+    function cleanup() {
+        document.removeEventListener('mousemove', onPointerMove);
+        document.removeEventListener('touchmove', onPointerMove);
+        document.removeEventListener('mouseup', onPointerUp);
+        document.removeEventListener('touchend', onPointerUp);
+        overlay.remove();
+    }
+
+    function cancel() {
+        cleanup();
+        reject(new Error('用户取消裁剪'));
+    }
+
+    cancelBtn.addEventListener('click', cancel);
+    closeBtn.addEventListener('click', cancel);
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) cancel();
+    });
+
+    confirmBtn.addEventListener('click', () => {
+        const vr = getViewportRect();
+        const vw = vr.width;
+        const vh = vr.height;
+        const srcX = -imgX / scale;
+        const srcY = -imgY / scale;
+        const srcW = vw / scale;
+        const srcH = vh / scale;
+        const canvas = document.createElement('canvas');
+        canvas.width = CROP_OUTPUT_WIDTH;
+        canvas.height = CROP_OUTPUT_HEIGHT;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(sourceImg, srcX, srcY, srcW, srcH, 0, 0, CROP_OUTPUT_WIDTH, CROP_OUTPUT_HEIGHT);
+        canvas.toBlob((blob) => {
+            cleanup();
+            if (!blob) {
+                reject(new Error('裁剪失败'));
+                return;
+            }
+            resolve(blob);
+        }, 'image/jpeg', CROP_JPEG_QUALITY);
+    });
+
+    requestAnimationFrame(() => {
+        fitInitialScale();
+        update();
+    });
+}
+
 function showAdminCreateProductModal() {
     const content = `
         <form id="admin-create-product-form" class="commerce-modal-form commerce-modal-form-refined">
-            <p class="commerce-modal-lead">带 <span class="commerce-req">*</span> 为必填项。</p>
             <div class="commerce-modal-grid">
                 <div class="commerce-modal-field">
                     <label class="commerce-modal-label" for="admin-product-key">商品 Key <span class="commerce-req">*</span></label>
-                    <input id="admin-product-key" type="text" name="key" required placeholder="字母数字下划线，如 pro_monthly" autocomplete="off" maxlength="64">
+                    <input id="admin-product-key" type="text" name="key" required placeholder="如 pro_monthly" autocomplete="off" maxlength="64">
                 </div>
                 <div class="commerce-modal-field">
                     <label class="commerce-modal-label" for="admin-product-title">商品名称 <span class="commerce-req">*</span></label>
                     <input id="admin-product-title" type="text" name="title" required placeholder="展示名称" autocomplete="off" maxlength="128">
                 </div>
-                <div class="commerce-modal-field commerce-modal-field-span">
+                <div class="commerce-modal-field">
                     <label class="commerce-modal-label" for="admin-product-price">价格（元）<span class="commerce-req">*</span></label>
                     <input id="admin-product-price" type="text" name="price" required placeholder="如 9.99" inputmode="decimal" autocomplete="off">
-                    <p class="commerce-field-hint">仅数字，最多保留两位小数。</p>
                 </div>
-                <div class="commerce-modal-field commerce-modal-field-span commerce-expire-row">
+                <div class="commerce-modal-field commerce-expire-row">
                     <label class="commerce-modal-label" for="admin-product-expire-val">有效期</label>
                     <div class="commerce-expire-inputs">
                         <input id="admin-product-expire-val" type="text" name="expire_val" placeholder="留空表示永久" inputmode="numeric" autocomplete="off">
@@ -2200,9 +2432,8 @@ function showAdminCreateProductModal() {
                             <option value="hour">小时</option>
                         </select>
                     </div>
-                    <p class="commerce-field-hint">将换算为秒存储，换算结果须在 1～10⁸ 秒之间。</p>
                 </div>
-                <div class="commerce-modal-field commerce-modal-field-span">
+                <div class="commerce-modal-field">
                     <label class="commerce-modal-label">封面图</label>
                     <input type="hidden" name="icon" id="admin-product-icon-url" value="">
                     <input type="file" id="admin-product-icon-file" class="commerce-file-input-hidden" accept="image/jpeg,image/png,image/gif,image/webp">
@@ -2213,17 +2444,22 @@ function showAdminCreateProductModal() {
                     <div id="admin-product-icon-preview" class="commerce-icon-preview" hidden>
                         <img id="admin-product-icon-preview-img" alt="封面预览">
                     </div>
-                    <p class="commerce-field-hint">上传到 OSS，需服务端已开启对象存储。</p>
+                </div>
+                <div class="commerce-modal-field">
+                    <label class="commerce-modal-label" for="admin-product-renew">支持续费</label>
+                    <select id="admin-product-renew" name="support_continue" class="commerce-modal-select">
+                        <option value="0" selected>否</option>
+                        <option value="1">是</option>
+                    </select>
                 </div>
             </div>
-            <label class="commerce-modal-checkbox commerce-modal-checkbox-block"><input type="checkbox" name="support_continue"> 支持续费</label>
             <div class="commerce-modal-field commerce-modal-field-span commerce-modal-desc-block">
                 <label class="commerce-modal-label" for="admin-product-desc">商品描述</label>
-                <textarea id="admin-product-desc" name="desc" class="commerce-desc-textarea" rows="5" maxlength="${COMMERCE_MAX_DESC_LEN}" placeholder="支持换行，前台按原格式展示"></textarea>
+                <textarea id="admin-product-desc" name="desc" class="commerce-desc-textarea" rows="4" maxlength="${COMMERCE_MAX_DESC_LEN}" placeholder="支持换行，前台按原格式展示"></textarea>
             </div>
             <div class="modal-actions commerce-modal-actions commerce-modal-actions-compact">
                 <button type="button" class="btn-secondary commerce-btn-modal-cancel" onclick="closeModal()">取消</button>
-                <button type="submit" class="btn-primary commerce-btn-submit-create">创建商品</button>
+                <button type="submit" class="btn-primary commerce-btn-submit-create">创建</button>
             </div>
         </form>
     `;
@@ -2241,9 +2477,17 @@ function showAdminCreateProductModal() {
         fileInput.addEventListener('change', async () => {
             const f = fileInput.files && fileInput.files[0];
             if (!f) return;
+            fileInput.value = '';
+            let croppedBlob;
+            try {
+                croppedBlob = await openImageCropDialog(f);
+            } catch (cropErr) {
+                return;
+            }
             statusEl.textContent = '上传中…';
             try {
-                const res = await adminCommerceAPI.uploadProductIcon(f);
+                const croppedFile = new File([croppedBlob], f.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
+                const res = await adminCommerceAPI.uploadProductIcon(croppedFile);
                 const url = res.data && res.data.url;
                 if (!url) throw new Error('未返回链接');
                 hiddenIcon.value = url;
@@ -2256,7 +2500,6 @@ function showAdminCreateProductModal() {
                 statusEl.textContent = err.message || '上传失败';
                 showToast(statusEl.textContent, 'error');
             }
-            fileInput.value = '';
         });
     }
 
@@ -2308,7 +2551,7 @@ function showAdminCreateProductModal() {
                 desc,
                 price: pr.value,
                 expire_time: expireSeconds,
-                support_continue: form.querySelector('[name=support_continue]').checked,
+                support_continue: form.querySelector('[name=support_continue]').value === '1',
                 icon,
             };
             try {
@@ -2346,6 +2589,21 @@ async function loadAdminProducts() {
                     showToast('已下架', 'success');
                 } catch (err) {
                     showToast(`下架失败：${err.message}`, 'error');
+                }
+            });
+        });
+
+        root.querySelectorAll('.btn-online-product').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const productId = Number(btn.dataset.id);
+                if (!productId) return;
+                if (!confirm('确认上架该商品？前台将重新展示。')) return;
+                try {
+                    await adminCommerceAPI.onlineProduct(productId);
+                    await loadAdminProducts();
+                    showToast('已上架', 'success');
+                } catch (err) {
+                    showToast(`上架失败：${err.message}`, 'error');
                 }
             });
         });
@@ -2438,6 +2696,228 @@ function renderAdminOrdersTable(data) {
 
 function openTaskChat(taskId) {
     window.open(`chat.html?task_id=${taskId}`, '_blank');
+}
+
+// ===== 商店 =====
+
+function initStore() {
+    // 商店视图首次切换时由 switchToView 触发 loadStoreProducts
+}
+
+async function loadStoreProducts() {
+    const grid = document.getElementById('store-products-grid');
+    if (!grid) return;
+
+    grid.innerHTML = '<p class="store-loading-tip">加载中…</p>';
+    try {
+        const resp = await commercialAPI.getProducts();
+        const products = resp.data || [];
+        if (products.length === 0) {
+            grid.innerHTML = '<p class="store-empty-tip">暂无商品</p>';
+            return;
+        }
+        grid.innerHTML = products.map(renderStoreProductCard).join('');
+        grid.querySelectorAll('.store-buy-btn').forEach((btn) => {
+            btn.addEventListener('click', handleStoreBuy);
+        });
+    } catch (err) {
+        grid.innerHTML = `<p class="store-error-tip">加载失败：${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function renderStoreProductCard(product) {
+    const iconHtml = product.icon
+        ? `<img src="${escapeHtml(product.icon)}" alt="${escapeHtml(product.title)}" class="store-product-icon">`
+        : `<div class="store-product-icon-placeholder">🛍️</div>`;
+    const expireText = product.expire_time
+        ? `有效期 ${Math.round(product.expire_time / 86400)} 天`
+        : '永久有效';
+    const renewBtn = product.support_continue
+        ? `<button class="store-buy-btn btn-primary" data-id="${product.id}" data-type="renew">续费</button>`
+        : '';
+    return `
+<div class="store-product-card">
+  <div class="store-product-header">${iconHtml}</div>
+  <div class="store-product-body">
+    <div class="store-product-title">${escapeHtml(product.title)}</div>
+    <div class="store-product-desc">${product.desc || ''}</div>
+    <div class="store-product-meta">
+      <span class="store-product-price">¥${product.price.toFixed(2)}</span>
+      <span class="store-product-expire">${escapeHtml(expireText)}</span>
+    </div>
+  </div>
+  <div class="store-product-actions">
+    <button class="store-buy-btn btn-primary" data-id="${product.id}" data-type="purchase">购买</button>
+    ${renewBtn}
+  </div>
+</div>`;
+}
+
+async function handleStoreBuy(e) {
+    const btn = e.currentTarget;
+    const productId = parseInt(btn.dataset.id, 10);
+    const orderType = btn.dataset.type || 'purchase';
+
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = '跳转中…';
+    try {
+        const isMobile = /mobile|android|iphone|ipad/i.test(navigator.userAgent);
+        const resp = await commercialAPI.buy(productId, orderType, isMobile ? 'mobile' : 'pc');
+        const payUrl = resp.data && resp.data.pay_url;
+        if (payUrl) {
+            window.location.href = payUrl;
+        } else {
+            throw new Error('未获取到支付链接');
+        }
+    } catch (err) {
+        showToast(`购买失败：${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// ===== 我的（个人中心）=====
+
+let profileOrderPage = 1;
+
+function loadProfileUserInfo() {
+    const user = getCurrentUser();
+    const nameEl = document.getElementById('profile-username');
+    const idEl = document.getElementById('profile-user-id');
+    if (nameEl) nameEl.textContent = (user && user.name) ? user.name : '用户';
+    if (idEl) idEl.textContent = (user && user.user_id != null) ? String(user.user_id) : '—';
+}
+
+function initProfile() {
+    // 初始化分页按钮
+    const prevBtn = document.getElementById('profile-orders-prev-btn');
+    const nextBtn = document.getElementById('profile-orders-next-btn');
+    if (prevBtn && prevBtn.dataset.bound !== 'true') {
+        prevBtn.addEventListener('click', () => loadMyOrders(profileOrderPage - 1));
+        prevBtn.dataset.bound = 'true';
+    }
+    if (nextBtn && nextBtn.dataset.bound !== 'true') {
+        nextBtn.addEventListener('click', () => loadMyOrders(profileOrderPage + 1));
+        nextBtn.dataset.bound = 'true';
+    }
+}
+
+async function loadMyServices() {
+    const container = document.getElementById('profile-services-list');
+    const emptyEl = document.getElementById('profile-services-empty');
+    if (!container) return;
+
+    container.innerHTML = '<p class="store-loading-tip">加载中…</p>';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    try {
+        const resp = await commercialAPI.getMyServices();
+        const services = resp.data || [];
+        if (services.length === 0) {
+            container.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = '';
+            return;
+        }
+        container.innerHTML = services.map(renderServiceCard).join('');
+    } catch (err) {
+        container.innerHTML = `<p class="store-error-tip">加载失败：${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function renderServiceCard(service) {
+    const iconHtml = service.product_icon
+        ? `<img src="${escapeHtml(service.product_icon)}" alt="" class="service-card-icon">`
+        : `<div class="service-card-icon-placeholder">✨</div>`;
+
+    let expireHtml;
+    if (service.is_permanent) {
+        expireHtml = `<span class="service-expire-badge service-expire-permanent">永久有效</span>`;
+    } else {
+        const expireDate = new Date(service.expire_at);
+        const now = new Date();
+        const diffDays = Math.ceil((expireDate - now) / 86400000);
+        const expireDateStr = expireDate.toLocaleDateString('zh-CN');
+        const urgentClass = diffDays <= 7 ? 'service-expire-urgent' : 'service-expire-normal';
+        expireHtml = `<span class="service-expire-badge ${urgentClass}">到期：${expireDateStr}（剩 ${diffDays} 天）</span>`;
+    }
+
+    return `
+<div class="service-card">
+  <div class="service-card-left">${iconHtml}</div>
+  <div class="service-card-body">
+    <div class="service-card-title">${escapeHtml(service.product_title)}</div>
+    <div class="service-card-expire">${expireHtml}</div>
+  </div>
+</div>`;
+}
+
+async function loadMyOrders(page) {
+    profileOrderPage = Math.max(1, page || 1);
+    const tbody = document.getElementById('profile-orders-tbody');
+    const emptyEl = document.getElementById('profile-orders-empty');
+    const footer = document.getElementById('profile-orders-footer');
+    if (!tbody) return;
+
+    try {
+        const resp = await commercialAPI.getMyOrders(profileOrderPage, 20);
+        const data = resp.data || {};
+        const orders = data.orders || [];
+        const total = data.total || 0;
+        const totalPages = Math.ceil(total / (data.page_size || 20));
+
+        if (orders.length === 0 && profileOrderPage === 1) {
+            tbody.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = '';
+            if (footer) footer.style.display = 'none';
+            return;
+        }
+
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (footer) footer.style.display = '';
+
+        tbody.innerHTML = orders.map((order) => {
+            const statusMap = { pending: '待支付', paid: '已支付', failed: '失败', refunded: '已退款' };
+            const typeMap = { purchase: '购买', renew: '续费' };
+            const expireText = order.expire_at
+                ? new Date(order.expire_at).toLocaleDateString('zh-CN')
+                : (order.status === 'paid' ? '永久' : '-');
+            const statusClass = order.status === 'paid' ? 'status-paid'
+                : order.status === 'refunded' ? 'status-refunded'
+                : order.status === 'failed' ? 'status-failed'
+                : 'status-pending';
+            return `<tr>
+  <td class="text-muted" style="font-size:12px;">${escapeHtml(order.out_trade_no || String(order.id))}</td>
+  <td>${escapeHtml(order.product_title || order.product_key)}</td>
+  <td>¥${Number(order.amount).toFixed(2)}</td>
+  <td>${typeMap[order.order_type] || order.order_type}</td>
+  <td><span class="order-status-badge ${statusClass}">${statusMap[order.status] || order.status}</span></td>
+  <td>${expireText}</td>
+  <td>${order.created_at ? new Date(order.created_at).toLocaleDateString('zh-CN') : '-'}</td>
+</tr>`;
+        }).join('');
+
+        // 更新分页信息
+        const totalInfoEl = document.getElementById('profile-orders-total-info');
+        const pageInfoEl = document.getElementById('profile-orders-page-info');
+        const prevBtn = document.getElementById('profile-orders-prev-btn');
+        const nextBtn = document.getElementById('profile-orders-next-btn');
+
+        if (totalInfoEl) totalInfoEl.textContent = `共 ${total} 条`;
+        if (pageInfoEl) pageInfoEl.textContent = `第 ${profileOrderPage} / ${totalPages} 页`;
+        if (prevBtn) prevBtn.disabled = profileOrderPage <= 1;
+        if (nextBtn) nextBtn.disabled = profileOrderPage >= totalPages;
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-danger);">加载失败：${escapeHtml(err.message)}</td></tr>`;
+    }
 }
 
 // ===== 工具函数 =====

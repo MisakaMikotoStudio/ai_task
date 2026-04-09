@@ -283,6 +283,11 @@ const adminCommerceAPI = {
             method: 'POST'
         });
     },
+    async onlineProduct(productId) {
+        return request(`/admin/product/${productId}/online`, {
+            method: 'POST'
+        });
+    },
     async getOrders(params = {}) {
         const query = new URLSearchParams();
         if (params.page) query.set('page', String(params.page));
@@ -518,6 +523,16 @@ const commercialAPI = {
             method: 'POST',
             body: JSON.stringify(body)
         });
+    },
+
+    // 获取当前用户的订单列表（分页）
+    async getMyOrders(page = 1, pageSize = 20) {
+        return request(`/commercial/my-orders?page=${page}&page_size=${pageSize}`);
+    },
+
+    // 获取当前用户正在生效的服务
+    async getMyServices() {
+        return request('/commercial/my-services');
     }
 };
 
