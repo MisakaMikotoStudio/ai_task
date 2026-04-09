@@ -927,6 +927,7 @@ async function wizardSaveAll() {
             });
         }
 
+
         showToast('应用配置保存成功', 'success');
         cfgResetClientConfigState();
         backToClients();
