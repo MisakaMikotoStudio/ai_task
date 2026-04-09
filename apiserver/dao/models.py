@@ -703,6 +703,41 @@ class ClientOss(Base):
         }
 
 
+class PermissionConfig(Base):
+    """权限配置表"""
+    __tablename__ = 'ai_task_permission_configs'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    key = Column(String(64), nullable=False, comment='权限 key（如 subscribed, official_cloud_client_count）')
+    type = Column(String(32), nullable=False, comment='权限校验类型：count_limit / subscribed')
+    product_key = Column(String(64), nullable=False, comment='关联的产品 key')
+    config_detail = Column(JSON, nullable=True, comment='具体权限配置（如 {"limit": 5}）')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
+                        onupdate=func.utc_timestamp(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间（软删除）')
+
+    TYPE_COUNT_LIMIT = 'count_limit'
+    TYPE_SUBSCRIBED = 'subscribed'
+    VALID_TYPES = [TYPE_COUNT_LIMIT, TYPE_SUBSCRIBED]
+
+    __table_args__ = (
+        Index('idx_permission_configs_key', 'key'),
+        Index('idx_permission_configs_key_product', 'key', 'product_key'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'type': self.type,
+            'product_key': self.product_key,
+            'config_detail': self.config_detail or {},
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
 class ChatMessage(Base):
     """Chat消息表"""
     __tablename__ = 'ai_task_chat_message'
