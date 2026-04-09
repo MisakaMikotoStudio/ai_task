@@ -184,7 +184,7 @@ def _normalize_client_payload(data: dict) -> Optional[str]:
 def get_client_detail(client_id: int, user_id: int) -> Optional[dict]:
     """
     组装客户端详情（与 GET /<client_id> 响应 data 一致）：
-    基本信息、editable、last_sync_at（合并心跳）、repos、env_vars。
+    基本信息、editable、last_sync_at（合并心跳）、repos、env_vars、infrastructure。
     客户端不存在或无权访问时返回 None。
     """
     client = get_client_by_id(client_id=client_id, user_id=user_id)
@@ -197,6 +197,7 @@ def get_client_detail(client_id: int, user_id: int) -> Optional[dict]:
         payload['last_sync_at'] = heartbeats[0].get('last_sync_at')
     payload['repos'] = [repo.to_dict() for repo in get_client_repos(client_id, user_id)]
     payload['env_vars'] = [ev.to_dict() for ev in get_client_env_vars(client_id, user_id)]
+    payload['infrastructure'] = get_client_infrastructure(client_id=client_id, user_id=user_id)
     return payload
 
 
@@ -304,6 +305,11 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
     if env_vars_changed:
         # 目前只有环境变量出现变更的时候，才有可能影响到客户端的执行版本号，所以这里直接调用 increment_client_version
         increment_client_version(cid, user_id)
+
+    # 保存基础设施配置（若 data 中含 infrastructure 字段）
+    infra_data = data.get('infrastructure')
+    if infra_data and isinstance(infra_data, dict):
+        save_all_infrastructure(client_id=cid, user_id=user_id, data=infra_data)
 
     return cid
 
@@ -549,12 +555,9 @@ def save_client_env_vars(client_id: int, env_items: List[dict], *, user_id: int)
 SSH_CHECK_TIMEOUT = 5  # SSH 连通性检查超时秒数
 
 
-class InfraConfigError(Exception):
+class InfraConfigError(ClientSaveError):
     """基础设施配置校验或操作失败"""
-
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
+    pass
 
 
 def check_ssh_connectivity(ip: str, username: str, password: str) -> Tuple[bool, str]:
@@ -794,3 +797,46 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
         'payments': payments_result,
         'oss': oss_result,
     }
+
+
+def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
+    """
+    一次性保存全量基础设施配置（云服务器、域名、数据库、支付、对象存储）。
+
+    Args:
+        client_id: 客户端 ID
+        user_id: 用户 ID
+        data: {
+            "servers": {"test": {...}, "prod": {...}},
+            "domains": {"test": [...], "prod": [...]},
+            "databases": {"test": [...], "prod": [...]},
+            "payments": {"test": {...}, "prod": {...}},
+            "oss": {"test": {...}, "prod": {...}}
+        }
+
+    Raises:
+        InfraConfigError: 参数校验或 SSH 校验失败
+    """
+    servers_data = data.get('servers') or {}
+    domains_data = data.get('domains') or {}
+    databases_data = data.get('databases') or {}
+    payments_data = data.get('payments') or {}
+    oss_data = data.get('oss') or {}
+
+    # SSH 连通性校验（仅在有服务器 ip 时）
+    if servers_data:
+        ssh_ok, ssh_err = check_servers_ssh(servers_data)
+        if not ssh_ok:
+            raise InfraConfigError(ssh_err)
+
+    # 逐类型保存
+    if servers_data:
+        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='servers', data=servers_data)
+    if domains_data:
+        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='domains', data=domains_data)
+    if databases_data:
+        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='databases', data=databases_data)
+    if payments_data:
+        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='payments', data=payments_data)
+    if oss_data:
+        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='oss', data=oss_data)
