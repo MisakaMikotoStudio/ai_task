@@ -68,6 +68,11 @@ def _check_subscription_for_write(trace_id: str):
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return None
 
+    # admin 接口只做身份鉴权，跳过订阅权限校验
+    endpoint = request.endpoint or ''
+    if endpoint.startswith('admin.'):
+        return None
+
     user_info = getattr(request, 'user_info', None)
     if not user_info:
         return None
