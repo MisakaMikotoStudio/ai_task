@@ -228,9 +228,7 @@ function initNavigation() {
     if (ADMIN_PAGE) {
         navItems.forEach((item) => {
             const view = item.dataset.view;
-            if (!ADMIN_ALLOWED_VIEWS.has(view)) {
-                item.style.display = 'none';
-            }
+            item.style.display = ADMIN_ALLOWED_VIEWS.has(view) ? '' : 'none';
         });
     }
     
@@ -2187,6 +2185,228 @@ function renderAdminProductCard(p) {
 </article>`;
 }
 
+/* ===== 图片裁剪工具 ===== */
+const CROP_ASPECT = 3 / 2;
+const CROP_OUTPUT_WIDTH = 600;
+const CROP_OUTPUT_HEIGHT = Math.round(CROP_OUTPUT_WIDTH / CROP_ASPECT);
+const CROP_JPEG_QUALITY = 0.85;
+
+function openImageCropDialog(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('读取文件失败'));
+        reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('无法加载图片'));
+            img.onload = () => _showCropUI(img, resolve, reject);
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function _showCropUI(sourceImg, resolve, reject) {
+    const overlay = document.createElement('div');
+    overlay.className = 'image-crop-overlay';
+    overlay.innerHTML = `
+        <div class="image-crop-dialog">
+            <div class="image-crop-header">
+                <h4>裁剪封面图</h4>
+                <button type="button" class="image-crop-close">&times;</button>
+            </div>
+            <div class="image-crop-body">
+                <p class="image-crop-hint">拖拽图片调整位置，滑块控制缩放</p>
+                <div class="image-crop-canvas-wrap" id="crop-viewport">
+                    <img id="crop-source-img" alt="">
+                </div>
+                <div class="image-crop-zoom-row">
+                    <span class="image-crop-zoom-label">缩放</span>
+                    <input type="range" class="image-crop-zoom-slider" id="crop-zoom-slider"
+                           min="100" max="300" value="100" step="1">
+                </div>
+            </div>
+            <div class="image-crop-footer">
+                <button type="button" class="btn-secondary" id="crop-cancel-btn">取消</button>
+                <button type="button" class="btn-primary" id="crop-confirm-btn">确认裁剪</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const viewport = overlay.querySelector('#crop-viewport');
+    const imgEl = overlay.querySelector('#crop-source-img');
+    const zoomSlider = overlay.querySelector('#crop-zoom-slider');
+    const cancelBtn = overlay.querySelector('#crop-cancel-btn');
+    const closeBtn = overlay.querySelector('.image-crop-close');
+    const confirmBtn = overlay.querySelector('#crop-confirm-btn');
+
+    imgEl.src = sourceImg.src;
+
+    let scale = 1;
+    let imgX = 0;
+    let imgY = 0;
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartImgX = 0;
+    let dragStartImgY = 0;
+
+    function getViewportRect() {
+        return viewport.getBoundingClientRect();
+    }
+
+    function fitInitialScale() {
+        const vr = getViewportRect();
+        const vw = vr.width;
+        const vh = vr.height;
+        const iw = sourceImg.naturalWidth;
+        const ih = sourceImg.naturalHeight;
+        const scaleToFitW = vw / iw;
+        const scaleToFitH = vh / ih;
+        const minFit = Math.max(scaleToFitW, scaleToFitH);
+        scale = minFit;
+        zoomSlider.min = Math.round(minFit * 100);
+        zoomSlider.max = Math.round(Math.max(minFit * 3, 3) * 100);
+        zoomSlider.value = Math.round(scale * 100);
+        imgX = (vw - iw * scale) / 2;
+        imgY = (vh - ih * scale) / 2;
+    }
+
+    function clampPosition() {
+        const vr = getViewportRect();
+        const vw = vr.width;
+        const vh = vr.height;
+        const iw = sourceImg.naturalWidth * scale;
+        const ih = sourceImg.naturalHeight * scale;
+        if (iw <= vw) {
+            imgX = (vw - iw) / 2;
+        } else {
+            imgX = Math.min(0, Math.max(vw - iw, imgX));
+        }
+        if (ih <= vh) {
+            imgY = (vh - ih) / 2;
+        } else {
+            imgY = Math.min(0, Math.max(vh - ih, imgY));
+        }
+    }
+
+    function render() {
+        imgEl.style.width = (sourceImg.naturalWidth * scale) + 'px';
+        imgEl.style.height = (sourceImg.naturalHeight * scale) + 'px';
+        imgEl.style.left = imgX + 'px';
+        imgEl.style.top = imgY + 'px';
+    }
+
+    function update() {
+        clampPosition();
+        render();
+    }
+
+    function onPointerDown(e) {
+        if (e.button && e.button !== 0) return;
+        isDragging = true;
+        dragStartX = e.clientX ?? e.touches[0].clientX;
+        dragStartY = e.clientY ?? e.touches[0].clientY;
+        dragStartImgX = imgX;
+        dragStartImgY = imgY;
+        e.preventDefault();
+    }
+
+    function onPointerMove(e) {
+        if (!isDragging) return;
+        const cx = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : dragStartX);
+        const cy = e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : dragStartY);
+        imgX = dragStartImgX + (cx - dragStartX);
+        imgY = dragStartImgY + (cy - dragStartY);
+        update();
+    }
+
+    function onPointerUp() {
+        isDragging = false;
+    }
+
+    viewport.addEventListener('mousedown', onPointerDown);
+    viewport.addEventListener('touchstart', onPointerDown, { passive: false });
+    document.addEventListener('mousemove', onPointerMove);
+    document.addEventListener('touchmove', onPointerMove, { passive: false });
+    document.addEventListener('mouseup', onPointerUp);
+    document.addEventListener('touchend', onPointerUp);
+
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const vr = getViewportRect();
+        const oldScale = scale;
+        const delta = e.deltaY > 0 ? -0.03 : 0.03;
+        const minScale = parseInt(zoomSlider.min) / 100;
+        const maxScale = parseInt(zoomSlider.max) / 100;
+        scale = Math.min(maxScale, Math.max(minScale, scale + delta));
+        const pointerX = e.clientX - vr.left;
+        const pointerY = e.clientY - vr.top;
+        imgX = pointerX - (pointerX - imgX) * (scale / oldScale);
+        imgY = pointerY - (pointerY - imgY) * (scale / oldScale);
+        zoomSlider.value = Math.round(scale * 100);
+        update();
+    }, { passive: false });
+
+    zoomSlider.addEventListener('input', () => {
+        const vr = getViewportRect();
+        const oldScale = scale;
+        scale = parseInt(zoomSlider.value) / 100;
+        const cx = vr.width / 2;
+        const cy = vr.height / 2;
+        imgX = cx - (cx - imgX) * (scale / oldScale);
+        imgY = cy - (cy - imgY) * (scale / oldScale);
+        update();
+    });
+
+    function cleanup() {
+        document.removeEventListener('mousemove', onPointerMove);
+        document.removeEventListener('touchmove', onPointerMove);
+        document.removeEventListener('mouseup', onPointerUp);
+        document.removeEventListener('touchend', onPointerUp);
+        overlay.remove();
+    }
+
+    function cancel() {
+        cleanup();
+        reject(new Error('用户取消裁剪'));
+    }
+
+    cancelBtn.addEventListener('click', cancel);
+    closeBtn.addEventListener('click', cancel);
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) cancel();
+    });
+
+    confirmBtn.addEventListener('click', () => {
+        const vr = getViewportRect();
+        const vw = vr.width;
+        const vh = vr.height;
+        const srcX = -imgX / scale;
+        const srcY = -imgY / scale;
+        const srcW = vw / scale;
+        const srcH = vh / scale;
+        const canvas = document.createElement('canvas');
+        canvas.width = CROP_OUTPUT_WIDTH;
+        canvas.height = CROP_OUTPUT_HEIGHT;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(sourceImg, srcX, srcY, srcW, srcH, 0, 0, CROP_OUTPUT_WIDTH, CROP_OUTPUT_HEIGHT);
+        canvas.toBlob((blob) => {
+            cleanup();
+            if (!blob) {
+                reject(new Error('裁剪失败'));
+                return;
+            }
+            resolve(blob);
+        }, 'image/jpeg', CROP_JPEG_QUALITY);
+    });
+
+    requestAnimationFrame(() => {
+        fitInitialScale();
+        update();
+    });
+}
+
 function showAdminCreateProductModal() {
     const content = `
         <form id="admin-create-product-form" class="commerce-modal-form commerce-modal-form-refined">
@@ -2257,9 +2477,17 @@ function showAdminCreateProductModal() {
         fileInput.addEventListener('change', async () => {
             const f = fileInput.files && fileInput.files[0];
             if (!f) return;
+            fileInput.value = '';
+            let croppedBlob;
+            try {
+                croppedBlob = await openImageCropDialog(f);
+            } catch (cropErr) {
+                return;
+            }
             statusEl.textContent = '上传中…';
             try {
-                const res = await adminCommerceAPI.uploadProductIcon(f);
+                const croppedFile = new File([croppedBlob], f.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
+                const res = await adminCommerceAPI.uploadProductIcon(croppedFile);
                 const url = res.data && res.data.url;
                 if (!url) throw new Error('未返回链接');
                 hiddenIcon.value = url;
@@ -2272,7 +2500,6 @@ function showAdminCreateProductModal() {
                 statusEl.textContent = err.message || '上传失败';
                 showToast(statusEl.textContent, 'error');
             }
-            fileInput.value = '';
         });
     }
 
