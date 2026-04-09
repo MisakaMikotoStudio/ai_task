@@ -228,9 +228,7 @@ function initNavigation() {
     if (ADMIN_PAGE) {
         navItems.forEach((item) => {
             const view = item.dataset.view;
-            if (!ADMIN_ALLOWED_VIEWS.has(view)) {
-                item.style.display = 'none';
-            }
+            item.style.display = ADMIN_ALLOWED_VIEWS.has(view) ? '' : 'none';
         });
     }
     
