@@ -744,7 +744,7 @@ async function openClientConfig(id, mode) {
         `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`
     ).join('');
 
-    // 如果是编辑/查看模式，加载已有数据
+    // 如果是编辑/查看模式，加载已有数据（一个接口返回所有内容，含基础设施）
     if (id !== null) {
         try {
             const clientResult = await activeClientAPI.get(id);
@@ -764,28 +764,18 @@ async function openClientConfig(id, mode) {
             agentSelect.value = clientData.agent || 'claude sdk';
             document.getElementById('cfg-client-official-cloud-deploy').value = String(clientData.official_cloud_deploy ?? 0);
 
-            // 加载基础设施配置
-            try {
-                const infraResult = await infraAPI.get(id);
-                const infra = infraResult.data || {};
-                // 云服务器
-                cfgServersByEnv.test = infra.servers && infra.servers.test ? { ...infra.servers.test } : { name: '', password: '', ip: '' };
-                cfgServersByEnv.prod = infra.servers && infra.servers.prod ? { ...infra.servers.prod } : { name: '', password: '', ip: '' };
-                // 域名
-                cfgDomainsByEnv.test = (infra.domains && infra.domains.test) || [];
-                cfgDomainsByEnv.prod = (infra.domains && infra.domains.prod) || [];
-                // 数据库
-                cfgDatabasesByEnv.test = (infra.databases && infra.databases.test) || [];
-                cfgDatabasesByEnv.prod = (infra.databases && infra.databases.prod) || [];
-                // 支付
-                cfgPaymentsByEnv.test = (infra.payments && infra.payments.test) ? { ...infra.payments.test } : {};
-                cfgPaymentsByEnv.prod = (infra.payments && infra.payments.prod) ? { ...infra.payments.prod } : {};
-                // 对象存储
-                cfgOssByEnv.test = (infra.oss && infra.oss.test) ? { ...infra.oss.test } : {};
-                cfgOssByEnv.prod = (infra.oss && infra.oss.prod) ? { ...infra.oss.prod } : {};
-            } catch (e) {
-                console.warn('加载基础设施配置失败', e);
-            }
+            // 基础设施配置（已包含在 client detail 响应中）
+            const infra = clientData.infrastructure || {};
+            cfgServersByEnv.test = infra.servers && infra.servers.test ? { ...infra.servers.test } : { name: '', password: '', ip: '' };
+            cfgServersByEnv.prod = infra.servers && infra.servers.prod ? { ...infra.servers.prod } : { name: '', password: '', ip: '' };
+            cfgDomainsByEnv.test = (infra.domains && infra.domains.test) || [];
+            cfgDomainsByEnv.prod = (infra.domains && infra.domains.prod) || [];
+            cfgDatabasesByEnv.test = (infra.databases && infra.databases.test) || [];
+            cfgDatabasesByEnv.prod = (infra.databases && infra.databases.prod) || [];
+            cfgPaymentsByEnv.test = (infra.payments && infra.payments.test) ? { ...infra.payments.test } : {};
+            cfgPaymentsByEnv.prod = (infra.payments && infra.payments.prod) ? { ...infra.payments.prod } : {};
+            cfgOssByEnv.test = (infra.oss && infra.oss.test) ? { ...infra.oss.test } : {};
+            cfgOssByEnv.prod = (infra.oss && infra.oss.prod) ? { ...infra.oss.prod } : {};
         } catch (error) {
             showToast(error.message, 'error');
             return;
@@ -923,16 +913,18 @@ async function wizardSaveAll() {
             });
         }
 
-        // 5. 保存基础设施配置（需要 clientId）
+        // 5. 统一保存基础设施配置（需要 clientId）
         const hasAnyServer = Object.values(cfgServersByEnv).some(s => s.ip);
         if (hasAnyServer) {
             showToast('正在校验 SSH 连通性，请稍候...', 'success');
-            await infraAPI.saveServers(cfgClientId, cfgServersByEnv);
         }
-        await infraAPI.saveDomains(cfgClientId, cfgDomainsByEnv);
-        await infraAPI.saveDatabases(cfgClientId, cfgDatabasesByEnv);
-        await infraAPI.savePayments(cfgClientId, cfgPaymentsByEnv);
-        await infraAPI.saveOss(cfgClientId, cfgOssByEnv);
+        await infraAPI.saveAll(cfgClientId, {
+            servers: cfgServersByEnv,
+            domains: cfgDomainsByEnv,
+            databases: cfgDatabasesByEnv,
+            payments: cfgPaymentsByEnv,
+            oss: cfgOssByEnv,
+        });
 
         showToast('应用配置保存成功', 'success');
         cfgResetClientConfigState();
