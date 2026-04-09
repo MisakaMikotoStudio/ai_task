@@ -117,19 +117,21 @@ const clientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
         });
     },
 
-    // 更新（可选 repos、env_vars 全量同步）
+    // 更新（可选 repos、env_vars、infrastructure 全量同步）
     async update(id, name, options = {}) {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -156,53 +158,6 @@ const clientAPI = {
     }
 };
 
-// 基础设施配置 API
-const infraAPI = {
-    // 获取全量基础设施配置
-    async get(clientId) {
-        return request(`/client/${clientId}/infrastructure`);
-    },
-
-    // 保存云服务器配置（含 SSH 校验）
-    async saveServers(clientId, data) {
-        return request(`/client/${clientId}/servers`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-
-    // 保存域名配置
-    async saveDomains(clientId, data) {
-        return request(`/client/${clientId}/domains`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-
-    // 保存数据库配置
-    async saveDatabases(clientId, data) {
-        return request(`/client/${clientId}/databases`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-
-    // 保存支付配置
-    async savePayments(clientId, data) {
-        return request(`/client/${clientId}/payments`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-
-    // 保存对象存储配置
-    async saveOss(clientId, data) {
-        return request(`/client/${clientId}/oss`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    }
-};
 
 // 秘钥API
 const secretAPI = {
@@ -261,6 +216,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request('/admin/clients', {
             method: 'POST',
             body: JSON.stringify(body)
@@ -272,6 +228,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request(`/admin/clients/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
