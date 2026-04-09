@@ -258,30 +258,16 @@
         max-width: 600px;
     }
 
-    .sc-client-select-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 10px;
-    }
-
-    .sc-client-label {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text-secondary);
-        flex-shrink: 0;
-    }
-
     .sc-client-select {
-        flex: 1;
-        padding: 7px 10px;
-        border-radius: 7px;
+        padding: 4px 8px;
+        border-radius: 6px;
         border: 1px solid var(--border-color);
-        background: var(--bg-secondary);
+        background: var(--bg-tertiary);
         color: var(--text-primary);
-        font-size: 13px;
+        font-size: 12px;
         outline: none;
         transition: var(--transition);
+        max-width: 180px;
     }
 
     .sc-client-select:focus {
@@ -539,12 +525,6 @@
                                 <div class="sc-welcome-sub">选择应用，输入问题，即可开始对话</div>
                             </div>
                             <div class="sc-welcome-composer">
-                                <div class="sc-client-select-row">
-                                    <label class="sc-client-label">应用</label>
-                                    <select class="sc-client-select" id="sc-client-select">
-                                        <option value="">加载中...</option>
-                                    </select>
-                                </div>
                                 <div class="sc-composer-box">
                                     <textarea
                                         class="sc-composer-textarea"
@@ -554,6 +534,9 @@
                                     ></textarea>
                                     <div class="sc-composer-footer">
                                         <span class="sc-composer-hint">Ctrl+Enter 发送</span>
+                                        <select class="sc-client-select" id="sc-client-select">
+                                            <option value="">选择应用</option>
+                                        </select>
                                         <button class="sc-send-btn" id="sc-welcome-send-btn">发送</button>
                                     </div>
                                 </div>

@@ -1230,6 +1230,10 @@
         .chat-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         .chat-toast.success { border-color: var(--accent-success); color: var(--accent-success); }
         .chat-toast.error { border-color: var(--accent-danger); color: var(--accent-danger); }
+
+        /* Embed mode: hide sidebar, main takes full width */
+        .chat-page.embed-mode .chat-sidebar { display: none; }
+        .chat-page.embed-mode .chat-main { flex: 1; }
     </style>
 </head>
 <body>

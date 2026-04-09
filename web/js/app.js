@@ -2770,6 +2770,16 @@ function initStandaloneChatPanel() {
         });
     }
 
+    // 客户端选择变化时缓存
+    const clientSel = document.getElementById('sc-client-select');
+    if (clientSel) {
+        clientSel.addEventListener('change', () => {
+            if (clientSel.value) {
+                localStorage.setItem(SC_CLIENT_CACHE_KEY, clientSel.value);
+            }
+        });
+    }
+
     // 加载客户端列表
     scLoadClients();
 }
@@ -2790,19 +2800,12 @@ function scRenderClientSelect() {
 
     const lastClientId = localStorage.getItem(SC_CLIENT_CACHE_KEY) || '';
 
-    let html = '<option value="">-- 请选择应用 --</option>';
+    let html = '<option value="">-- 选择应用 --</option>';
     for (const c of scClientsCache) {
         const selected = String(c.id) === lastClientId ? ' selected' : '';
-        html += `<option value="${c.id}"${selected}>${escapeHtml(c.name)} (ID: ${c.id})</option>`;
+        html += `<option value="${c.id}"${selected}>${escapeHtml(c.name)}</option>`;
     }
     sel.innerHTML = html;
-
-    // 保存选择变化
-    sel.addEventListener('change', () => {
-        if (sel.value) {
-            localStorage.setItem(SC_CLIENT_CACHE_KEY, sel.value);
-        }
-    });
 }
 
 async function loadStandaloneChatList(append = false) {
@@ -2901,7 +2904,7 @@ function scSelectChat(chatId, clientId) {
     document.getElementById('sc-welcome').style.display = 'none';
     const frame = document.getElementById('sc-chat-frame');
     frame.style.display = '';
-    const frameUrl = `chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}`;
+    const frameUrl = `chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}&embed=1`;
     // 只在 URL 变化时重新加载
     if (!frame.src || !frame.src.endsWith(frameUrl)) {
         frame.src = frameUrl;

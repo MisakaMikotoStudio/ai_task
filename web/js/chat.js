@@ -35,6 +35,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     isStandaloneMode = (taskId === 0);
 
+    // Embed mode: hide sidebar when loaded inside an iframe
+    const isEmbed = params.get('embed') === '1';
+    if (isEmbed) {
+        document.querySelector('.chat-page')?.classList.add('embed-mode');
+    }
+
     if (isStandaloneMode) {
         // 独立 Chat 模式
         standaloneClientId = parseInt(params.get('client_id')) || null;
