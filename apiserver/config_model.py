@@ -66,6 +66,14 @@ class OssConfig:
 
 
 @dataclass
+class GithubConfig:
+    """GitHub 组织配置（用于从模板初始化仓库）"""
+    organization: str = ""             # GitHub 组织名称
+    admin_token: str = ""              # 组织管理员 Personal Access Token（建议使用 fine-grained PAT，仅授予仓库创建/管理权限）
+    api_base: str = "https://api.github.com"  # GitHub API 地址（GitHub Enterprise 可自定义）
+
+
+@dataclass
 class AppConfig:
     """应用总配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -73,6 +81,7 @@ class AppConfig:
     heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
     alipay: AlipayConfig = field(default_factory=AlipayConfig)
     oss: OssConfig = field(default_factory=OssConfig)
+    github: GithubConfig = field(default_factory=GithubConfig)
 
     @classmethod
     def from_toml(cls, path: str) -> "AppConfig":
@@ -86,6 +95,7 @@ class AppConfig:
             heartbeat=HeartbeatConfig(**data.get("heartbeat", {})),
             alipay=AlipayConfig(**data.get("alipay", {})),
             oss=OssConfig(**data.get("oss", {})),
+            github=GithubConfig(**data.get("github", {})),
         )
 
 

@@ -155,6 +155,13 @@ const clientAPI = {
         return request(`/client/${id}/copy`, {
             method: 'POST'
         });
+    },
+
+    // 从模板初始化仓库
+    async initReposFromTemplate() {
+        return request('/client/init-repos-from-template', {
+            method: 'POST'
+        });
     }
 };
 
@@ -241,6 +248,13 @@ const adminClientAPI = {
     },
     async copy(id) {
         return request(`/admin/clients/${id}/copy`, {
+            method: 'POST'
+        });
+    },
+
+    // 从模板初始化仓库
+    async initReposFromTemplate() {
+        return request('/admin/clients/init-repos-from-template', {
             method: 'POST'
         });
     }

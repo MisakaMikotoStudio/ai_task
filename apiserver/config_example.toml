@@ -42,6 +42,15 @@ sandbox = false
 # 使用"获取会员手机号"等敏感能力时必填。
 app_encrypt_key = ""
 
+[github]
+# GitHub 组织名称（从模板初始化仓库时，在此组织下创建）
+organization = ""
+# 组织管理员 Personal Access Token
+# 建议使用 fine-grained PAT，仅授予该组织下仓库的创建与管理权限
+admin_token = ""
+# GitHub API 地址（默认 https://api.github.com，GitHub Enterprise 可自定义）
+api_base = "https://api.github.com"
+
 [oss]
 # 是否启用 OSS（腾讯云 COS）
 enabled = false

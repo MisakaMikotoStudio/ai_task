@@ -439,6 +439,55 @@ def get_client_config_api(client_id):
     })
 
 
+@client_bp.route('/init-repos-from-template', methods=['POST'])
+def init_repos_from_template_api():
+    """
+    从模板初始化仓库：在 GitHub Organization 下创建文档仓库和业务代码仓库。
+
+    - {user_id}_docs: 文档仓库（已存在则复用）
+    - {user_id}_app_{version}: 业务代码仓库（已有版本则 version+1）
+
+    Response:
+        成功 (200):
+            {
+                "code": 200,
+                "message": "仓库初始化成功",
+                "data": {
+                    "repos": [
+                        {"url": str, "desc": str, "default_branch": str, "token": str, "branch_prefix": str, "docs_repo": true},
+                        {"url": str, "desc": str, "default_branch": str, "token": str, "branch_prefix": str, "docs_repo": false}
+                    ]
+                }
+            }
+        失败 (400):
+            {"code": 400, "message": "错误信息"}
+    """
+    from flask import current_app
+    from service.github_service import init_repos_from_template, GitHubServiceError
+
+    config = current_app.config['APP_CONFIG']
+    github_cfg = config.github
+
+    if not github_cfg.organization or not github_cfg.admin_token:
+        return jsonify({'code': 400, 'message': 'GitHub 组织配置未设置，请联系管理员'}), 400
+
+    try:
+        result = init_repos_from_template(
+            user_id=request.user_info.user_id,
+            organization=github_cfg.organization,
+            admin_token=github_cfg.admin_token,
+            api_base=github_cfg.api_base,
+        )
+    except GitHubServiceError as e:
+        return jsonify({'code': 400, 'message': e.message}), 400
+
+    return jsonify({
+        'code': 200,
+        'message': '仓库初始化成功',
+        'data': result,
+    })
+
+
 @client_bp.route('/startup-config', methods=['POST'])
 def get_client_startup_config():
     """

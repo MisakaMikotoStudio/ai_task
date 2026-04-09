@@ -1061,6 +1061,32 @@ function wizardRenderReposStep(isView) {
             cfgRenderReposWaterfall();
         };
     }
+
+    const initBtn = document.getElementById('cfg-init-from-template-btn');
+    if (initBtn) {
+        initBtn.style.display = isView ? 'none' : '';
+        initBtn.onclick = async () => {
+            try {
+                initBtn.disabled = true;
+                initBtn.textContent = '初始化中...';
+                const result = await activeClientAPI.initReposFromTemplate();
+                const repos = result.data && result.data.repos;
+                if (repos && repos.length) {
+                    cfgReposList = repos.map(r => ({ ...r }));
+                    cfgRenderReposWaterfall();
+                    showToast('仓库初始化成功', 'success');
+                } else {
+                    showToast('未返回仓库信息', 'error');
+                }
+            } catch (error) {
+                showToast(error.message || '初始化失败', 'error');
+            } finally {
+                initBtn.disabled = false;
+                initBtn.textContent = '从模板初始化';
+            }
+        };
+    }
+
     cfgRenderReposWaterfall();
 }
 

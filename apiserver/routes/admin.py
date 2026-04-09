@@ -411,6 +411,35 @@ def admin_update_client(client_id: int):
     })
 
 
+@admin_bp.route('/clients/init-repos-from-template', methods=['POST'])
+@require_admin
+def admin_init_repos_from_template():
+    """从模板初始化仓库（admin 专用）"""
+    from service.github_service import init_repos_from_template, GitHubServiceError
+
+    config = current_app.config['APP_CONFIG']
+    github_cfg = config.github
+
+    if not github_cfg.organization or not github_cfg.admin_token:
+        return jsonify({'code': 400, 'message': 'GitHub 组织配置未设置，请联系管理员', 'data': None}), 400
+
+    try:
+        result = init_repos_from_template(
+            user_id=request.user_info.user_id,
+            organization=github_cfg.organization,
+            admin_token=github_cfg.admin_token,
+            api_base=github_cfg.api_base,
+        )
+    except GitHubServiceError as e:
+        return jsonify({'code': 400, 'message': e.message, 'data': None}), 400
+
+    return jsonify({
+        'code': 200,
+        'message': '仓库初始化成功',
+        'data': result,
+    })
+
+
 @admin_bp.route('/clients/<int:client_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_client(client_id: int):
