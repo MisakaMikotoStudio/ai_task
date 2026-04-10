@@ -994,6 +994,10 @@
                         <span class="nav-icon">🔐</span>
                         <span>权限配置</span>
                     </a>
+                    <a href="#" class="nav-item" data-view="resources" style="display:none;">
+                        <span class="nav-icon">🗄️</span>
+                        <span>资源管理</span>
+                    </a>
                     <a href="#" class="nav-item user-only-nav" data-view="store" style="display:none;">
                         <span class="nav-icon">🛍️</span>
                         <span>商店</span>
@@ -1663,6 +1667,80 @@
                                 <div class="commerce-modal-footer">
                                     <button type="button" class="btn-secondary" id="cancel-permission-btn">取消</button>
                                     <button type="submit" class="btn-primary" id="save-permission-btn">保存</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 资源管理视图（admin） -->
+                <div id="resources-view" class="view">
+                    <div class="commerce-page-head">
+                        <div class="commerce-page-head-text">
+                            <h2 class="commerce-page-title">资源管理</h2>
+                            <p class="commerce-page-sub">管理系统基础设施资源（数据库实例等），控制上架/下架状态</p>
+                        </div>
+                        <button type="button" id="open-create-resource-btn" class="commerce-add-product-btn">
+                            <span class="commerce-add-icon">+</span> 新增资源
+                        </button>
+                    </div>
+                    <div class="card">
+                        <h3 class="section-title">资源列表</h3>
+                        <div id="resources-list" aria-live="polite"></div>
+                    </div>
+
+                    <!-- 新增/编辑资源弹窗 -->
+                    <div id="resource-modal" class="commerce-modal-overlay" style="display:none;">
+                        <div class="commerce-modal resource-modal">
+                            <div class="commerce-modal-header">
+                                <h3 id="resource-modal-title">新增资源</h3>
+                                <button type="button" class="commerce-modal-close" id="close-resource-modal">&times;</button>
+                            </div>
+                            <form id="resource-form" class="commerce-form">
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">资源类型 <span class="required">*</span></label>
+                                    <select id="resource-type" class="commerce-input" required>
+                                        <option value="">请选择</option>
+                                        <option value="mysql">MySQL</option>
+                                    </select>
+                                </div>
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">资源来源 <span class="required">*</span></label>
+                                    <select id="resource-source" class="commerce-input" required>
+                                        <option value="">请选择</option>
+                                        <option value="aliyun">阿里云</option>
+                                    </select>
+                                </div>
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">可用环境 <span class="required">*</span></label>
+                                    <div class="resource-env-checkboxes">
+                                        <label class="resource-env-checkbox">
+                                            <input type="checkbox" name="resource-envs" value="test"> test（测试环境）
+                                        </label>
+                                        <label class="resource-env-checkbox">
+                                            <input type="checkbox" name="resource-envs" value="prod"> prod（生产环境）
+                                        </label>
+                                    </div>
+                                </div>
+                                <!-- 补充信息区域，动态显示 -->
+                                <div id="resource-extra-fields" style="display:none;">
+                                    <div class="resource-extra-divider">补充信息</div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">数据库实例地址 (URL) <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-url" class="commerce-input" placeholder="如 rm-bp1xxxxx.mysql.rds.aliyuncs.com">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">AccessKey ID <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-ak-id" class="commerce-input" placeholder="阿里云 AccessKey ID">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">AccessKey Secret <span class="required">*</span></label>
+                                        <input type="password" id="resource-extra-ak-secret" class="commerce-input" placeholder="阿里云 AccessKey Secret">
+                                    </div>
+                                </div>
+                                <div class="commerce-modal-footer">
+                                    <button type="button" class="btn-secondary" id="cancel-resource-btn">取消</button>
+                                    <button type="submit" class="btn-primary" id="save-resource-btn">保存</button>
                                 </div>
                             </form>
                         </div>

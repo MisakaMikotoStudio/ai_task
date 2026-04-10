@@ -350,6 +350,49 @@ const adminPermissionAPI = {
     }
 };
 
+// 资源管理API（admin专用）
+const adminResourceAPI = {
+    async list() {
+        return request('/admin/resources');
+    },
+    async create(data) {
+        return request('/admin/resource', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    async update(id, data) {
+        return request(`/admin/resource/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    async offline(id) {
+        return request(`/admin/resource/${id}/offline`, {
+            method: 'POST'
+        });
+    },
+    async online(id) {
+        return request(`/admin/resource/${id}/online`, {
+            method: 'POST'
+        });
+    },
+    async remove(id) {
+        return request(`/admin/resource/${id}`, {
+            method: 'DELETE'
+        });
+    },
+    async listDatabases(resourceId, userId) {
+        return request(`/admin/resource/${resourceId}/databases?user_id=${userId}`);
+    },
+    async createDatabase(resourceId, userId) {
+        return request(`/admin/resource/${resourceId}/create-database`, {
+            method: 'POST',
+            body: JSON.stringify({ user_id: userId })
+        });
+    }
+};
+
 // 任务API
 const taskAPI = {
     // 获取列表

@@ -23,5 +23,7 @@ RUN pip install  --retries 10 "tomli>=2.0.0"
 RUN pip install  --retries 10 "cryptography>=42.0.0"
 RUN pip install  --retries 10 "cos-python-sdk-v5"
 RUN pip install  --retries 10 "paramiko>=3.0.0"
+RUN pip install  --retries 10 "alibabacloud_rds20140815"
+RUN pip install  --retries 10 "alibabacloud_tea_openapi"
 
 COPY . /app
