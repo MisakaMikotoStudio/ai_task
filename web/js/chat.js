@@ -17,6 +17,12 @@ let clientConfigCache = null;
 let isStandaloneMode = false; // task_id=0 模式
 let standaloneClientId = null; // 独立 chat 的 client_id
 
+// ===== Image attachment state =====
+// 已上传图片列表（active view），每项 { oss_path, filename }
+let pendingImages = [];
+// welcome view 的已上传图片列表
+let welcomePendingImages = [];
+
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', async () => {
     await initAPIConfig();
@@ -301,7 +307,9 @@ function renderFeed() {
         const [chipClass, chipLabel] = statusChipMap[msg.status] || ['', msg.status];
         const extra = parseMsgExtra(msg.extra);
 
-        // User row
+        // User row (with optional image list)
+        const msgImages = extra.images || [];
+        const imageListHtml = renderMsgImages(msgImages);
         const userRow = `
         <div class="msg-user-row">
             <div class="msg-avatar user-avatar">你</div>
@@ -311,6 +319,7 @@ function renderFeed() {
                     <span class="msg-time">${formatTime(msg.created_at)}</span>
                 </div>
                 <div class="msg-text">${escapeHtml(msg.input)}</div>
+                ${imageListHtml}
             </div>
         </div>`;
 
@@ -593,7 +602,9 @@ async function sendMessage() {
     btn.disabled = true;
 
     try {
-        await chatAPI.createMessage(taskId, currentChatId, text);
+        const images = collectAndClearImages('active');
+        const extra = images.length > 0 ? { images } : {};
+        await chatAPI.createMessage(taskId, currentChatId, text, extra);
         input.value = '';
         autoResize(input);
         await loadMessages(currentChatId);
@@ -612,6 +623,136 @@ function handleInputKeydown(e) {
 function autoResize(el) {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+}
+
+// ===== Image attachment helpers =====
+
+function triggerImageSelect(inputId) {
+    document.getElementById(inputId).click();
+}
+
+async function handleImageSelect(event, target) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? welcomePendingImages : pendingImages;
+
+    for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+            showToast('仅支持图片文件', 'error');
+            continue;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            showToast(`${file.name} 超过 10MB 限制`, 'error');
+            continue;
+        }
+        try {
+            const res = await chatAPI.uploadImage(file);
+            list.push(res.data);
+        } catch (e) {
+            showToast(e.message, 'error');
+        }
+    }
+    // 清空 input 以允许重复选择同一文件
+    event.target.value = '';
+    renderPendingImages(target);
+}
+
+function removePendingImage(index, target) {
+    const list = (target === 'welcome') ? welcomePendingImages : pendingImages;
+    list.splice(index, 1);
+    renderPendingImages(target);
+}
+
+function renderPendingImages(target) {
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? welcomePendingImages : pendingImages;
+    const containerId = isWelcome ? 'welcome-pending-images' : 'pending-images';
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (list.length === 0) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    container.innerHTML = list.map((img, i) => `
+        <div class="pending-image-item">
+            <span class="pending-image-name" title="${escapeHtml(img.filename)}">
+                📎 ${escapeHtml(img.filename)}
+            </span>
+            <button class="pending-image-remove" onclick="removePendingImage(${i}, '${target}')" title="移除">×</button>
+        </div>
+    `).join('');
+}
+
+function collectAndClearImages(target) {
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? welcomePendingImages : pendingImages;
+    const images = list.slice();
+    list.length = 0;
+    renderPendingImages(target);
+    return images;
+}
+
+// ===== Message image display helpers =====
+
+function renderMsgImages(images) {
+    if (!images || !Array.isArray(images) || images.length === 0) return '';
+    const items = images.map(img => {
+        const ossPath = escapeHtml(img.oss_path || '');
+        const filename = escapeHtml(img.filename || 'image');
+        return `<span class="msg-image-link" onclick="viewChatImage('${ossPath}', '${filename}')" title="点击查看">📎 ${filename}</span>`;
+    }).join('');
+    return `<div class="msg-image-list">${items}</div>`;
+}
+
+function viewChatImage(ossPath, filename) {
+    const modal = document.getElementById('image-preview-modal');
+    const img = document.getElementById('image-preview-img');
+    const title = document.getElementById('image-preview-title');
+
+    title.textContent = filename;
+    img.src = '';
+    img.alt = filename;
+
+    // 构造代理 URL（需要带 auth token）
+    const url = chatAPI.getImageProxyUrl(ossPath);
+    const token = getToken();
+
+    fetch(url, {
+        headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Appid': 'ai_task',
+        }
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error('加载失败');
+        return resp.blob();
+    })
+    .then(blob => {
+        img.src = URL.createObjectURL(blob);
+    })
+    .catch(e => {
+        img.alt = '图片加载失败';
+        showToast('图片加载失败: ' + e.message, 'error');
+    });
+
+    modal.classList.add('show');
+}
+
+function closeImagePreviewModal() {
+    const modal = document.getElementById('image-preview-modal');
+    const img = document.getElementById('image-preview-img');
+    modal.classList.remove('show');
+    // 释放 blob URL
+    if (img.src && img.src.startsWith('blob:')) {
+        URL.revokeObjectURL(img.src);
+    }
+    img.src = '';
 }
 
 // ===== Terminate =====
@@ -671,11 +812,13 @@ async function sendNewChatMessage() {
     btn.disabled = true;
 
     try {
+        const images = collectAndClearImages('welcome');
+        const extra = images.length > 0 ? { images } : {};
         let res;
         if (isStandaloneMode) {
-            res = await chatAPI.createStandaloneChatWithMessage(text, standaloneClientId);
+            res = await chatAPI.createStandaloneChatWithMessage(text, standaloneClientId, extra);
         } else {
-            res = await chatAPI.createChatWithMessage(taskId, text);
+            res = await chatAPI.createChatWithMessage(taskId, text, extra);
         }
         input.value = '';
         autoResize(input);

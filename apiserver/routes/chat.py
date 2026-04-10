@@ -4,9 +4,13 @@
 Chat相关路由
 """
 
-from flask import Blueprint, request, jsonify
+import logging
+import os
+
+from flask import Blueprint, request, jsonify, Response, current_app
 
 from dao.models import Chat, ChatMessage
+from dao import order_dao
 from dao.chat_dao import (
     create_chat, get_chats_by_task, get_chat_by_id, update_chat_status, soft_delete_chat,
     create_chat_message, get_messages_by_chat, get_running_message,
@@ -367,4 +371,103 @@ def agent_reply_message_api():
         if not ok_session:
             return jsonify({'code': 400, 'message': 'Chat不存在或已删除'}), 400
     return jsonify({'code': 200, 'message': '同步成功'})
+
+
+# ===== 图片上传/下载接口 =====
+
+logger = logging.getLogger(__name__)
+
+MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
+ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+
+
+@chat_bp.route('/upload/image', methods=['POST'])
+def upload_chat_image_api():
+    """
+    上传聊天图片到 OSS（私有读写）。
+    需要登录校验（全局中间件）+ 订阅校验。
+    """
+    from service import oss_service
+
+    user = request.user_info
+    config = current_app.config['APP_CONFIG']
+
+    # 订阅校验：用户必须有至少一个生效中的付费服务
+    active_orders = order_dao.get_user_active_orders(user_id=user.id)
+    if not active_orders:
+        return jsonify({'code': 403, 'message': '需要订阅服务后才能上传图片'}), 403
+
+    if not config.oss.enabled:
+        return jsonify({'code': 500, 'message': 'OSS 服务未启用'}), 500
+
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'code': 400, 'message': '缺少 file 字段'}), 400
+
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        return jsonify({'code': 400, 'message': '仅支持 jpg/png/gif/webp 格式'}), 400
+
+    # 检查文件大小
+    try:
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
+    except OSError:
+        file_size = None
+    if file_size is not None and file_size > MAX_CHAT_IMAGE_BYTES:
+        return jsonify({'code': 400, 'message': '图片大小不能超过 10MB'}), 400
+
+    try:
+        result = oss_service.upload_chat_image(
+            config=config.oss,
+            file_storage=file,
+            user_id=user.user_id,
+        )
+    except Exception as e:
+        logger.exception("聊天图片上传失败")
+        return jsonify({'code': 500, 'message': f'上传失败: {e}'}), 500
+
+    return jsonify({'code': 200, 'message': '上传成功', 'data': result})
+
+
+@chat_bp.route('/image', methods=['GET'])
+def get_chat_image_api():
+    """
+    代理下载聊天图片（私有读写，前端无法直接访问 COS）。
+    校验：登录 + 路径归属当前用户。
+    """
+    from service import oss_service
+
+    user = request.user_info
+    config = current_app.config['APP_CONFIG']
+
+    oss_path = request.args.get('path', '').strip()
+    if not oss_path:
+        return jsonify({'code': 400, 'message': '缺少 path 参数'}), 400
+
+    # 防越权：路径必须包含当前用户的 user_id
+    expected_prefix = f'chat/images/{user.user_id}/'
+    if not oss_path.startswith(expected_prefix):
+        return jsonify({'code': 403, 'message': '无权访问该图片'}), 403
+
+    if not config.oss.enabled:
+        return jsonify({'code': 500, 'message': 'OSS 服务未启用'}), 500
+
+    try:
+        file_content, content_type = oss_service.download_chat_image(
+            config=config.oss,
+            oss_path=oss_path,
+        )
+    except Exception as e:
+        logger.exception("聊天图片下载失败: path=%s", oss_path)
+        return jsonify({'code': 404, 'message': '图片不存在'}), 404
+
+    return Response(
+        file_content,
+        mimetype=content_type,
+        headers={
+            'Cache-Control': 'max-age=3600',
+            'Content-Length': str(len(file_content)),
+        },
+    )
 

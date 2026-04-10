@@ -286,7 +286,19 @@ class CodeDevelopWorker(BaseWorker):
 
     def execute(self):
         """执行节点逻辑 - 待处理"""
+        # 检查最新消息是否携带图片，下载到工作目录
+        downloaded_images = self._download_chat_images()
+
         prompt = self._build_development_prompt()
+
+        # 如果有下载的图片，在 prompt 末尾追加图片信息
+        if downloaded_images:
+            image_lines = ["\n\n---\n\n## 用户附带的图片\n\n以下图片已下载到当前工作目录：\n"]
+            for img in downloaded_images:
+                image_lines.append(f"- `{img['local_path']}` (原始文件名: {img['filename']})")
+            image_lines.append("\n请在处理用户需求时参考这些图片。")
+            prompt += "\n".join(image_lines)
+
         session_id = self.task.get("session_id") or ""
         reply, session_id = self.run_agent_prompt(
             cwd=self.work_dir,
@@ -378,6 +390,103 @@ class CodeDevelopWorker(BaseWorker):
         if rebase_in_progress:
             git_utils.abort_rebase(repo_dir=work_repo_dir, trace_id=self.trace_id)
             raise Exception(f"Agent 未能完成 rebase 冲突解决，已自动 abort")
+
+    def _download_chat_images(self) -> list:
+        """检查最新消息的 extra.images，通过 OSS 直接下载或通过 apiserver 代理下载到工作目录。
+        返回 [{'filename': str, 'local_path': str}]
+        """
+        chat_messages = self.task.get("chat_messages", [])
+        if not chat_messages:
+            return []
+
+        latest_msg = chat_messages[-1]
+        extra = latest_msg.get("extra") or {}
+        images = extra.get("images", [])
+        if not images:
+            return []
+
+        # 创建图片保存目录
+        images_dir = os.path.join(self.work_dir, "chat_images")
+        os.makedirs(images_dir, exist_ok=True)
+
+        downloaded = []
+        oss_config = self.client_config.oss
+
+        for img in images:
+            oss_path = img.get("oss_path", "")
+            filename = img.get("filename", "image")
+            if not oss_path:
+                continue
+
+            # 使用 oss_path 的文件名部分作为本地文件名（保留原始扩展名）
+            _, ext = os.path.splitext(oss_path)
+            local_filename = filename
+            if ext and not filename.lower().endswith(ext.lower()):
+                local_filename = filename + ext
+            local_path = os.path.join(images_dir, local_filename)
+
+            try:
+                if oss_config and oss_config.secret_id and oss_config.bucket:
+                    # 通过 COS SDK 直接下载
+                    self._download_image_from_oss(
+                        oss_config=oss_config,
+                        oss_path=oss_path,
+                        local_path=local_path,
+                    )
+                else:
+                    # 通过 apiserver 代理下载
+                    self._download_image_from_apiserver(
+                        oss_path=oss_path,
+                        local_path=local_path,
+                    )
+                downloaded.append({
+                    'filename': filename,
+                    'local_path': local_path,
+                })
+                logger.info(f"[{self.trace_id}] 聊天图片下载成功: {oss_path} -> {local_path}")
+            except Exception as e:
+                logger.error(f"[{self.trace_id}] 聊天图片下载失败: {oss_path}, error={e}")
+
+        return downloaded
+
+    def _download_image_from_oss(self, oss_config, oss_path: str, local_path: str):
+        """通过 COS SDK 直接下载图片"""
+        try:
+            from qcloud_cos import CosConfig, CosS3Client
+        except ImportError:
+            raise RuntimeError("请安装 cos-python-sdk-v5: pip install cos-python-sdk-v5")
+
+        cos_config = CosConfig(
+            Region=oss_config.region,
+            SecretId=oss_config.secret_id,
+            SecretKey=oss_config.secret_key,
+        )
+        client = CosS3Client(cos_config)
+        response = client.get_object(
+            Bucket=oss_config.bucket,
+            Key=oss_path,
+        )
+        file_content = response['Body'].get_raw_stream().read()
+        with open(local_path, 'wb') as f:
+            f.write(file_content)
+
+    def _download_image_from_apiserver(self, oss_path: str, local_path: str):
+        """通过 apiserver 代理接口下载图片"""
+        import requests as http_requests
+        url = f"{self.client_config.apiserver_url.rstrip('/')}/api/chat/image"
+        headers = {
+            'X-Client-Secret': self.client_config.secret,
+            'X-Client-ID': str(self.client_config.client_id),
+        }
+        resp = http_requests.get(
+            url=url,
+            params={'path': oss_path},
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        with open(local_path, 'wb') as f:
+            f.write(resp.content)
 
     def _build_development_prompt(self) -> str:
         """构建跨多项目开发 prompt"""
