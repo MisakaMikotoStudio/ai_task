@@ -136,6 +136,9 @@ def _normalize_client_payload(data: dict) -> Optional[str]:
             return '必须指定一个文档仓库'
         if docs_repo_count > 1:
             return '只能指定一个文档仓库'
+        non_docs_repo_count = len(repos) - docs_repo_count
+        if non_docs_repo_count == 0:
+            return '除文档仓库外，至少需要一个代码仓库'
 
     if 'env_vars' in data:
         env_vars_body = data.get('env_vars')
@@ -354,6 +357,9 @@ def _validate_docs_repo_policy(repos: List[dict]) -> None:
         raise ClientRepoSaveError("必须指定一个文档仓库")
     if docs_repo_count > 1:
         raise ClientRepoSaveError("只能指定一个文档仓库")
+    non_docs_repo_count = len(repos) - docs_repo_count
+    if non_docs_repo_count == 0:
+        raise ClientRepoSaveError("除文档仓库外，至少需要一个代码仓库")
 
 
 def save_client_repos(
