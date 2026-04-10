@@ -772,7 +772,7 @@ class Resource(Base):
             'type': self.type,
             'source': self.source,
             'envs': self.envs or [],
-            'extra': self._safe_extra(),
+            'extra': self.extra or {},
             'is_online': self.deleted_at is None,
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at),
