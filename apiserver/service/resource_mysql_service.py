@@ -145,6 +145,93 @@ def list_databases(resource: Resource, user_id: int) -> List[Dict]:
         raise ResourceMySQLError(f"查询数据库列表失败：{str(e)}")
 
 
+def create_database_with_name(resource: Resource, user_id: int, db_name: str) -> Dict:
+    """
+    在指定资源上创建一个指定名称的数据库，并生成仅对该数据库具有读写权限的账号
+
+    Args:
+        resource: Resource 对象
+        user_id: 用户 ID
+        db_name: 数据库名称（由调用方生成）
+
+    Returns:
+        {
+            "db_name": "...",
+            "account_name": "...",
+            "account_password": "...",
+            "instance_url": "...",
+            "port": 3306,
+        }
+    """
+    from alibabacloud_rds20140815 import models as rds_models
+
+    client, instance_id = _build_rds_client(resource=resource)
+    extra = resource.get_raw_extra()
+    instance_url = extra.get('url', '')
+    port = int(extra.get('port', 3306))
+
+    try:
+        # 1. 创建数据库
+        create_db_req = rds_models.CreateDatabaseRequest(
+            dbinstance_id=instance_id,
+            dbname=db_name,
+            character_set_name="utf8mb4",
+        )
+        client.create_database(create_db_req)
+        logger.info(
+            "create_database_with_name: resource_id=%s, user_id=%s, db_name=%s",
+            resource.id, user_id, db_name,
+        )
+
+        # 2. 创建账户（账号名由 db_name 派生，截断到 32 字符以内）
+        account_name = f"u_{db_name}"
+        if len(account_name) > 32:
+            account_name = account_name[:32]
+        account_password = _generate_password(length=16)
+
+        create_account_req = rds_models.CreateAccountRequest(
+            dbinstance_id=instance_id,
+            account_name=account_name,
+            account_password=account_password,
+            account_type="Normal",
+        )
+        client.create_account(create_account_req)
+        logger.info(
+            "create_account: resource_id=%s, user_id=%s, account=%s",
+            resource.id, user_id, account_name,
+        )
+
+        # 3. 授权账户对数据库的权限
+        grant_req = rds_models.GrantAccountPrivilegeRequest(
+            dbinstance_id=instance_id,
+            account_name=account_name,
+            dbname=db_name,
+            account_privilege="ReadWrite",
+        )
+        client.grant_account_privilege(grant_req)
+        logger.info(
+            "grant_privilege: resource_id=%s, account=%s, db=%s, privilege=ReadWrite",
+            resource.id, account_name, db_name,
+        )
+
+        return {
+            'db_name': db_name,
+            'account_name': account_name,
+            'account_password': account_password,
+            'instance_url': instance_url,
+            'port': port,
+        }
+
+    except ResourceMySQLError:
+        raise
+    except Exception as e:
+        logger.error(
+            "create_database_with_name failed: resource_id=%s, user_id=%s, db_name=%s, error=%s",
+            resource.id, user_id, db_name, str(e),
+        )
+        raise ResourceMySQLError(f"创建数据库失败：{str(e)}")
+
+
 def create_database_for_user(resource: Resource, user_id: int) -> Dict:
     """
     为用户创建数据库，并生成仅对该数据库具有 admin 权限的账号和密码

@@ -162,6 +162,14 @@ const clientAPI = {
         return request('/client/generate-default-database', {
             method: 'POST'
         });
+    },
+
+    // 从模板生成默认应用
+    async createFromTemplate(appTypes) {
+        return request('/client/create-from-template', {
+            method: 'POST',
+            body: JSON.stringify({ app_types: appTypes })
+        });
     }
 };
 
@@ -256,6 +264,14 @@ const adminClientAPI = {
     async generateDefaultDatabase() {
         return request('/client/generate-default-database', {
             method: 'POST'
+        });
+    },
+
+    // 从模板生成默认应用
+    async createFromTemplate(appTypes) {
+        return request('/client/create-from-template', {
+            method: 'POST',
+            body: JSON.stringify({ app_types: appTypes })
         });
     }
 };

@@ -5819,3 +5819,83 @@ textarea:focus {
     border-top: 1px solid var(--border-color);
     margin-top: 8px;
 }
+
+/* 添加应用选择弹窗 */
+.add-client-choice .choice-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.add-client-choice .choice-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--transition);
+    flex-wrap: wrap;
+}
+
+.add-client-choice .choice-option:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-secondary);
+}
+
+.add-client-choice .choice-option input[type="radio"] {
+    margin-top: 2px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.add-client-choice .choice-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.add-client-choice .choice-desc {
+    width: 100%;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-left: 24px;
+}
+
+.add-client-choice .form-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    display: block;
+}
+
+.add-client-choice .checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.add-client-choice .checkbox-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: var(--transition);
+}
+
+.add-client-choice .checkbox-option:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-secondary);
+}
+
+.add-client-choice .checkbox-option input[type="checkbox"] {
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
