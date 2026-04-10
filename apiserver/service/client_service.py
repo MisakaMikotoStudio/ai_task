@@ -877,9 +877,6 @@ def generate_default_database(user_id: int, config) -> dict:
     """
     import pymysql
 
-    if not config.enabled:
-        raise ClientSaveError('默认数据库功能未启用，请联系管理员配置')
-
     admin_conn = None
     try:
         admin_conn = pymysql.connect(

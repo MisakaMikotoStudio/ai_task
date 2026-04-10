@@ -68,7 +68,6 @@ class OssConfig:
 @dataclass
 class DefaultDatabaseConfig:
     """默认数据库实例配置（用于为用户应用自动创建数据库）"""
-    enabled: bool = False
     url: str = "127.0.0.1"
     port: int = 3306
     admin_username: str = "root"       # 拥有 CREATE DATABASE / CREATE USER 权限的管理员账号

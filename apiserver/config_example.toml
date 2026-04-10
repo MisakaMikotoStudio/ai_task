@@ -43,8 +43,6 @@ sandbox = false
 app_encrypt_key = ""
 
 [default_database]
-# 是否启用"生成默认数据库"功能
-enabled = false
 # 数据库实例地址（腾讯云 MySQL 等）
 url = "your-db-instance.mysql.rds.tencentcloud.com"
 # 数据库实例端口
