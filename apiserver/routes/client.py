@@ -28,6 +28,7 @@ from service.client_service import (
     ClientSaveError,
     update_client_heartbeat,
     generate_default_database,
+    create_client_from_template,
 )
 from dao.heartbeat_dao import get_heartbeats_by_user
 from dao.chat_dao import get_running_chat_messages_by_client
@@ -138,6 +139,50 @@ def generate_default_database_api():
             'message': '数据库创建成功',
             'data': db_info,
         })
+    except ClientSaveError as e:
+        return jsonify({'code': 400, 'message': e.message}), 400
+
+
+@client_bp.route('/create-from-template', methods=['POST'])
+def create_from_template_api():
+    """
+    从模板生成默认应用
+
+    Request Body:
+        {
+            "app_types": ["web"]  # 应用形态列表，必填，目前仅支持 "web"
+        }
+
+    Response:
+        成功 (201):
+            {
+                "code": 201,
+                "message": "应用创建成功",
+                "data": { ... }  # 客户端详情
+            }
+        失败 (400):
+            {"code": 400, "message": "错误信息"}
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    app_types = data.get('app_types', [])
+
+    try:
+        client_id = create_client_from_template(
+            user_id=request.user_info.user_id,
+            app_types=app_types,
+        )
+        response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
+        if not response_data:
+            return jsonify({'code': 500, 'message': '应用创建成功但读取详情失败'}), 500
+
+        return jsonify({
+            'code': 201,
+            'message': '应用创建成功',
+            'data': response_data,
+        }), 201
     except ClientSaveError as e:
         return jsonify({'code': 400, 'message': e.message}), 400
 
