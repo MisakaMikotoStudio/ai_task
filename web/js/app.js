@@ -4238,12 +4238,25 @@ function initResources() {
 function toggleResourceExtraFields() {
     const type = document.getElementById('resource-type').value;
     const source = document.getElementById('resource-source').value;
-    const extraFields = document.getElementById('resource-extra-fields');
-    if (type === 'mysql' && source === 'aliyun') {
-        extraFields.style.display = '';
-    } else {
-        extraFields.style.display = 'none';
-    }
+    const mysqlFields = document.getElementById('resource-extra-fields');
+    const githubFields = document.getElementById('resource-extra-github-fields');
+    const sourceSelect = document.getElementById('resource-source');
+
+    // 根据资源类型动态过滤来源选项
+    const sourceOptions = sourceSelect.querySelectorAll('option');
+    sourceOptions.forEach(opt => {
+        if (!opt.value) return; // 跳过占位选项
+        if (type === 'mysql') {
+            opt.style.display = opt.value === 'aliyun' ? '' : 'none';
+        } else if (type === 'code_repo') {
+            opt.style.display = opt.value === 'github' ? '' : 'none';
+        } else {
+            opt.style.display = '';
+        }
+    });
+
+    mysqlFields.style.display = (type === 'mysql' && source === 'aliyun') ? '' : 'none';
+    githubFields.style.display = (type === 'code_repo' && source === 'github') ? '' : 'none';
 }
 
 function showResourceModal(item) {
@@ -4256,6 +4269,7 @@ function showResourceModal(item) {
     document.getElementById('resource-extra-ak-secret').type = 'password';
     const toggleBtn = document.getElementById('toggle-ak-secret');
     if (toggleBtn) toggleBtn.textContent = '👁️';
+    document.getElementById('resource-extra-github-fields').style.display = 'none';
 
     if (item) {
         currentEditResourceId = item.id;
@@ -4273,6 +4287,8 @@ function showResourceModal(item) {
         document.getElementById('resource-extra-url').value = extra.url || '';
         document.getElementById('resource-extra-ak-id').value = extra.access_key_id || '';
         document.getElementById('resource-extra-ak-secret').value = extra.access_key_secret || '';
+        document.getElementById('resource-extra-organization').value = extra.organization || '';
+        document.getElementById('resource-extra-admin-token').value = '';
         toggleResourceExtraFields();
     } else {
         currentEditResourceId = null;
@@ -4325,15 +4341,32 @@ async function handleResourceFormSubmit(e) {
                 alert('请填写 AccessKey Secret');
                 return;
             }
+        } else if (type === 'code_repo' && source === 'github') {
+            const organization = document.getElementById('resource-extra-organization').value.trim();
+            const adminToken = document.getElementById('resource-extra-admin-token').value.trim();
+            if (!organization) {
+                alert('请填写 GitHub Organization');
+                return;
+            }
+            extra.organization = organization;
+            if (adminToken) {
+                extra.admin_token = adminToken;
+            } else if (!currentEditResourceId) {
+                alert('请填写 GitHub Admin Token');
+                return;
+            }
         }
 
         const payload = { type, source, envs, extra };
 
         let res;
         if (currentEditResourceId) {
-            // 编辑时如果没填 secret，不传该字段（保留原值）
+            // 编辑时如果没填敏感字段，不传该字段（保留原值）
             if (type === 'mysql' && source === 'aliyun' && !extra.access_key_secret) {
                 delete payload.extra.access_key_secret;
+            }
+            if (type === 'code_repo' && source === 'github' && !extra.admin_token) {
+                delete payload.extra.admin_token;
             }
             res = await adminResourceAPI.update(currentEditResourceId, payload);
         } else {
@@ -4379,7 +4412,7 @@ async function loadAdminResources() {
                         <th>类型</th>
                         <th>来源</th>
                         <th>可用环境</th>
-                        <th>实例地址</th>
+                        <th>实例信息</th>
                         <th>状态</th>
                         <th>创建时间</th>
                         <th>操作</th>
@@ -4421,8 +4454,8 @@ async function loadAdminResources() {
 }
 
 function renderResourceRow(resource) {
-    const typeLabels = { mysql: 'MySQL' };
-    const sourceLabels = { aliyun: '阿里云' };
+    const typeLabels = { mysql: 'MySQL', code_repo: '代码仓库' };
+    const sourceLabels = { aliyun: '阿里云', github: 'GitHub' };
     const envLabels = { test: '测试', prod: '生产' };
 
     const envsHtml = (resource.envs || []).map(e =>
@@ -4430,7 +4463,9 @@ function renderResourceRow(resource) {
     ).join(' ');
 
     const extra = resource.extra || {};
-    const instanceUrl = extra.url || '-';
+    const instanceUrl = resource.type === 'code_repo'
+        ? (extra.organization || '-')
+        : (extra.url || '-');
 
     const statusClass = resource.is_online ? 'resource-status-online' : 'resource-status-offline';
     const statusText = resource.is_online ? '上架' : '下架';

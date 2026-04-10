@@ -1702,6 +1702,7 @@
                                     <select id="resource-type" class="commerce-input" required>
                                         <option value="">请选择</option>
                                         <option value="mysql">MySQL</option>
+                                        <option value="code_repo">代码仓库</option>
                                     </select>
                                 </div>
                                 <div class="commerce-form-group">
@@ -1709,6 +1710,7 @@
                                     <select id="resource-source" class="commerce-input" required>
                                         <option value="">请选择</option>
                                         <option value="aliyun">阿里云</option>
+                                        <option value="github">GitHub</option>
                                     </select>
                                 </div>
                                 <div class="commerce-form-group">
@@ -1722,7 +1724,7 @@
                                         </label>
                                     </div>
                                 </div>
-                                <!-- 补充信息区域，动态显示 -->
+                                <!-- 补充信息区域（MySQL + 阿里云），动态显示 -->
                                 <div id="resource-extra-fields" style="display:none;">
                                     <div class="resource-extra-divider">补充信息</div>
                                     <div class="commerce-form-group">
@@ -1739,6 +1741,18 @@
                                             <input type="password" id="resource-extra-ak-secret" class="commerce-input" placeholder="阿里云 AccessKey Secret">
                                             <button type="button" class="resource-secret-toggle" id="toggle-ak-secret" title="显示/隐藏">👁️</button>
                                         </div>
+                                    </div>
+                                </div>
+                                <!-- 补充信息区域（代码仓库 + GitHub），动态显示 -->
+                                <div id="resource-extra-github-fields" style="display:none;">
+                                    <div class="resource-extra-divider">补充信息</div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">Organization <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-organization" class="commerce-input" placeholder="GitHub 组织名称">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">Admin Token <span class="required">*</span></label>
+                                        <input type="password" id="resource-extra-admin-token" class="commerce-input" placeholder="具有组织管理权限的 GitHub Token">
                                     </div>
                                 </div>
                                 <div class="commerce-modal-footer">

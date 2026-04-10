@@ -824,4 +824,13 @@ def _validate_resource_extra(res_type: str, source: str, extra: dict) -> str:
             return 'AccessKey Secret 不能为空'
         return None
 
+    if res_type == Resource.TYPE_CODE_REPO and source == Resource.SOURCE_GITHUB:
+        organization = (extra.get('organization') or '').strip()
+        admin_token = (extra.get('admin_token') or '').strip()
+        if not organization:
+            return 'GitHub Organization 不能为空'
+        if not admin_token:
+            return 'GitHub Admin Token 不能为空'
+        return None
+
     return f'暂不支持 type={res_type} + source={source} 的组合'
