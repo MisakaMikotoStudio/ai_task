@@ -863,103 +863,7 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
 VALID_APP_TYPES = ['web']
 
 
-def _generate_db_password(length: int = 16) -> str:
-    """生成满足 MySQL 复杂度要求的密码：大小写字母 + 数字 + 特殊字符"""
-    import secrets as _secrets
-    import string as _string
-
-    if length < 8:
-        length = 8
-    chars = [
-        _secrets.choice(_string.ascii_uppercase),
-        _secrets.choice(_string.ascii_lowercase),
-        _secrets.choice(_string.digits),
-        _secrets.choice('!@#$%^&*'),
-    ]
-    all_chars = _string.ascii_letters + _string.digits + '!@#$%^&*'
-    chars.extend(_secrets.choice(all_chars) for _ in range(length - len(chars)))
-    rng = _secrets.SystemRandom()
-    rng.shuffle(chars)
-    return ''.join(chars)
-
-
-def _create_mysql_database_direct(config, db_name: str, user_id: int) -> dict:
-    """
-    通过直连 MySQL（pymysql）创建数据库 + 专属账号。
-
-    Args:
-        config: DefaultDatabaseConfig 对象
-        db_name: 数据库名称
-        user_id: 用户 ID（用于生成账号名）
-
-    Returns:
-        {"host", "port", "username", "password", "db_name"}
-
-    Raises:
-        ClientSaveError
-    """
-    import pymysql
-
-    # 生成专属账号（截断到 32 字符以内，MySQL 用户名长度限制）
-    account_name = f"u_{db_name}"
-    if len(account_name) > 32:
-        account_name = account_name[:32]
-    account_password = _generate_db_password(length=16)
-
-    admin_conn = None
-    try:
-        admin_conn = pymysql.connect(
-            host=config.url,
-            port=config.port,
-            user=config.admin_username,
-            password=config.admin_password,
-            connect_timeout=10,
-        )
-        cursor = admin_conn.cursor()
-
-        # 创建数据库
-        cursor.execute(
-            f"CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
-        )
-
-        # 创建专属账号并授权
-        cursor.execute(
-            "CREATE USER %s@'%%' IDENTIFIED BY %s",
-            (account_name, account_password),
-        )
-        cursor.execute(
-            f"GRANT ALL PRIVILEGES ON `{db_name}`.* TO %s@'%%'",
-            (account_name,),
-        )
-        cursor.execute("FLUSH PRIVILEGES")
-
-        admin_conn.commit()
-
-        logger.info(
-            "_create_mysql_database_direct: db_name=%s, account=%s, host=%s, user_id=%s",
-            db_name, account_name, config.url, user_id,
-        )
-
-        return {
-            'host': config.url,
-            'port': config.port,
-            'username': account_name,
-            'password': account_password,
-            'db_name': db_name,
-        }
-
-    except pymysql.Error as e:
-        logger.error(
-            "_create_mysql_database_direct failed: db_name=%s, user_id=%s, error=%s",
-            db_name, user_id, str(e),
-        )
-        raise ClientSaveError(f'创建数据库失败：{str(e)}')
-    finally:
-        if admin_conn:
-            admin_conn.close()
-
-
-def create_client_from_template(user_id: int, app_types: list, config) -> int:
+def create_client_from_template(user_id: int, app_types: list) -> int:
     """
     从模板生成默认应用：创建 Client，然后在 test/prod 环境下各创建一个默认数据库。
 
@@ -967,15 +871,15 @@ def create_client_from_template(user_id: int, app_types: list, config) -> int:
     1. 生成不重复的应用名称
     2. 创建 Client 记录
     3. 对于 test、prod 两个环境：
-       a. 生成 db_name = {user_id}_{env}_{秒级时间戳}
-       b. 写入 ClientDatabase 记录
-       c. 通过直连 MySQL 创建数据库 + 专属账号
-       d. 回写连接信息到 ClientDatabase
+       a. 从资源管理中获取一个可用的 MySQL 资源
+       b. 生成 db_name = {user_id}_{env}_{秒级时间戳}
+       c. 写入 ClientDatabase 记录
+       d. 调用资源服务在云上创建数据库 + 专属账号
+       e. 回写连接信息到 ClientDatabase
 
     Args:
         user_id: 用户 ID
         app_types: 应用形态列表，如 ["web"]
-        config: DefaultDatabaseConfig 对象
 
     Returns:
         新创建的客户端 ID
@@ -984,6 +888,8 @@ def create_client_from_template(user_id: int, app_types: list, config) -> int:
         ClientSaveError: 校验失败或创建失败
     """
     import time
+    from dao.resource_dao import get_online_resources_by_type_source
+    from service.resource_mysql_service import create_database_with_name, ResourceMySQLError
 
     # 校验 app_types
     if not app_types or not isinstance(app_types, list):
@@ -1018,6 +924,20 @@ def create_client_from_template(user_id: int, app_types: list, config) -> int:
 
     # 为 test、prod 两个环境分别创建数据库
     for env in VALID_ENVS:
+        # 从资源管理中获取可用的 MySQL 资源
+        resources = get_online_resources_by_type_source(
+            type='mysql',
+            source='aliyun',
+            env=env,
+        )
+        if not resources:
+            logger.warning(
+                "create_client_from_template: no mysql resource for env=%s, user_id=%s, skipping",
+                env, user_id,
+            )
+            continue
+
+        resource = resources[0]
         db_name = f"{user_id}_{env}_{int(time.time())}"
 
         # 先写入 ClientDatabase 记录
@@ -1029,34 +949,34 @@ def create_client_from_template(user_id: int, app_types: list, config) -> int:
             db_type='mysql',
         )
         logger.info(
-            "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s",
-            record_id, env, db_name,
+            "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s, resource_id=%s",
+            record_id, env, db_name, resource.id,
         )
 
-        # 通过直连 MySQL 创建数据库 + 专属账号
+        # 调用资源服务在云上创建数据库 + 专属账号
         try:
-            result = _create_mysql_database_direct(
-                config=config,
-                db_name=db_name,
+            result = create_database_with_name(
+                resource=resource,
                 user_id=user_id,
+                db_name=db_name,
             )
             # 回写连接信息
             update_client_database(
                 record_id=record_id,
                 user_id=user_id,
-                host=result['host'],
-                port=result['port'],
-                username=result['username'],
-                password=result['password'],
+                host=result['instance_url'],
+                port=result.get('port', 3306),
+                username=result['account_name'],
+                password=result['account_password'],
             )
             logger.info(
-                "create_client_from_template: db created, env=%s, db_name=%s, host=%s",
-                env, db_name, result['host'],
+                "create_client_from_template: cloud db created, env=%s, db_name=%s, host=%s",
+                env, db_name, result['instance_url'],
             )
-        except ClientSaveError as e:
+        except ResourceMySQLError as e:
             logger.error(
-                "create_client_from_template: db creation failed, env=%s, db_name=%s, error=%s",
-                env, db_name, e.message,
+                "create_client_from_template: cloud db creation failed, env=%s, db_name=%s, resource_id=%s, error=%s",
+                env, db_name, resource.id, e.message,
             )
             # 不阻断其他环境的创建，继续处理
 
