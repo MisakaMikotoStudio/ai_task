@@ -14,7 +14,7 @@ from flask import Blueprint, request, jsonify, current_app
 from dao import get_db_session
 from dao import product_dao, order_dao
 from dao.models import to_iso_utc
-from routes.auth_plugin import skip_auth
+from routes.auth_plugin import skip_auth, skip_subscribe
 from service import order_service, alipay_service
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ def list_products():
 
 
 @commercial_bp.route('/buy', methods=['POST'])
+@skip_subscribe
 def buy():
     """生成支付宝支付链接"""
     user = request.user_info
