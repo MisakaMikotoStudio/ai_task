@@ -753,11 +753,13 @@ class Resource(Base):
 
     # 类型常量
     TYPE_MYSQL = 'mysql'
-    VALID_TYPES = [TYPE_MYSQL]
+    TYPE_CODE_REPO = 'code_repo'
+    VALID_TYPES = [TYPE_MYSQL, TYPE_CODE_REPO]
 
     # 来源常量
     SOURCE_ALIYUN = 'aliyun'
-    VALID_SOURCES = [SOURCE_ALIYUN]
+    SOURCE_GITHUB = 'github'
+    VALID_SOURCES = [SOURCE_ALIYUN, SOURCE_GITHUB]
 
     # 环境常量
     VALID_ENVS = ['test', 'prod']
@@ -779,15 +781,16 @@ class Resource(Base):
         }
 
     def _safe_extra(self):
-        """返回 extra 时隐藏敏感字段（AccessKey Secret 等）"""
+        """返回 extra 时隐藏敏感字段（AccessKey Secret、admin_token 等）"""
         raw = self.extra or {}
         safe = dict(raw)
-        if 'access_key_secret' in safe:
-            val = safe['access_key_secret']
-            if val and len(val) > 6:
-                safe['access_key_secret'] = val[:3] + '***' + val[-3:]
-            else:
-                safe['access_key_secret'] = '***'
+        for key in ('access_key_secret', 'admin_token'):
+            if key in safe:
+                val = safe[key]
+                if val and len(val) > 6:
+                    safe[key] = val[:3] + '***' + val[-3:]
+                else:
+                    safe[key] = '***'
         return safe
 
     def get_raw_extra(self):
