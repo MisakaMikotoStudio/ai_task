@@ -4288,6 +4288,7 @@ function showResourceModal(item) {
         document.getElementById('resource-extra-ak-id').value = extra.access_key_id || '';
         document.getElementById('resource-extra-ak-secret').value = extra.access_key_secret || '';
         document.getElementById('resource-extra-organization').value = extra.organization || '';
+        document.getElementById('resource-extra-app-id').value = extra.app_id || '';
         document.getElementById('resource-extra-admin-token').value = '';
         toggleResourceExtraFields();
     } else {
@@ -4343,16 +4344,22 @@ async function handleResourceFormSubmit(e) {
             }
         } else if (type === 'code_repo' && source === 'github') {
             const organization = document.getElementById('resource-extra-organization').value.trim();
+            const appId = document.getElementById('resource-extra-app-id').value.trim();
             const adminToken = document.getElementById('resource-extra-admin-token').value.trim();
             if (!organization) {
                 alert('请填写 GitHub Organization');
                 return;
             }
+            if (!appId) {
+                alert('请填写 GitHub App ID');
+                return;
+            }
             extra.organization = organization;
+            extra.app_id = appId;
             if (adminToken) {
                 extra.admin_token = adminToken;
             } else if (!currentEditResourceId) {
-                alert('请填写 GitHub Admin Token');
+                alert('请填写 GitHub App Private Key');
                 return;
             }
         }

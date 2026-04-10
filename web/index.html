@@ -1751,8 +1751,12 @@
                                         <input type="text" id="resource-extra-organization" class="commerce-input" placeholder="GitHub 组织名称">
                                     </div>
                                     <div class="commerce-form-group">
-                                        <label class="commerce-label">Admin Token <span class="required">*</span></label>
-                                        <input type="password" id="resource-extra-admin-token" class="commerce-input" placeholder="具有组织管理权限的 GitHub Token">
+                                        <label class="commerce-label">App ID <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-app-id" class="commerce-input" placeholder="GitHub App ID">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">App Private Key (PEM) <span class="required">*</span></label>
+                                        <textarea id="resource-extra-admin-token" class="commerce-input" rows="4" placeholder="GitHub App 私钥（PEM 格式，-----BEGIN RSA PRIVATE KEY-----...）"></textarea>
                                     </div>
                                 </div>
                                 <div class="commerce-modal-footer">
