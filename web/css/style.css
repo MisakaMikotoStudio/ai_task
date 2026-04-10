@@ -5546,8 +5546,8 @@ textarea:focus {
     font-size: 14px;
 }
 
-/* 权限配置弹窗 */
-#permission-modal {
+/* 通用弹窗覆盖层 */
+.commerce-modal-overlay {
     position: fixed;
     inset: 0;
     z-index: 1000;
@@ -5785,7 +5785,102 @@ textarea:focus {
 }
 
 .resource-modal {
+    background: var(--bg-card);
+    border-radius: var(--border-radius-lg);
     max-width: 520px;
+    width: 90%;
+    box-shadow: var(--shadow-lg);
+    animation: fadeIn 0.2s ease;
+}
+
+.resource-modal .commerce-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.resource-modal .commerce-modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.resource-modal .commerce-modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.resource-modal .commerce-modal-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.resource-modal .commerce-form {
+    padding: 20px;
+}
+
+.resource-modal .commerce-form-group {
+    margin-bottom: 16px;
+}
+
+.resource-modal .commerce-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.resource-modal .commerce-input {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 8px 12px;
+    font-size: 14px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    box-sizing: border-box;
+}
+
+.resource-modal .commerce-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.15);
+}
+
+.resource-secret-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.resource-secret-wrap .commerce-input {
+    padding-right: 36px;
+}
+
+.resource-secret-toggle {
+    position: absolute;
+    right: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    line-height: 1;
+    opacity: 0.6;
+}
+
+.resource-secret-toggle:hover {
+    opacity: 1;
 }
 
 .resource-env-checkboxes {
@@ -5808,6 +5903,21 @@ textarea:focus {
     height: 16px;
     accent-color: var(--accent-primary);
     cursor: pointer;
+}
+
+.resource-modal .commerce-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+.resource-modal .commerce-modal-footer .btn-primary,
+.resource-modal .commerce-modal-footer .btn-secondary {
+    width: auto;
+    padding: 8px 20px;
+    font-size: 13px;
+    white-space: nowrap;
 }
 
 .resource-extra-divider {
