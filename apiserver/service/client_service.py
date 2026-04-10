@@ -871,10 +871,10 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
     1. 生成不重复的应用名称
     2. 创建 Client 记录
     3. 对于 test、prod 两个环境：
-       a. 查找可用的 MySQL Resource
-       b. 生成 db_name = {user_id}_{env}_{秒级时间戳}
+       a. 从资源管理中获取一个可用的 MySQL 资源
+       b. 生成 db_name = {env}_{user_id}_{yyyyMMddHHmmss}
        c. 写入 ClientDatabase 记录
-       d. 调用云服务创建数据库 + 账号
+       d. 调用资源服务在云上创建数据库 + 专属账号
        e. 回写连接信息到 ClientDatabase
 
     Args:
@@ -924,6 +924,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
 
     # 为 test、prod 两个环境分别创建数据库
     for env in VALID_ENVS:
+        # 从资源管理中获取可用的 MySQL 资源
         resources = get_online_resources_by_type_source(
             type='mysql',
             source='aliyun',
@@ -937,7 +938,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
             continue
 
         resource = resources[0]
-        db_name = f"{user_id}_{env}_{int(time.time())}"
+        db_name = f"{env}_{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
         # 先写入 ClientDatabase 记录
         record_id = add_client_database(
@@ -948,11 +949,11 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
             db_type='mysql',
         )
         logger.info(
-            "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s",
-            record_id, env, db_name,
+            "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s, resource_id=%s",
+            record_id, env, db_name, resource.id,
         )
 
-        # 调用云服务创建实际数据库 + 账号
+        # 调用资源服务在云上创建数据库 + 专属账号
         try:
             result = create_database_with_name(
                 resource=resource,
@@ -974,8 +975,8 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
             )
         except ResourceMySQLError as e:
             logger.error(
-                "create_client_from_template: cloud db creation failed, env=%s, db_name=%s, error=%s",
-                env, db_name, e.message,
+                "create_client_from_template: cloud db creation failed, env=%s, db_name=%s, resource_id=%s, error=%s",
+                env, db_name, resource.id, e.message,
             )
             # 不阻断其他环境的创建，继续处理
 
