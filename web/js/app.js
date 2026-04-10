@@ -4259,7 +4259,7 @@ function showResourceModal(item) {
         const extra = item.extra || {};
         document.getElementById('resource-extra-url').value = extra.url || '';
         document.getElementById('resource-extra-ak-id').value = extra.access_key_id || '';
-        document.getElementById('resource-extra-ak-secret').value = '';
+        document.getElementById('resource-extra-ak-secret').value = extra.access_key_secret || '';
         toggleResourceExtraFields();
     } else {
         currentEditResourceId = null;
