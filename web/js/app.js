@@ -4351,6 +4351,16 @@ function initResources() {
         sourceSelect.addEventListener('change', toggleResourceExtraFields);
         sourceSelect.dataset.bound = 'true';
     }
+    const toggleSecretBtn = document.getElementById('toggle-ak-secret');
+    if (toggleSecretBtn && toggleSecretBtn.dataset.bound !== 'true') {
+        toggleSecretBtn.addEventListener('click', () => {
+            const input = document.getElementById('resource-extra-ak-secret');
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            toggleSecretBtn.textContent = isPassword ? '🙈' : '👁️';
+        });
+        toggleSecretBtn.dataset.bound = 'true';
+    }
 }
 
 function toggleResourceExtraFields() {
@@ -4371,6 +4381,9 @@ function showResourceModal(item) {
 
     form.reset();
     document.getElementById('resource-extra-fields').style.display = 'none';
+    document.getElementById('resource-extra-ak-secret').type = 'password';
+    const toggleBtn = document.getElementById('toggle-ak-secret');
+    if (toggleBtn) toggleBtn.textContent = '👁️';
 
     if (item) {
         currentEditResourceId = item.id;
@@ -4387,7 +4400,7 @@ function showResourceModal(item) {
         const extra = item.extra || {};
         document.getElementById('resource-extra-url').value = extra.url || '';
         document.getElementById('resource-extra-ak-id').value = extra.access_key_id || '';
-        document.getElementById('resource-extra-ak-secret').value = '';
+        document.getElementById('resource-extra-ak-secret').value = extra.access_key_secret || '';
         toggleResourceExtraFields();
     } else {
         currentEditResourceId = null;
@@ -4530,22 +4543,6 @@ async function loadAdminResources() {
                 }
             });
         });
-        container.querySelectorAll('.resource-delete-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const id = parseInt(btn.dataset.id, 10);
-                if (!confirm('确定删除该资源？此操作不可恢复。')) return;
-                try {
-                    const res = await adminResourceAPI.remove(id);
-                    if (res.code === 200) {
-                        loadAdminResources();
-                    } else {
-                        alert(res.message || '删除失败');
-                    }
-                } catch (err) {
-                    alert(err.message || '删除失败');
-                }
-            });
-        });
     } catch (err) {
         container.innerHTML = `<p class="perm-empty">加载失败: ${err.message || '网络错误'}</p>`;
     }
@@ -4591,7 +4588,6 @@ function renderResourceRow(resource) {
         <td class="perm-actions-cell">
             <button type="button" class="resource-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
             <button type="button" class="resource-toggle-btn perm-action-btn" data-id="${resource.id}" data-action="${toggleAction}" title="${toggleText}">${resource.is_online ? '⏸️' : '▶️'}</button>
-            <button type="button" class="resource-delete-btn perm-action-btn perm-action-danger" data-id="${resource.id}" title="删除">🗑️</button>
         </td>
     </tr>`;
 }
