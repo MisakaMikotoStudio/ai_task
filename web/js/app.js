@@ -4223,6 +4223,16 @@ function initResources() {
         sourceSelect.addEventListener('change', toggleResourceExtraFields);
         sourceSelect.dataset.bound = 'true';
     }
+    const toggleSecretBtn = document.getElementById('toggle-ak-secret');
+    if (toggleSecretBtn && toggleSecretBtn.dataset.bound !== 'true') {
+        toggleSecretBtn.addEventListener('click', () => {
+            const input = document.getElementById('resource-extra-ak-secret');
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            toggleSecretBtn.textContent = isPassword ? '🙈' : '👁️';
+        });
+        toggleSecretBtn.dataset.bound = 'true';
+    }
 }
 
 function toggleResourceExtraFields() {
@@ -4243,6 +4253,9 @@ function showResourceModal(item) {
 
     form.reset();
     document.getElementById('resource-extra-fields').style.display = 'none';
+    document.getElementById('resource-extra-ak-secret').type = 'password';
+    const toggleBtn = document.getElementById('toggle-ak-secret');
+    if (toggleBtn) toggleBtn.textContent = '👁️';
 
     if (item) {
         currentEditResourceId = item.id;
