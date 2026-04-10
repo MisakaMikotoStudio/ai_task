@@ -854,6 +854,87 @@ def delete_client_oss_by_env(client_id: int, user_id: int, env: str) -> None:
         ).update({ClientOss.deleted_at: now}, synchronize_session=False)
 
 
+def add_client_database(
+    client_id: int,
+    user_id: int,
+    env: str,
+    db_name: str,
+    db_type: str = 'mysql',
+    host: str = '',
+    port: int = 3306,
+    username: str = '',
+    password: str = '',
+) -> int:
+    """
+    新增一条客户端数据库配置记录
+
+    Args:
+        client_id: 客户端ID
+        user_id: 用户ID
+        env: 环境标识（test/prod）
+        db_name: 数据库名称
+        db_type: 数据库类型
+        host: 数据库地址
+        port: 端口
+        username: 用户名
+        password: 密码
+
+    Returns:
+        新记录的ID
+    """
+    with get_db_session() as session:
+        record = ClientDatabase(
+            client_id=client_id,
+            user_id=user_id,
+            env=env,
+            db_type=db_type,
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            db_name=db_name,
+        )
+        session.add(record)
+        session.flush()
+        return record.id
+
+
+def update_client_database(
+    record_id: int,
+    user_id: int,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+) -> bool:
+    """
+    回写数据库连接信息到已有记录
+
+    Args:
+        record_id: 记录ID
+        user_id: 用户ID（归属校验）
+        host: 数据库地址
+        port: 端口
+        username: 用户名
+        password: 密码
+
+    Returns:
+        是否更新成功
+    """
+    with get_db_session() as session:
+        affected = session.query(ClientDatabase).filter(
+            ClientDatabase.id == record_id,
+            ClientDatabase.user_id == user_id,
+            ClientDatabase.deleted_at.is_(None),
+        ).update({
+            ClientDatabase.host: host,
+            ClientDatabase.port: port,
+            ClientDatabase.username: username,
+            ClientDatabase.password: password,
+        }, synchronize_session=False)
+        return affected > 0
+
+
 def check_client_usable_for_user(client_id: int, user_id: int) -> bool:
     """
     校验用户是否可以使用指定客户端创建任务
