@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from dao.client_dao import (
+    add_client_database,
     apply_client_env_var_sync,
     apply_client_repo_sync,
     check_client_name_exists,
@@ -23,6 +24,7 @@ from dao.client_dao import (
     get_client_repos,
     increment_client_version,
     update_client,
+    update_client_database,
     VALID_ENVS,
 )
 from dao.heartbeat_dao import get_heartbeat, get_heartbeats_by_user, add_heartbeat, update_heartbeat
@@ -856,6 +858,128 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='payments', data=payments_data)
     if oss_data:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='oss', data=oss_data)
+
+
+VALID_APP_TYPES = ['web']
+
+
+def create_client_from_template(user_id: int, app_types: list) -> int:
+    """
+    从模板生成默认应用：创建 Client，然后在 test/prod 环境下各创建一个默认数据库。
+
+    流程：
+    1. 生成不重复的应用名称
+    2. 创建 Client 记录
+    3. 对于 test、prod 两个环境：
+       a. 查找可用的 MySQL Resource
+       b. 生成 db_name = {user_id}_{env}_{秒级时间戳}
+       c. 写入 ClientDatabase 记录
+       d. 调用云服务创建数据库 + 账号
+       e. 回写连接信息到 ClientDatabase
+
+    Args:
+        user_id: 用户 ID
+        app_types: 应用形态列表，如 ["web"]
+
+    Returns:
+        新创建的客户端 ID
+
+    Raises:
+        ClientSaveError: 校验失败或创建失败
+    """
+    import time
+    from dao.resource_dao import get_online_resources_by_type_source
+    from service.resource_mysql_service import create_database_with_name, ResourceMySQLError
+
+    # 校验 app_types
+    if not app_types or not isinstance(app_types, list):
+        raise ClientSaveError('请选择至少一种应用形态')
+    for at in app_types:
+        if at not in VALID_APP_TYPES:
+            raise ClientSaveError(f'不支持的应用形态：{at}')
+
+    # 生成不重复的应用名称
+    timestamp = int(time.time())
+    base_name = f"默认应用_{timestamp}"
+    client_name = base_name[:16]
+    retries = 0
+    while check_client_name_exists(user_id, client_name):
+        retries += 1
+        if retries > 5:
+            raise ClientSaveError('应用名称生成失败，请稍后重试')
+        suffix = f"_{retries}"
+        client_name = base_name[:16 - len(suffix)] + suffix
+
+    # 创建 Client
+    client_id = create_client(
+        user_id=user_id,
+        name=client_name,
+        agent=AVAILABLE_AGENTS[0],
+        official_cloud_deploy=0,
+    )
+    logger.info(
+        "create_client_from_template: user_id=%s, client_id=%s, app_types=%s",
+        user_id, client_id, app_types,
+    )
+
+    # 为 test、prod 两个环境分别创建数据库
+    for env in VALID_ENVS:
+        resources = get_online_resources_by_type_source(
+            type='mysql',
+            source='aliyun',
+            env=env,
+        )
+        if not resources:
+            logger.warning(
+                "create_client_from_template: no mysql resource for env=%s, user_id=%s, skipping",
+                env, user_id,
+            )
+            continue
+
+        resource = resources[0]
+        db_name = f"{user_id}_{env}_{int(time.time())}"
+
+        # 先写入 ClientDatabase 记录
+        record_id = add_client_database(
+            client_id=client_id,
+            user_id=user_id,
+            env=env,
+            db_name=db_name,
+            db_type='mysql',
+        )
+        logger.info(
+            "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s",
+            record_id, env, db_name,
+        )
+
+        # 调用云服务创建实际数据库 + 账号
+        try:
+            result = create_database_with_name(
+                resource=resource,
+                user_id=user_id,
+                db_name=db_name,
+            )
+            # 回写连接信息
+            update_client_database(
+                record_id=record_id,
+                user_id=user_id,
+                host=result['instance_url'],
+                port=result.get('port', 3306),
+                username=result['account_name'],
+                password=result['account_password'],
+            )
+            logger.info(
+                "create_client_from_template: cloud db created, env=%s, db_name=%s, host=%s",
+                env, db_name, result['instance_url'],
+            )
+        except ResourceMySQLError as e:
+            logger.error(
+                "create_client_from_template: cloud db creation failed, env=%s, db_name=%s, error=%s",
+                env, db_name, e.message,
+            )
+            # 不阻断其他环境的创建，继续处理
+
+    return client_id
 
 
 def generate_default_database(user_id: int, config) -> dict:
