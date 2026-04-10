@@ -5811,6 +5811,21 @@ textarea:focus {
     cursor: pointer;
 }
 
+.resource-modal .commerce-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+.resource-modal .commerce-modal-footer .btn-primary,
+.resource-modal .commerce-modal-footer .btn-secondary {
+    width: auto;
+    padding: 8px 20px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
 .resource-extra-divider {
     padding: 12px 0 8px;
     font-size: 13px;

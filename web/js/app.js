@@ -4402,22 +4402,6 @@ async function loadAdminResources() {
                 }
             });
         });
-        container.querySelectorAll('.resource-delete-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const id = parseInt(btn.dataset.id, 10);
-                if (!confirm('确定删除该资源？此操作不可恢复。')) return;
-                try {
-                    const res = await adminResourceAPI.remove(id);
-                    if (res.code === 200) {
-                        loadAdminResources();
-                    } else {
-                        alert(res.message || '删除失败');
-                    }
-                } catch (err) {
-                    alert(err.message || '删除失败');
-                }
-            });
-        });
     } catch (err) {
         container.innerHTML = `<p class="perm-empty">加载失败: ${err.message || '网络错误'}</p>`;
     }
@@ -4463,7 +4447,6 @@ function renderResourceRow(resource) {
         <td class="perm-actions-cell">
             <button type="button" class="resource-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
             <button type="button" class="resource-toggle-btn perm-action-btn" data-id="${resource.id}" data-action="${toggleAction}" title="${toggleText}">${resource.is_online ? '⏸️' : '▶️'}</button>
-            <button type="button" class="resource-delete-btn perm-action-btn perm-action-danger" data-id="${resource.id}" title="删除">🗑️</button>
         </td>
     </tr>`;
 }
