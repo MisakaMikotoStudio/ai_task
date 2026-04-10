@@ -456,7 +456,7 @@ class CodeDevelopWorker(BaseWorker):
         constraints = [
             "**禁止切换分支** — 仅当用户需求明确要求合并操作时例外",
             "**禁止在主分支提交** — 用户明确要求合并到默认分支时例外",
-            "**需求累积记录** — 更新「需求内容」时追加，不得覆盖已有内容",
+            "**需求文档维护** — 更新「需求内容」时可结合历史与现状整理归纳，但不得丢失已确认的需求要点",
             f"**强制产出开发文档** — 任何需求（含咨询/分析）都须记录到 `{self.develop_file_path}`",
         ]
         if guidance_file_exists:
@@ -484,7 +484,7 @@ class CodeDevelopWorker(BaseWorker):
 
         if develop_file_exists:
             step_bodies.append(
-                f"**更新需求文档** — 在 `{self.develop_file_path}` 的「需求内容」章节追加本次需求"
+                f"**更新需求文档** — 将本次需求整合到 `{self.develop_file_path}` 的「需求内容」章节，可结合历史进行整理归纳"
             )
         else:
             step_bodies.append(

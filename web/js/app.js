@@ -3390,7 +3390,6 @@ ${repoTable}
 2. **Fast-forward 合并**：\`git checkout <默认分支> && git merge --ff-only <chat分支>\`
 3. **推送**：\`git push origin <默认分支>\`
 4. **清理 PR**：删除远端 chat 分支：\`git push origin --delete <chat分支>\`
-5. **切回 chat 分支**
 
 ## 注意事项
 

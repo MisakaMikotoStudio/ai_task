@@ -746,7 +746,6 @@ ${repoTable}
    \`git checkout <task分支> && git merge --squash <chat分支> && git commit\`
 2. **推送**：\`git push origin <task分支>\`（远端有新提交则先 \`git pull --rebase\`）
 3. **清理 PR**：删除远端 chat 分支关闭关联 PR：\`git push origin --delete <chat分支>\`
-4. **切回 chat 分支**
 
 ## 注意事项
 
@@ -779,7 +778,6 @@ ${repoTable}
 2. **Fast-forward 合并**：\`git checkout <默认分支> && git merge --ff-only <chat分支>\`
 3. **推送**：\`git push origin <默认分支>\`
 4. **清理 PR**：删除远端 chat 分支：\`git push origin --delete <chat分支>\`
-5. **切回 chat 分支**
 
 ## 注意事项
 
@@ -815,7 +813,6 @@ ${repoTable}
 2. **Rebase + Fast-forward**：\`git rebase <默认分支> <task分支> && git checkout <默认分支> && git merge --ff-only <task分支>\`
 3. **推送**：\`git push origin <默认分支>\`
 4. **清理 PR**：删除远端 task 分支：\`git push origin --delete <task分支>\`
-5. **切回 chat 分支**
 
 ## 注意事项
 
