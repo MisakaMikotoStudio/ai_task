@@ -42,6 +42,20 @@ sandbox = false
 # 使用"获取会员手机号"等敏感能力时必填。
 app_encrypt_key = ""
 
+[default_database]
+# 数据库实例地址（腾讯云 MySQL 等）
+url = "your-db-instance.mysql.rds.tencentcloud.com"
+# 数据库实例端口
+port = 3306
+# 管理员账号（需具有 CREATE DATABASE、CREATE USER、GRANT 权限）
+admin_username = "root"
+# 管理员密码
+admin_password = "your-admin-password"
+# 为应用数据库分配的访问账号（所有自动创建的数据库共用此账号）
+app_username = "app_user"
+# 为应用数据库分配的访问密码
+app_password = "your-app-password"
+
 [oss]
 # 是否启用 OSS（腾讯云 COS）
 enabled = false

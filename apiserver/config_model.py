@@ -66,6 +66,17 @@ class OssConfig:
 
 
 @dataclass
+class DefaultDatabaseConfig:
+    """默认数据库实例配置（用于为用户应用自动创建数据库）"""
+    url: str = "127.0.0.1"
+    port: int = 3306
+    admin_username: str = "root"       # 拥有 CREATE DATABASE / CREATE USER 权限的管理员账号
+    admin_password: str = ""
+    app_username: str = ""             # 为应用创建的数据库分配的访问账号
+    app_password: str = ""             # 为应用创建的数据库分配的访问密码
+
+
+@dataclass
 class AppConfig:
     """应用总配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -73,6 +84,7 @@ class AppConfig:
     heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
     alipay: AlipayConfig = field(default_factory=AlipayConfig)
     oss: OssConfig = field(default_factory=OssConfig)
+    default_database: DefaultDatabaseConfig = field(default_factory=DefaultDatabaseConfig)
 
     @classmethod
     def from_toml(cls, path: str) -> "AppConfig":
@@ -86,6 +98,7 @@ class AppConfig:
             heartbeat=HeartbeatConfig(**data.get("heartbeat", {})),
             alipay=AlipayConfig(**data.get("alipay", {})),
             oss=OssConfig(**data.get("oss", {})),
+            default_database=DefaultDatabaseConfig(**data.get("default_database", {})),
         )
 
 
