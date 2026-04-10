@@ -738,6 +738,63 @@ class PermissionConfig(Base):
         }
 
 
+class Resource(Base):
+    """资源表（admin 管理）"""
+    __tablename__ = 'ai_task_resources'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type = Column(String(32), nullable=False, comment='资源类型：mysql')
+    source = Column(String(32), nullable=False, comment='资源来源：aliyun')
+    envs = Column(JSON, nullable=False, comment='可用环境列表，如 ["test","prod"]')
+    extra = Column(JSON, nullable=True, comment='补充详细信息（不同 type+source 对应不同字段）')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='下架时间，NULL 表示上架中')
+
+    # 类型常量
+    TYPE_MYSQL = 'mysql'
+    VALID_TYPES = [TYPE_MYSQL]
+
+    # 来源常量
+    SOURCE_ALIYUN = 'aliyun'
+    VALID_SOURCES = [SOURCE_ALIYUN]
+
+    # 环境常量
+    VALID_ENVS = ['test', 'prod']
+
+    __table_args__ = (
+        Index('idx_resources_type_source', 'type', 'source'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'type': self.type,
+            'source': self.source,
+            'envs': self.envs or [],
+            'extra': self._safe_extra(),
+            'is_online': self.deleted_at is None,
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+    def _safe_extra(self):
+        """返回 extra 时隐藏敏感字段（AccessKey Secret 等）"""
+        raw = self.extra or {}
+        safe = dict(raw)
+        if 'access_key_secret' in safe:
+            val = safe['access_key_secret']
+            if val and len(val) > 6:
+                safe['access_key_secret'] = val[:3] + '***' + val[-3:]
+            else:
+                safe['access_key_secret'] = '***'
+        return safe
+
+    def get_raw_extra(self):
+        """返回原始 extra（含完整敏感字段，仅服务层使用）"""
+        return self.extra or {}
+
+
 class ChatMessage(Base):
     """Chat消息表"""
     __tablename__ = 'ai_task_chat_message'
