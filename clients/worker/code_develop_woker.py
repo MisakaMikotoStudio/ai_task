@@ -351,9 +351,8 @@ class CodeDevelopWorker(BaseWorker):
 该分支需要 rebase 到主分支 `origin/{default_branch}`，但存在冲突（rebase 已被中止，仓库当前处于干净状态）。{develop_ctx}
 
 ## 冲突解决策略
-- 优先保留本开发分支 `{dev_branch}` 的修改内容
-- 同时整合主分支 `{default_branch}` 的新改动，确保不丢失主分支的新增功能
-- 如果两边修改了同一处逻辑，以本分支的开发意图为准，但要确保代码能正常运行
+- 优先保留本分支 `{dev_branch}` 的修改，同时整合主分支 `{default_branch}` 的新改动
+- 同一处冲突以本分支意图为准，但确保代码可正常运行
 
 ## 操作步骤
 1. 重新发起 rebase：`git rebase origin/{default_branch}`
@@ -428,26 +427,24 @@ class CodeDevelopWorker(BaseWorker):
         # ===== 3. 对话历史（存在时强制最先阅读）=====
         if has_chat_history:
             sections.append(
-                "## 对话历史（必须最先完成）\n\n"
-                f"先前轮次的对话已写入 `{self.chat_history_file_path}`（JSON 数组，"
-                f"每项含 `user_input`、`assistant_output`，按时间顺序）。\n\n"
-                "**在你用工具读取任何其它文件、列举目录、搜索或浏览任一仓库代码之前**，必须先读取该文件全文，"
-                "理清历史语境（例如用户说「重试」「改一下」时具体所指），再结合本轮用户需求理解任务。"
+                "## 对话历史\n\n"
+                f"历史对话文件：`{self.chat_history_file_path}`（JSON 数组，含 user_input / assistant_output）。\n"
+                "**必须在操作任何文件前先读取**，理解上下文引用（如「重试」「改一下」的具体指向）。"
             )
 
         # ===== 4. 前置阅读 =====
         read_items = []
         if guidance_file_exists:
             read_items.append(
-                f"- **开发规范** `{self.develop_guidance_file_path}` — 编码必须遵守的统一规范（数据库设计、日志、接口、安全等），**编码前必须先读取**"
+                f"- **开发规范** `{self.develop_guidance_file_path}` — 统一规范（数据库、日志、接口、安全等）"
             )
         if knowledge_file_exists:
             read_items.append(
-                f"- **知识库** `{self.knowledge_file_path}` — 项目背景、架构设计、已有约定"
+                f"- **知识库** `{self.knowledge_file_path}` — 项目背景、架构、已有约定"
             )
         if develop_file_exists:
             read_items.append(
-                f"- **开发文档** `{self.develop_file_path}` — 已有的需求描述和技术方案"
+                f"- **开发文档** `{self.develop_file_path}` — 已有需求和技术方案"
             )
         if read_items:
             sections.append(
@@ -456,18 +453,17 @@ class CodeDevelopWorker(BaseWorker):
 
         # ===== 5. 强制约束 =====
         constraints = [
-            "**常规开发任务禁止切换分支** — 所有仓库已在正确的开发分支，直接在当前分支开发。仅当用户需求明确要求合并分支操作时，允许切换分支",
-            "**禁止在主分支（main/master）上提交任何变更**（用户明确要求合并到默认分支的操作除外）",
-            "**需求累积记录** — 更新开发文档「需求内容」章节时追加新内容，不得覆盖或删除已有需求",
-            f"**强制产出开发文档** — 无论用户需求是否涉及实际代码改动（例如咨询、介绍、分析类问题），都必须创建或更新 `{self.develop_file_path}`，并将本次需求、分析过程、执行结论完整记录到文档中",
+            "**禁止切换分支** — 仅当用户需求明确要求合并操作时例外",
+            "**禁止在主分支提交** — 用户明确要求合并到默认分支时例外",
+            "**需求累积记录** — 更新「需求内容」时追加，不得覆盖已有内容",
+            f"**强制产出开发文档** — 任何需求（含咨询/分析）都须记录到 `{self.develop_file_path}`",
         ]
         if guidance_file_exists:
             constraints.append(
-                f"**遵守开发规范** — 所有代码必须符合 `{self.develop_guidance_file_path}` 中的规范要求，如当前任务与规范冲突需在开发文档中说明原因"
+                f"**遵守开发规范** — 代码须符合 `{self.develop_guidance_file_path}`，冲突时在文档说明"
             )
         constraints.append(
-            "**待确认事项必须返回** — 如果需求信息不足需要用户补充，除了在开发文档「待确认事项」章节记录外，"
-            "还必须在你的最终回复中明确列出所有待确认问题，确保调用方第一时间看到"
+            "**待确认事项必须返回** — 在开发文档「待确认事项」和最终回复中同时列出"
         )
         numbered_constraints = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(constraints))
         sections.append(f"## 强制约束\n\n{numbered_constraints}")
@@ -477,41 +473,35 @@ class CodeDevelopWorker(BaseWorker):
 
         if has_chat_history:
             step_bodies.append(
-                f"**读取对话历史** — 打开并阅读 `{self.chat_history_file_path}` 全文，结合上文「用户需求」理解任务；"
-                f"未完成前不得浏览各仓库或读取其他文档"
+                f"**读取对话历史** — 阅读 `{self.chat_history_file_path}` 全文，完成前不得操作其他文件"
             )
 
         if guidance_file_exists:
             step_bodies.append(
-                f"**读取开发规范** — 阅读 `{self.develop_guidance_file_path}`，理解项目的编码标准和约定，后续编码严格遵守"
+                f"**读取开发规范** — 阅读 `{self.develop_guidance_file_path}`，后续编码严格遵守"
             )
 
         if develop_file_exists:
             step_bodies.append(
-                f"**更新需求文档** — 在 `{self.develop_file_path}` 的「需求内容」章节追加本次用户需求（即使是咨询/介绍类需求也必须记录）"
+                f"**更新需求文档** — 在 `{self.develop_file_path}` 的「需求内容」章节追加本次需求"
             )
         else:
             step_bodies.append(
-                "**了解项目** — 浏览各仓库代码结构，理解现有架构和代码组织"
+                "**了解项目** — 浏览各仓库代码结构，理解现有架构"
             )
             step_bodies.append(
-                f"**创建开发文档** — 参照模板 `{self.develop_plan_example_file_path}`，"
-                f"创建 `{self.develop_file_path}`，完整记录用户需求和技术方案"
+                f"**创建开发文档** — 参照模板 `{self.develop_plan_example_file_path}`，创建 `{self.develop_file_path}`"
             )
 
         step_bodies.append(
-            f"**执行开发或分析** — 按 `{self.develop_file_path}` 中的技术方案进行编码；"
-            f"若无需编码，则完成必要的项目分析并形成结论"
+            f"**执行开发或分析** — 按 `{self.develop_file_path}` 中的方案编码；无需编码则完成分析形成结论"
         )
         step_bodies.append(
-            f"**同步文档与进度** — 开发过程中持续更新 `{self.develop_file_path}`："
-            f"对照模板 `{self.develop_plan_example_file_path}` 检查章节完整性，"
-            f"缺失则补齐；每完成一个步骤更新「开发进度」章节的状态"
+            f"**同步文档与进度** — 持续更新 `{self.develop_file_path}`：参照模板 `{self.develop_plan_example_file_path}` 补齐缺失章节，更新「开发进度」状态"
         )
         step_bodies.append(
-            "**提交并推送变更** — 开发完成后，对每个有改动的仓库执行 `git add -A && git commit && git push`，"
-            "commit message 用英文简要概括本次改动内容（不要使用固定模板，根据实际修改编写），"
-            "格式示例：`feat: add email verification for user registration`"
+            "**提交并推送** — 对有改动的仓库执行 `git add -A && git commit && git push`，"
+            "commit message 用英文概括改动（如 `feat: add email verification for user registration`）"
         )
 
         numbered_steps = "\n".join(f"{i + 1}. {body}" for i, body in enumerate(step_bodies))
@@ -566,7 +556,7 @@ class CodeDevelopWorker(BaseWorker):
         # 构建变更提示
         lines = [
             "## 代码变更提示\n",
-            "**注意：自上次对话执行以来，以下仓库的代码已发生变更：**\n",
+            "**以下仓库自上次对话以来有代码变更：**\n",
             "| 仓库 | 上次commitId | 当前commitId |",
             "|------|-------------|-------------|",
         ]
@@ -579,7 +569,7 @@ class CodeDevelopWorker(BaseWorker):
         for repo_name, commit_id in current_commit_map.items():
             lines.append(f"- `{repo_name}`: `{commit_id[:12]}`")
         lines.append("")
-        lines.append("请注意代码可能已被其他任务或手动修改，开发时应基于当前最新代码状态进行。")
+        lines.append("代码可能已被其他任务修改，请基于当前最新状态开发。")
 
         return "\n".join(lines)
 
