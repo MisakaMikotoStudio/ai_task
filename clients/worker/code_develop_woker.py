@@ -429,7 +429,7 @@ class CodeDevelopWorker(BaseWorker):
         if has_chat_history:
             sections.append(
                 "## 对话历史\n\n"
-                f"历史对话文件：`{self.chat_history_file_path}`（JSON 数组，含 user_input / assistant_output）。\n"
+                f"历史对话文件：`{self.chat_history_file_path}`（JSON 数组，含 user_input / assistant_output /extra）。\n"
                 "**必须在操作任何文件前先读取**，理解上下文引用（如「重试」「改一下」的具体指向）。"
             )
 
