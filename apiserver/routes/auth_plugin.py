@@ -26,6 +26,12 @@ def skip_auth(f):
     return f
 
 
+def skip_subscribe(f):
+    """标记接口跳过订阅校验（仍需身份鉴权）"""
+    setattr(f, '_skip_subscribe', True)
+    return f
+
+
 def _is_skip_auth_endpoint() -> bool:
     """当前请求对应的endpoint是否显式跳过鉴权"""
     endpoint = request.endpoint
@@ -33,6 +39,15 @@ def _is_skip_auth_endpoint() -> bool:
         return False
     view_func = current_app.view_functions.get(endpoint)
     return bool(view_func and getattr(view_func, '_skip_auth', False))
+
+
+def _is_skip_subscribe_endpoint() -> bool:
+    """当前请求对应的endpoint是否显式跳过订阅校验"""
+    endpoint = request.endpoint
+    if not endpoint:
+        return False
+    view_func = current_app.view_functions.get(endpoint)
+    return bool(view_func and getattr(view_func, '_skip_subscribe', False))
 
 
 def _request_body_for_log():
@@ -66,6 +81,10 @@ def _request_body_for_log():
 def _check_subscription_for_write(trace_id: str):
     """对非 GET/HEAD/OPTIONS 请求做 subscribed 鉴权"""
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+
+    # 标记了 @skip_subscribe 的接口只做身份鉴权，跳过订阅权限校验
+    if _is_skip_subscribe_endpoint():
         return None
 
     # admin 接口只做身份鉴权，跳过订阅权限校验
