@@ -4417,7 +4417,7 @@ function showResourceModal(item) {
         document.getElementById('resource-extra-ak-secret').value = extra.access_key_secret || '';
         document.getElementById('resource-extra-organization').value = extra.organization || '';
         document.getElementById('resource-extra-app-id').value = extra.app_id || '';
-        document.getElementById('resource-extra-admin-token').value = '';
+        document.getElementById('resource-extra-private-key').value = '';
         toggleResourceExtraFields();
     } else {
         currentEditResourceId = null;
@@ -4473,7 +4473,7 @@ async function handleResourceFormSubmit(e) {
         } else if (type === 'code_repo' && source === 'github') {
             const organization = document.getElementById('resource-extra-organization').value.trim();
             const appId = document.getElementById('resource-extra-app-id').value.trim();
-            const adminToken = document.getElementById('resource-extra-admin-token').value.trim();
+            const privateKey = document.getElementById('resource-extra-private-key').value.trim();
             if (!organization) {
                 alert('请填写 GitHub Organization');
                 return;
@@ -4484,10 +4484,10 @@ async function handleResourceFormSubmit(e) {
             }
             extra.organization = organization;
             extra.app_id = appId;
-            if (adminToken) {
-                extra.admin_token = adminToken;
+            if (privateKey) {
+                extra.private_key = privateKey;
             } else if (!currentEditResourceId) {
-                alert('请填写 GitHub App Private Key');
+                alert('请填写 GitHub App Private Key（PEM 格式，非 Client Secret）');
                 return;
             }
         }
@@ -4500,8 +4500,8 @@ async function handleResourceFormSubmit(e) {
             if (type === 'mysql' && source === 'aliyun' && !extra.access_key_secret) {
                 delete payload.extra.access_key_secret;
             }
-            if (type === 'code_repo' && source === 'github' && !extra.admin_token) {
-                delete payload.extra.admin_token;
+            if (type === 'code_repo' && source === 'github' && !extra.private_key) {
+                delete payload.extra.private_key;
             }
             res = await adminResourceAPI.update(currentEditResourceId, payload);
         } else {
