@@ -1093,6 +1093,130 @@
         .merge-btn:hover { background: rgba(43, 147, 213, 0.20); }
         .merge-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+        /* Image attachment button */
+        .attach-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            background: transparent;
+            color: var(--text-muted);
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: var(--transition);
+            flex-shrink: 0;
+        }
+        .attach-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+        /* Pending images list */
+        .pending-images {
+            display: none;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 6px 14px 2px;
+        }
+        .pending-image-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            background: rgba(88, 166, 255, 0.10);
+            border: 1px solid rgba(88, 166, 255, 0.20);
+            border-radius: 5px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            max-width: 200px;
+        }
+        .pending-image-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pending-image-remove {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 0 2px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .pending-image-remove:hover { color: var(--accent-danger, #e55); }
+
+        /* Message image list (in rendered feed) */
+        .msg-image-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .msg-image-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 3px 8px;
+            background: rgba(88, 166, 255, 0.08);
+            border: 1px solid rgba(88, 166, 255, 0.18);
+            border-radius: 5px;
+            font-size: 12px;
+            color: var(--accent-primary);
+            cursor: pointer;
+            transition: var(--transition);
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .msg-image-link:hover {
+            background: rgba(88, 166, 255, 0.18);
+            border-color: rgba(88, 166, 255, 0.35);
+        }
+
+        /* Image preview modal */
+        .image-preview-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            background: rgba(0,0,0,0.75);
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .image-preview-modal.show { display: flex; }
+        .image-preview-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #fff;
+            font-size: 14px;
+        }
+        .image-preview-close {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: #fff;
+            font-size: 20px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .image-preview-close:hover { background: rgba(255,255,255,0.3); }
+        .image-preview-img {
+            max-width: 90vw;
+            max-height: 80vh;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+
         .stop-btn {
             display: flex;
             align-items: center;
@@ -1279,6 +1403,7 @@
             </div>
             <div class="welcome-composer">
                 <div class="composer-box" id="welcome-composer-box">
+                    <div class="pending-images" id="welcome-pending-images"></div>
                     <textarea
                         class="composer-textarea"
                         id="welcome-input"
@@ -1287,7 +1412,9 @@
                         onkeydown="handleWelcomeInputKeydown(event)"
                         oninput="autoResize(this)"
                     ></textarea>
+                    <input type="file" id="welcome-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple style="display:none" onchange="handleImageSelect(event, 'welcome')">
                     <div class="composer-footer">
+                        <button class="attach-btn" onclick="triggerImageSelect('welcome-image-input')" title="添加图片">📎</button>
                         <span class="composer-hint-inline">Ctrl+Enter 发送</span>
                         <button class="send-btn" id="welcome-send-btn" onclick="sendNewChatMessage()">
                             <span>↑</span> 发送
@@ -1321,6 +1448,7 @@
                     <span id="composer-hint-text">尽管问，带图也行</span>
                 </div>
                 <div class="composer-box" id="composer-box">
+                    <div class="pending-images" id="pending-images"></div>
                     <textarea
                         class="composer-textarea"
                         id="chat-input"
@@ -1329,7 +1457,9 @@
                         onkeydown="handleInputKeydown(event)"
                         oninput="autoResize(this)"
                     ></textarea>
+                    <input type="file" id="active-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple style="display:none" onchange="handleImageSelect(event, 'active')">
                     <div class="composer-footer">
+                        <button class="attach-btn" onclick="triggerImageSelect('active-image-input')" title="添加图片">📎</button>
                         <span class="composer-hint-inline">Ctrl+Enter 发送</span>
                         <button class="merge-btn" id="merge-to-task-btn" onclick="mergeToTask()">合并到 Task</button>
                         <button class="merge-btn" id="merge-to-default-btn" onclick="mergeToDefaultBranch()">合并到默认分支</button>
@@ -1360,10 +1490,19 @@
     </div>
 </div>
 
+<!-- Image Preview Modal -->
+<div class="image-preview-modal" id="image-preview-modal" onclick="if(event.target===this)closeImagePreviewModal()">
+    <div class="image-preview-header">
+        <span id="image-preview-title"></span>
+        <button class="image-preview-close" onclick="closeImagePreviewModal()">×</button>
+    </div>
+    <img class="image-preview-img" id="image-preview-img" alt="">
+</div>
+
 <div class="chat-toast" id="chat-toast"></div>
 
 <script src="js/utils.js?v=3"></script>
-<script src="js/api.js?v=10"></script>
-<script src="js/chat.js?v=7"></script>
+<script src="js/api.js?v=11"></script>
+<script src="js/chat.js?v=8"></script>
 </body>
 </html>

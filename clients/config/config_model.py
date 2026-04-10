@@ -87,6 +87,15 @@ class GitRepoConfig:
             logger.info(f"更新默认分支到服务端成功: {self.name} ({self.url})")
 
 @dataclass
+class OssConfig:
+    """OSS 对象存储配置（用于客户端直接下载聊天图片）"""
+    secret_id: str = ""
+    secret_key: str = ""
+    region: str = "ap-guangzhou"
+    bucket: str = ""
+
+
+@dataclass
 class ClientConfig:
     """客户端基础配置"""
     apiserver_url: str
@@ -100,6 +109,7 @@ class ClientConfig:
     code_git: List[GitRepoConfig] = field(default_factory=list) # 代码仓库配置
     agent : BaseAgent = None # 客户端 Agent
     login_user_name: str = '' # 当前登录用户名称（由 apiserver 返回）
+    oss: Optional[OssConfig] = None # OSS 配置（从 apiserver 下发）
     """检查器"""
     errors: List[str] = field(default_factory=list) # 错误信息列表
     warnings: List[str] = field(default_factory=list) # 警告信息列表
@@ -146,6 +156,19 @@ class ClientConfig:
         logger.debug(f"使用 Agent: {self.agent.name}")
 
         self.login_user_name = remote_config.get('login_user_name', '')
+
+        # 解析 OSS 配置（用于客户端下载聊天图片）
+        oss_data = remote_config.get('oss')
+        if oss_data and isinstance(oss_data, dict):
+            self.oss = OssConfig(
+                secret_id=oss_data.get('secret_id', ''),
+                secret_key=oss_data.get('secret_key', ''),
+                region=oss_data.get('region', 'ap-guangzhou'),
+                bucket=oss_data.get('bucket', ''),
+            )
+            logger.debug("OSS 配置已加载")
+        else:
+            self.oss = None
 
         logger.debug(f"客户端配置同步完成")
         logger.debug(f"宿主机工作目录: {self.workspace}")

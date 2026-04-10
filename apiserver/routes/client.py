@@ -7,7 +7,7 @@
 import secrets
 import string
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 
 from dao.client_dao import (
     create_client, get_clients_by_user, get_client_by_id,
@@ -426,6 +426,17 @@ def get_client_config_api(client_id):
     # 获取环境变量（官方云部署/容器启动场景有效）
     env_vars = get_client_env_vars(client_id, request.user_info.user_id)
 
+    # OSS 配置（供客户端直接下载聊天图片）
+    config = current_app.config['APP_CONFIG']
+    oss_data = None
+    if config.oss.enabled:
+        oss_data = {
+            'secret_id': config.oss.secret_id,
+            'secret_key': config.oss.secret_key,
+            'region': config.oss.region,
+            'bucket': config.oss.bucket,
+        }
+
     return jsonify({
         'code': 200,
         'data': {
@@ -434,7 +445,8 @@ def get_client_config_api(client_id):
             'login_user_name': request.user_info.name,
             'agent': client.agent,
             'repos': [repo.to_dict() for repo in repos],
-            'env_vars': [ev.to_dict() for ev in env_vars]
+            'env_vars': [ev.to_dict() for ev in env_vars],
+            'oss': oss_data,
         }
     })
 
