@@ -3764,6 +3764,11 @@ textarea:focus {
     white-space: nowrap;
     flex-shrink: 0;
 }
+.config-btn-group {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
 .config-section-header {
     display: flex;
     align-items: center;
@@ -5702,4 +5707,114 @@ textarea:focus {
     line-height: 1;
     font-weight: 500;
     opacity: 0.9;
+}
+
+/* ===== 资源管理 ===== */
+
+#resources-view .commerce-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+#resources-view .commerce-add-product-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--accent-primary);
+    font-size: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+#resources-view .commerce-add-product-btn:hover {
+    background: rgba(88, 166, 255, 0.1);
+    border-color: var(--accent-primary);
+}
+
+#resources-view .commerce-add-icon {
+    font-size: 15px;
+    line-height: 1;
+    font-weight: 500;
+    opacity: 0.9;
+}
+
+.resource-table {
+    width: 100%;
+}
+
+.resource-env-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent-primary);
+    margin-right: 4px;
+}
+
+.resource-status-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.resource-status-online {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.resource-status-offline {
+    background: rgba(139, 148, 158, 0.15);
+    color: var(--text-tertiary);
+}
+
+.resource-url-cell {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.resource-modal {
+    max-width: 520px;
+}
+
+.resource-env-checkboxes {
+    display: flex;
+    gap: 16px;
+    margin-top: 4px;
+}
+
+.resource-env-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.resource-env-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.resource-extra-divider {
+    padding: 12px 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border-color);
+    margin-top: 8px;
 }
