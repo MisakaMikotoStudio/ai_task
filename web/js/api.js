@@ -457,6 +457,30 @@ const okrAPI = {
     }
 };
 
+// 通用文件上传请求（不设置 Content-Type，让浏览器自动处理 multipart boundary）
+async function uploadRequest(url, formData) {
+    const token = getToken();
+    const headers = {
+        'Appid': 'ai_task',
+        'traceId': generateUUID(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    const response = await fetch(`${API_BASE}${url}`, {
+        method: 'POST',
+        headers,
+        body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        if (response.status === 401) {
+            clearAuth();
+            window.location.reload();
+        }
+        throw new Error(data.message || data.error || '上传失败');
+    }
+    return data;
+}
+
 // Chat API
 const chatAPI = {
     async listChats(taskId) {
@@ -528,7 +552,22 @@ const chatAPI = {
             method: 'POST',
             body: JSON.stringify({ input, extra })
         });
-    }
+    },
+
+    // 上传聊天图片（私有存储），返回 { oss_path, filename }
+    async uploadImage(file) {
+        if (file && file.size > 10 * 1024 * 1024) {
+            throw new Error('图片大小不能超过 10MB');
+        }
+        const fd = new FormData();
+        fd.append('file', file);
+        return uploadRequest('/chat/upload/image', fd);
+    },
+
+    // 获取聊天图片代理下载 URL
+    getImageProxyUrl(ossPath) {
+        return `${API_BASE}/chat/image?path=${encodeURIComponent(ossPath)}`;
+    },
 };
 
 // 商业化 API（商品列表、购买）
