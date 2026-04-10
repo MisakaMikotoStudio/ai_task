@@ -13,7 +13,7 @@ const currentUsername = document.getElementById('current-username');
 
 // 管理后台与主应用共用 index.html：pathname 以 /admin 结尾时为管理后台（与后端 Flask 路由 /admin 一致）
 const ADMIN_PAGE = /\/admin\/?$/.test(window.location.pathname);
-const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders', 'permissions']);
+const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders', 'permissions', 'resources']);
 
 function getUrlBasePrefix() {
     // 把 /admin 或 /index.html 去掉，得到类似 "/v1" 的前缀（若无则返回 ""）
@@ -309,6 +309,8 @@ function switchToView(view) {
         loadStoreProducts();
     } else if (view === 'permissions') {
         loadAdminPermissions();
+    } else if (view === 'resources') {
+        loadAdminResources();
     } else if (view === 'profile') {
         loadProfileUserInfo();
         loadMyServices();
@@ -1258,6 +1260,30 @@ function wizardRenderDatabaseStep(isView) {
                 db_type: 'mysql', host: '', port: 3306, username: '', password: '', db_name: ''
             });
             wizardRenderDatabaseList();
+        };
+    }
+    const genBtn = document.getElementById('gen-default-db-btn');
+    if (genBtn) {
+        genBtn.style.display = isView ? 'none' : '';
+        genBtn.onclick = async () => {
+            genBtn.disabled = true;
+            genBtn.textContent = '创建中...';
+            try {
+                const apiObj = (typeof adminClientAPI !== 'undefined' && window.location.hash.includes('admin')) ? adminClientAPI : clientAPI;
+                const res = await apiObj.generateDefaultDatabase();
+                if (res.code === 200 && res.data) {
+                    cfgDatabasesByEnv[cfgDatabaseCurrentEnv].push(res.data);
+                    wizardRenderDatabaseList();
+                    showToast('默认数据库创建成功：' + res.data.db_name, 'success');
+                } else {
+                    showToast(res.message || '创建失败', 'error');
+                }
+            } catch (e) {
+                showToast(e.message || '创建数据库失败', 'error');
+            } finally {
+                genBtn.disabled = false;
+                genBtn.textContent = '生成默认数据库';
+            }
         };
     }
     const tabs = document.querySelectorAll('#database-env-tabs .wizard-env-tab');
@@ -4274,6 +4300,287 @@ function escapeHTML(str) {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+}
+
+// ===== 资源管理（admin） =====
+
+let currentEditResourceId = null;
+
+function initResources() {
+    const createBtn = document.getElementById('open-create-resource-btn');
+    if (createBtn && createBtn.dataset.bound !== 'true') {
+        createBtn.addEventListener('click', () => showResourceModal(null));
+        createBtn.dataset.bound = 'true';
+    }
+    const closeBtn = document.getElementById('close-resource-modal');
+    if (closeBtn && closeBtn.dataset.bound !== 'true') {
+        closeBtn.addEventListener('click', hideResourceModal);
+        closeBtn.dataset.bound = 'true';
+    }
+    const cancelBtn = document.getElementById('cancel-resource-btn');
+    if (cancelBtn && cancelBtn.dataset.bound !== 'true') {
+        cancelBtn.addEventListener('click', hideResourceModal);
+        cancelBtn.dataset.bound = 'true';
+    }
+    const form = document.getElementById('resource-form');
+    if (form && form.dataset.bound !== 'true') {
+        form.addEventListener('submit', handleResourceFormSubmit);
+        form.dataset.bound = 'true';
+    }
+    // 监听类型和来源选择变化，动态显示补充信息
+    const typeSelect = document.getElementById('resource-type');
+    const sourceSelect = document.getElementById('resource-source');
+    if (typeSelect && typeSelect.dataset.bound !== 'true') {
+        typeSelect.addEventListener('change', toggleResourceExtraFields);
+        typeSelect.dataset.bound = 'true';
+    }
+    if (sourceSelect && sourceSelect.dataset.bound !== 'true') {
+        sourceSelect.addEventListener('change', toggleResourceExtraFields);
+        sourceSelect.dataset.bound = 'true';
+    }
+}
+
+function toggleResourceExtraFields() {
+    const type = document.getElementById('resource-type').value;
+    const source = document.getElementById('resource-source').value;
+    const extraFields = document.getElementById('resource-extra-fields');
+    if (type === 'mysql' && source === 'aliyun') {
+        extraFields.style.display = '';
+    } else {
+        extraFields.style.display = 'none';
+    }
+}
+
+function showResourceModal(item) {
+    const modal = document.getElementById('resource-modal');
+    const title = document.getElementById('resource-modal-title');
+    const form = document.getElementById('resource-form');
+
+    form.reset();
+    document.getElementById('resource-extra-fields').style.display = 'none';
+
+    if (item) {
+        currentEditResourceId = item.id;
+        title.textContent = '编辑资源';
+        document.getElementById('resource-type').value = item.type || '';
+        document.getElementById('resource-source').value = item.source || '';
+        // 设置环境复选框
+        const envCheckboxes = document.querySelectorAll('input[name="resource-envs"]');
+        const envs = item.envs || [];
+        envCheckboxes.forEach(cb => {
+            cb.checked = envs.includes(cb.value);
+        });
+        // 设置补充信息
+        const extra = item.extra || {};
+        document.getElementById('resource-extra-url').value = extra.url || '';
+        document.getElementById('resource-extra-ak-id').value = extra.access_key_id || '';
+        document.getElementById('resource-extra-ak-secret').value = '';
+        toggleResourceExtraFields();
+    } else {
+        currentEditResourceId = null;
+        title.textContent = '新增资源';
+    }
+    modal.style.display = 'flex';
+}
+
+function hideResourceModal() {
+    document.getElementById('resource-modal').style.display = 'none';
+    currentEditResourceId = null;
+}
+
+async function handleResourceFormSubmit(e) {
+    e.preventDefault();
+    const saveBtn = document.getElementById('save-resource-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+
+    try {
+        const type = document.getElementById('resource-type').value;
+        const source = document.getElementById('resource-source').value;
+
+        if (!type || !source) {
+            alert('请选择资源类型和来源');
+            return;
+        }
+
+        const envCheckboxes = document.querySelectorAll('input[name="resource-envs"]:checked');
+        const envs = Array.from(envCheckboxes).map(cb => cb.value);
+        if (envs.length === 0) {
+            alert('请至少选择一个可用环境');
+            return;
+        }
+
+        const extra = {};
+        if (type === 'mysql' && source === 'aliyun') {
+            const url = document.getElementById('resource-extra-url').value.trim();
+            const akId = document.getElementById('resource-extra-ak-id').value.trim();
+            const akSecret = document.getElementById('resource-extra-ak-secret').value.trim();
+            if (!url || !akId) {
+                alert('请填写数据库实例地址和 AccessKey ID');
+                return;
+            }
+            extra.url = url;
+            extra.access_key_id = akId;
+            if (akSecret) {
+                extra.access_key_secret = akSecret;
+            } else if (!currentEditResourceId) {
+                alert('请填写 AccessKey Secret');
+                return;
+            }
+        }
+
+        const payload = { type, source, envs, extra };
+
+        let res;
+        if (currentEditResourceId) {
+            // 编辑时如果没填 secret，不传该字段（保留原值）
+            if (type === 'mysql' && source === 'aliyun' && !extra.access_key_secret) {
+                delete payload.extra.access_key_secret;
+            }
+            res = await adminResourceAPI.update(currentEditResourceId, payload);
+        } else {
+            res = await adminResourceAPI.create(payload);
+        }
+
+        if (res.code === 200 || res.code === 201) {
+            hideResourceModal();
+            loadAdminResources();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (err) {
+        alert(err.message || '请求失败');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+    }
+}
+
+async function loadAdminResources() {
+    initResources();
+    const container = document.getElementById('resources-list');
+    if (!container) return;
+    container.innerHTML = '<p class="perm-loading">加载中…</p>';
+
+    try {
+        const res = await adminResourceAPI.list();
+        if (res.code !== 200) {
+            container.innerHTML = `<p class="perm-empty">加载失败: ${res.message || '未知错误'}</p>`;
+            return;
+        }
+        const resources = res.data || [];
+        if (resources.length === 0) {
+            container.innerHTML = '<p class="perm-empty">暂无资源，点击右上角「新增资源」添加</p>';
+            return;
+        }
+        container.innerHTML = `
+            <table class="data-table resource-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>类型</th>
+                        <th>来源</th>
+                        <th>可用环境</th>
+                        <th>实例地址</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${resources.map(renderResourceRow).join('')}
+                </tbody>
+            </table>`;
+
+        // 绑定操作按钮
+        container.querySelectorAll('.resource-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = JSON.parse(btn.dataset.item);
+                showResourceModal(item);
+            });
+        });
+        container.querySelectorAll('.resource-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = parseInt(btn.dataset.id, 10);
+                const action = btn.dataset.action;
+                try {
+                    const res = action === 'offline'
+                        ? await adminResourceAPI.offline(id)
+                        : await adminResourceAPI.online(id);
+                    if (res.code === 200) {
+                        loadAdminResources();
+                    } else {
+                        alert(res.message || '操作失败');
+                    }
+                } catch (err) {
+                    alert(err.message || '操作失败');
+                }
+            });
+        });
+        container.querySelectorAll('.resource-delete-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = parseInt(btn.dataset.id, 10);
+                if (!confirm('确定删除该资源？此操作不可恢复。')) return;
+                try {
+                    const res = await adminResourceAPI.remove(id);
+                    if (res.code === 200) {
+                        loadAdminResources();
+                    } else {
+                        alert(res.message || '删除失败');
+                    }
+                } catch (err) {
+                    alert(err.message || '删除失败');
+                }
+            });
+        });
+    } catch (err) {
+        container.innerHTML = `<p class="perm-empty">加载失败: ${err.message || '网络错误'}</p>`;
+    }
+}
+
+function renderResourceRow(resource) {
+    const typeLabels = { mysql: 'MySQL' };
+    const sourceLabels = { aliyun: '阿里云' };
+    const envLabels = { test: '测试', prod: '生产' };
+
+    const envsHtml = (resource.envs || []).map(e =>
+        `<span class="resource-env-tag">${envLabels[e] || e}</span>`
+    ).join(' ');
+
+    const extra = resource.extra || {};
+    const instanceUrl = extra.url || '-';
+
+    const statusClass = resource.is_online ? 'resource-status-online' : 'resource-status-offline';
+    const statusText = resource.is_online ? '上架' : '下架';
+    const toggleAction = resource.is_online ? 'offline' : 'online';
+    const toggleText = resource.is_online ? '下架' : '上架';
+
+    const itemData = JSON.stringify({
+        id: resource.id,
+        type: resource.type,
+        source: resource.source,
+        envs: resource.envs,
+        extra: resource.extra,
+    }).replace(/"/g, '&quot;');
+
+    const createdAt = resource.created_at
+        ? new Date(resource.created_at).toLocaleDateString('zh-CN')
+        : '-';
+
+    return `<tr>
+        <td>${resource.id}</td>
+        <td>${typeLabels[resource.type] || resource.type}</td>
+        <td>${sourceLabels[resource.source] || resource.source}</td>
+        <td>${envsHtml}</td>
+        <td class="resource-url-cell" title="${escapeHTML(instanceUrl)}">${escapeHTML(instanceUrl)}</td>
+        <td><span class="resource-status-badge ${statusClass}">${statusText}</span></td>
+        <td>${createdAt}</td>
+        <td class="perm-actions-cell">
+            <button type="button" class="resource-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
+            <button type="button" class="resource-toggle-btn perm-action-btn" data-id="${resource.id}" data-action="${toggleAction}" title="${toggleText}">${resource.is_online ? '⏸️' : '▶️'}</button>
+            <button type="button" class="resource-delete-btn perm-action-btn perm-action-danger" data-id="${resource.id}" title="删除">🗑️</button>
+        </td>
+    </tr>`;
 }
 
 // ===== 商店 =====
