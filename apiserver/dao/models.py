@@ -781,10 +781,10 @@ class Resource(Base):
         }
 
     def _safe_extra(self):
-        """返回 extra 时隐藏敏感字段（AccessKey Secret、admin_token 等）"""
+        """返回 extra 时隐藏敏感字段（AccessKey Secret、private_key 等）"""
         raw = self.extra or {}
         safe = dict(raw)
-        for key in ('access_key_secret', 'admin_token'):
+        for key in ('access_key_secret', 'private_key'):
             if key in safe:
                 val = safe[key]
                 if val and len(val) > 6:

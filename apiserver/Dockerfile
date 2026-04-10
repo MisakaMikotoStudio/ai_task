@@ -25,5 +25,7 @@ RUN pip install  --retries 10 "cos-python-sdk-v5"
 RUN pip install  --retries 10 "paramiko>=3.0.0"
 RUN pip install  --retries 10 "alibabacloud_rds20140815"
 RUN pip install  --retries 10 "alibabacloud_tea_openapi"
+RUN pip install  --retries 10 "PyJWT[crypto]>=2.0.0"
+RUN pip install  --retries 10 "requests>=2.28.0"
 
 COPY . /app

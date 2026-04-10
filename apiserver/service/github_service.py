@@ -10,7 +10,7 @@ GitHub 代码仓库服务层 —— 通过 GitHub REST API 管理组织下的仓
 - 组合流程：创建仓库 + 创建访问 token（用于默认应用初始化）
 
 认证方式说明：
-- 资源 extra 中存储 GitHub App 凭据：organization、app_id、admin_token（App 私钥 PEM）
+- 资源 extra 中存储 GitHub App 凭据：organization、app_id、private_key（App 私钥 PEM）
 - 通过 app_id + private_key 生成 JWT，再通过 JWT 获取 Installation Access Token
 - Installation Access Token 可以限定只对某几个仓库有效，且权限可控
 """
@@ -45,7 +45,7 @@ def _get_resource_config(resource: Resource) -> Dict[str, str]:
         resource: Resource 对象（type=code_repo, source=github）
 
     Returns:
-        {"organization": "...", "app_id": "...", "admin_token": "..."}
+        {"organization": "...", "app_id": "...", "private_key": "..."}
 
     Raises:
         GitHubServiceError: 配置缺失
@@ -53,19 +53,19 @@ def _get_resource_config(resource: Resource) -> Dict[str, str]:
     extra = resource.get_raw_extra()
     organization = (extra.get('organization') or '').strip()
     app_id = (extra.get('app_id') or '').strip()
-    admin_token = (extra.get('admin_token') or '').strip()
+    private_key = (extra.get('private_key') or '').strip()
 
     if not organization:
         raise GitHubServiceError("资源缺少 GitHub Organization 配置")
     if not app_id:
         raise GitHubServiceError("资源缺少 GitHub App ID 配置")
-    if not admin_token:
-        raise GitHubServiceError("资源缺少 GitHub App Private Key (admin_token) 配置")
+    if not private_key:
+        raise GitHubServiceError("资源缺少 GitHub App Private Key 配置")
 
     return {
         'organization': organization,
         'app_id': app_id,
-        'admin_token': admin_token,
+        'private_key': private_key,
     }
 
 
@@ -245,7 +245,7 @@ def _get_installation_token_for_org(resource: Resource) -> str:
     config = _get_resource_config(resource=resource)
     jwt_token = _generate_app_jwt(
         app_id=config['app_id'],
-        private_key_pem=config['admin_token'],
+        private_key_pem=config['private_key'],
     )
     installation_id = _get_installation_id(
         jwt_token=jwt_token,
@@ -377,7 +377,7 @@ def create_repo_scoped_token(resource: Resource, repo_name: str) -> str:
     # 1. 生成 App JWT
     jwt_token = _generate_app_jwt(
         app_id=config['app_id'],
-        private_key_pem=config['admin_token'],
+        private_key_pem=config['private_key'],
     )
 
     # 2. 获取 Installation ID
