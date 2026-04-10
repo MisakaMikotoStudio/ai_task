@@ -167,9 +167,11 @@ def create_from_template_api():
     app_types = data.get('app_types', [])
 
     try:
+        config = current_app.config['APP_CONFIG'].default_database
         client_id = create_client_from_template(
             user_id=request.user_info.user_id,
             app_types=app_types,
+            config=config,
         )
         response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
         if not response_data:
