@@ -172,6 +172,7 @@ class CodeDevelopWorker(BaseWorker):
         chat_history = []
         for chat_message in self.task.get("chat_messages")[:-1]:
             chat_history.append({
+                "extra": chat_message.get("extra"),
                 "user_input": chat_message.get("input"),
                 "assistant_output": chat_message.get("output"),
             })
