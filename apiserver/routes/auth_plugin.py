@@ -15,6 +15,7 @@ from dao import session_dao, user_dao
 from dao.secret_dao import update_secret_last_used_at
 from dao.user_dao import update_last_access
 from service.user_service import get_user_by_secret
+from service import permission_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,12 @@ def skip_auth(f):
     return f
 
 
+def skip_subscribe(f):
+    """标记接口跳过订阅校验（仍需身份鉴权）"""
+    setattr(f, '_skip_subscribe', True)
+    return f
+
+
 def _is_skip_auth_endpoint() -> bool:
     """当前请求对应的endpoint是否显式跳过鉴权"""
     endpoint = request.endpoint
@@ -32,6 +39,15 @@ def _is_skip_auth_endpoint() -> bool:
         return False
     view_func = current_app.view_functions.get(endpoint)
     return bool(view_func and getattr(view_func, '_skip_auth', False))
+
+
+def _is_skip_subscribe_endpoint() -> bool:
+    """当前请求对应的endpoint是否显式跳过订阅校验"""
+    endpoint = request.endpoint
+    if not endpoint:
+        return False
+    view_func = current_app.view_functions.get(endpoint)
+    return bool(view_func and getattr(view_func, '_skip_subscribe', False))
 
 
 def _request_body_for_log():
@@ -60,6 +76,47 @@ def _request_body_for_log():
         return json.loads(text)
     except Exception:
         return text
+
+
+def _check_subscription_for_write(trace_id: str):
+    """对非 GET/HEAD/OPTIONS 请求做 subscribed 鉴权"""
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+
+    # 标记了 @skip_subscribe 的接口只做身份鉴权，跳过订阅权限校验
+    if _is_skip_subscribe_endpoint():
+        return None
+
+    # admin 接口只做身份鉴权，跳过订阅权限校验
+    endpoint = request.endpoint or ''
+    if endpoint.startswith('admin.'):
+        return None
+
+    user_info = getattr(request, 'user_info', None)
+    if not user_info:
+        return None
+
+    try:
+        result = permission_service.check(user_id=user_info.user_id, key='subscribed')
+        if not result.passed:
+            logger.warning(
+                "订阅鉴权失败 user_id=%s path=%s method=%s",
+                user_info.user_id, request.path, request.method,
+                extra={'trace_id': trace_id},
+            )
+            return jsonify({
+                'code': 403,
+                'message': result.message,
+                'data': result.to_response_data(),
+            }), 403
+    except Exception as e:
+        logger.error(
+            "订阅鉴权异常: %s", str(e),
+            extra={'trace_id': trace_id},
+            exc_info=True,
+        )
+        # 鉴权异常时不阻塞请求，记录日志后放行
+    return None
 
 
 def _do_auth_check():
@@ -94,7 +151,8 @@ def _do_auth_check():
                     update_secret_last_used_at(secret)
                 except Exception as e:
                     logger.error(f"更新秘钥最近使用时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-                return None
+                # 非 GET 请求统一做订阅鉴权
+                return _check_subscription_for_write(trace_id=trace_id)
             else:
                 logger.error("无效的秘钥", extra={'trace_id': trace_id})
                 return jsonify({"code": 401, "message": "无效的秘钥"}), 401
@@ -140,7 +198,8 @@ def _do_auth_check():
     except Exception as e:
         logger.error(f"更新用户最近访问时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
 
-    return None
+    # 非 GET 请求统一做订阅鉴权
+    return _check_subscription_for_write(trace_id=trace_id)
 
 
 def register_global_auth(app, api_prefix: str = '/api'):

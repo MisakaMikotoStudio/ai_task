@@ -26,12 +26,16 @@ from flask import Blueprint, request, jsonify, current_app
 
 from dao import get_db_session
 from dao import product_dao, order_dao
+from dao import permission_dao
 from dao.secret_dao import get_user_secrets, create_user_secret, delete_user_secret
 from dao.client_dao import get_clients_by_user, delete_client, check_client_name_exists
 from dao.heartbeat_dao import get_heartbeats_by_user
 
+from dao.models import PermissionConfig, Resource
+from dao import resource_dao
 from service import oss_service, order_service
 from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_client, ClientSaveError
+from service.resource_mysql_service import ResourceMySQLError, list_databases, create_database_for_user
 
 logger = logging.getLogger(__name__)
 admin_bp = Blueprint('admin', __name__)
@@ -453,3 +457,371 @@ def admin_copy_client(client_id: int):
         'message': '客户端复制成功',
         'data': payload,
     }), 201
+
+
+# ========== 权限配置管理（admin 专用） ==========
+
+MAX_PERMISSION_KEY_LEN = 64
+MAX_PERMISSION_PRODUCT_KEY_LEN = 64
+
+
+@admin_bp.route('/permissions', methods=['GET'])
+@require_admin
+def list_permissions():
+    """获取所有权限配置，按 key 分组返回三层结构"""
+    configs = permission_dao.get_all_configs()
+    # 按 key 分组
+    grouped = {}
+    for c in configs:
+        if c.key not in grouped:
+            grouped[c.key] = {
+                'key': c.key,
+                'type': c.type,
+                'products': [],
+            }
+        grouped[c.key]['products'].append({
+            'id': c.id,
+            'product_key': c.product_key,
+            'config_detail': c.config_detail or {},
+            'created_at': c.to_dict()['created_at'],
+            'updated_at': c.to_dict()['updated_at'],
+        })
+    return jsonify({'code': 200, 'message': 'ok', 'data': list(grouped.values())})
+
+
+@admin_bp.route('/permission', methods=['POST'])
+@require_admin
+def create_permission():
+    """新增权限配置"""
+    data = request.get_json(silent=True) or {}
+
+    key = (data.get('key') or '').strip()
+    perm_type = (data.get('type') or '').strip()
+    product_key = (data.get('product_key') or '').strip()
+    config_detail = data.get('config_detail')
+
+    if not key or not perm_type or not product_key:
+        return jsonify({'code': 400, 'message': 'key、type、product_key 为必填项', 'data': None}), 400
+
+    if len(key) > MAX_PERMISSION_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', key):
+        return jsonify({'code': 400, 'message': 'key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if perm_type not in PermissionConfig.VALID_TYPES:
+        return jsonify({
+            'code': 400,
+            'message': f'type 仅支持: {", ".join(PermissionConfig.VALID_TYPES)}',
+            'data': None,
+        }), 400
+
+    if len(product_key) > MAX_PERMISSION_PRODUCT_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', product_key):
+        return jsonify({'code': 400, 'message': 'product_key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    # count_limit 类型必须有 limit 字段
+    if perm_type == PermissionConfig.TYPE_COUNT_LIMIT:
+        if not config_detail or not isinstance(config_detail, dict) or 'limit' not in config_detail:
+            return jsonify({'code': 400, 'message': 'count_limit 类型必须在 config_detail 中包含 limit 字段', 'data': None}), 400
+        limit_val = config_detail.get('limit')
+        if not isinstance(limit_val, int) or limit_val <= 0:
+            return jsonify({'code': 400, 'message': 'limit 必须为正整数', 'data': None}), 400
+
+    # 检查重复
+    if permission_dao.check_duplicate(key=key, product_key=product_key):
+        return jsonify({'code': 409, 'message': f'权限配置 key="{key}" + product_key="{product_key}" 已存在', 'data': None}), 409
+
+    with get_db_session():
+        config = permission_dao.create_config(
+            key=key,
+            type=perm_type,
+            product_key=product_key,
+            config_detail=config_detail,
+        )
+
+    return jsonify({'code': 200, 'message': 'ok', 'data': config.to_dict()})
+
+
+@admin_bp.route('/permission/<int:config_id>', methods=['PUT'])
+@require_admin
+def update_permission(config_id: int):
+    """更新权限配置"""
+    data = request.get_json(silent=True) or {}
+
+    key = (data.get('key') or '').strip()
+    perm_type = (data.get('type') or '').strip()
+    product_key = (data.get('product_key') or '').strip()
+    config_detail = data.get('config_detail')
+
+    if not key or not perm_type or not product_key:
+        return jsonify({'code': 400, 'message': 'key、type、product_key 为必填项', 'data': None}), 400
+
+    if len(key) > MAX_PERMISSION_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', key):
+        return jsonify({'code': 400, 'message': 'key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if perm_type not in PermissionConfig.VALID_TYPES:
+        return jsonify({
+            'code': 400,
+            'message': f'type 仅支持: {", ".join(PermissionConfig.VALID_TYPES)}',
+            'data': None,
+        }), 400
+
+    if len(product_key) > MAX_PERMISSION_PRODUCT_KEY_LEN or not re.match(r'^[a-zA-Z0-9_-]+$', product_key):
+        return jsonify({'code': 400, 'message': 'product_key 仅允许字母数字下划线与短横线，且长度不超过 64', 'data': None}), 400
+
+    if perm_type == PermissionConfig.TYPE_COUNT_LIMIT:
+        if not config_detail or not isinstance(config_detail, dict) or 'limit' not in config_detail:
+            return jsonify({'code': 400, 'message': 'count_limit 类型必须在 config_detail 中包含 limit 字段', 'data': None}), 400
+        limit_val = config_detail.get('limit')
+        if not isinstance(limit_val, int) or limit_val <= 0:
+            return jsonify({'code': 400, 'message': 'limit 必须为正整数', 'data': None}), 400
+
+    # 检查重复（排除自身）
+    if permission_dao.check_duplicate(key=key, product_key=product_key, exclude_id=config_id):
+        return jsonify({'code': 409, 'message': f'权限配置 key="{key}" + product_key="{product_key}" 已存在', 'data': None}), 409
+
+    with get_db_session():
+        config = permission_dao.update_config(
+            config_id=config_id,
+            key=key,
+            type=perm_type,
+            product_key=product_key,
+            config_detail=config_detail,
+        )
+
+    if not config:
+        return jsonify({'code': 404, 'message': '权限配置不存在', 'data': None}), 404
+
+    return jsonify({'code': 200, 'message': 'ok', 'data': config.to_dict()})
+
+
+@admin_bp.route('/permission/<int:config_id>', methods=['DELETE'])
+@require_admin
+def delete_permission(config_id: int):
+    """删除权限配置（软删除）"""
+    with get_db_session():
+        ok = permission_dao.soft_delete_config(config_id=config_id)
+    if not ok:
+        return jsonify({'code': 404, 'message': '权限配置不存在', 'data': None}), 404
+    return jsonify({'code': 200, 'message': 'ok', 'data': None})
+
+
+# ========== 资源管理（admin 专用） ==========
+
+
+@admin_bp.route('/resources', methods=['GET'])
+@require_admin
+def list_resources_api():
+    """获取资源列表（含已下架）"""
+    resources = resource_dao.list_resources(include_offline=True)
+    return jsonify({
+        'code': 200,
+        'message': 'ok',
+        'data': [r.to_dict() for r in resources],
+    })
+
+
+@admin_bp.route('/resource', methods=['POST'])
+@require_admin
+def create_resource_api():
+    """新增资源"""
+    data = request.get_json(silent=True) or {}
+
+    res_type = (data.get('type') or '').strip()
+    source = (data.get('source') or '').strip()
+    envs = data.get('envs')
+    extra = data.get('extra')
+
+    if not res_type:
+        return jsonify({'code': 400, 'message': 'type 不能为空', 'data': None}), 400
+    if res_type not in Resource.VALID_TYPES:
+        return jsonify({'code': 400, 'message': f'type 仅支持: {", ".join(Resource.VALID_TYPES)}', 'data': None}), 400
+
+    if not source:
+        return jsonify({'code': 400, 'message': 'source 不能为空', 'data': None}), 400
+    if source not in Resource.VALID_SOURCES:
+        return jsonify({'code': 400, 'message': f'source 仅支持: {", ".join(Resource.VALID_SOURCES)}', 'data': None}), 400
+
+    if not envs or not isinstance(envs, list):
+        return jsonify({'code': 400, 'message': 'envs 必须是非空数组', 'data': None}), 400
+    for env in envs:
+        if env not in Resource.VALID_ENVS:
+            return jsonify({'code': 400, 'message': f'envs 中包含无效环境: {env}，仅支持: {", ".join(Resource.VALID_ENVS)}', 'data': None}), 400
+
+    # 校验 extra 字段（不同 type+source 组合要求不同字段）
+    if not extra or not isinstance(extra, dict):
+        return jsonify({'code': 400, 'message': 'extra 不能为空', 'data': None}), 400
+
+    err = _validate_resource_extra(res_type=res_type, source=source, extra=extra)
+    if err:
+        return jsonify({'code': 400, 'message': err, 'data': None}), 400
+
+    with get_db_session():
+        resource = resource_dao.create_resource(
+            type=res_type,
+            source=source,
+            envs=envs,
+            extra=extra,
+        )
+
+    return jsonify({'code': 200, 'message': 'ok', 'data': resource.to_dict()})
+
+
+@admin_bp.route('/resource/<int:resource_id>', methods=['PUT'])
+@require_admin
+def update_resource_api(resource_id: int):
+    """更新资源"""
+    data = request.get_json(silent=True) or {}
+
+    res_type = (data.get('type') or '').strip()
+    source = (data.get('source') or '').strip()
+    envs = data.get('envs')
+    extra = data.get('extra')
+
+    if res_type and res_type not in Resource.VALID_TYPES:
+        return jsonify({'code': 400, 'message': f'type 仅支持: {", ".join(Resource.VALID_TYPES)}', 'data': None}), 400
+    if source and source not in Resource.VALID_SOURCES:
+        return jsonify({'code': 400, 'message': f'source 仅支持: {", ".join(Resource.VALID_SOURCES)}', 'data': None}), 400
+    if envs is not None:
+        if not isinstance(envs, list) or not envs:
+            return jsonify({'code': 400, 'message': 'envs 必须是非空数组', 'data': None}), 400
+        for env in envs:
+            if env not in Resource.VALID_ENVS:
+                return jsonify({'code': 400, 'message': f'envs 中包含无效环境: {env}', 'data': None}), 400
+
+    if extra is not None:
+        if not isinstance(extra, dict):
+            return jsonify({'code': 400, 'message': 'extra 必须是对象', 'data': None}), 400
+        # 获取当前资源确定 type/source
+        existing = resource_dao.get_resource_by_id(resource_id=resource_id)
+        if not existing:
+            return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
+        final_type = res_type or existing.type
+        final_source = source or existing.source
+        err = _validate_resource_extra(res_type=final_type, source=final_source, extra=extra)
+        if err:
+            return jsonify({'code': 400, 'message': err, 'data': None}), 400
+
+    with get_db_session():
+        resource = resource_dao.update_resource(
+            resource_id=resource_id,
+            type=res_type or None,
+            source=source or None,
+            envs=envs,
+            extra=extra,
+        )
+
+    if not resource:
+        return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
+
+    return jsonify({'code': 200, 'message': 'ok', 'data': resource.to_dict()})
+
+
+@admin_bp.route('/resource/<int:resource_id>/offline', methods=['POST'])
+@require_admin
+def offline_resource_api(resource_id: int):
+    """下架资源"""
+    with get_db_session():
+        ok = resource_dao.offline_resource(resource_id=resource_id)
+    if not ok:
+        return jsonify({'code': 404, 'message': '资源不存在或已下架', 'data': None}), 404
+    logger.info("资源下架: resource_id=%s", resource_id)
+    return jsonify({'code': 200, 'message': 'ok', 'data': None})
+
+
+@admin_bp.route('/resource/<int:resource_id>/online', methods=['POST'])
+@require_admin
+def online_resource_api(resource_id: int):
+    """上架资源"""
+    with get_db_session():
+        ok = resource_dao.online_resource(resource_id=resource_id)
+    if not ok:
+        return jsonify({'code': 404, 'message': '资源不存在或已上架', 'data': None}), 404
+    logger.info("资源上架: resource_id=%s", resource_id)
+    return jsonify({'code': 200, 'message': 'ok', 'data': None})
+
+
+@admin_bp.route('/resource/<int:resource_id>', methods=['DELETE'])
+@require_admin
+def delete_resource_api(resource_id: int):
+    """删除资源（硬删除）"""
+    with get_db_session():
+        ok = resource_dao.delete_resource(resource_id=resource_id)
+    if not ok:
+        return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
+    logger.info("资源删除: resource_id=%s", resource_id)
+    return jsonify({'code': 200, 'message': 'ok', 'data': None})
+
+
+@admin_bp.route('/resource/<int:resource_id>/databases', methods=['GET'])
+@require_admin
+def list_resource_databases_api(resource_id: int):
+    """查询资源上的用户数据库（通过 user_id 过滤）"""
+    user_id_param = request.args.get('user_id')
+    if not user_id_param:
+        return jsonify({'code': 400, 'message': 'user_id 参数必填', 'data': None}), 400
+
+    try:
+        target_user_id = int(user_id_param)
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': 'user_id 须为整数', 'data': None}), 400
+
+    resource = resource_dao.get_resource_by_id(resource_id=resource_id)
+    if not resource:
+        return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
+    if resource.type != Resource.TYPE_MYSQL:
+        return jsonify({'code': 400, 'message': '仅支持 mysql 类型资源', 'data': None}), 400
+
+    try:
+        dbs = list_databases(resource=resource, user_id=target_user_id)
+        return jsonify({'code': 200, 'message': 'ok', 'data': dbs})
+    except ResourceMySQLError as e:
+        return jsonify({'code': 500, 'message': e.message, 'data': None}), 500
+
+
+@admin_bp.route('/resource/<int:resource_id>/create-database', methods=['POST'])
+@require_admin
+def create_resource_database_api(resource_id: int):
+    """在指定资源上为用户创建数据库 + 账号"""
+    data = request.get_json(silent=True) or {}
+    user_id_param = data.get('user_id')
+    if not user_id_param:
+        return jsonify({'code': 400, 'message': 'user_id 参数必填', 'data': None}), 400
+
+    try:
+        target_user_id = int(user_id_param)
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': 'user_id 须为整数', 'data': None}), 400
+
+    resource = resource_dao.get_resource_by_id(resource_id=resource_id)
+    if not resource:
+        return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
+    if resource.type != Resource.TYPE_MYSQL:
+        return jsonify({'code': 400, 'message': '仅支持 mysql 类型资源', 'data': None}), 400
+    if resource.deleted_at is not None:
+        return jsonify({'code': 400, 'message': '该资源已下架，无法创建数据库', 'data': None}), 400
+
+    try:
+        result = create_database_for_user(resource=resource, user_id=target_user_id)
+        return jsonify({'code': 200, 'message': 'ok', 'data': result})
+    except ResourceMySQLError as e:
+        return jsonify({'code': 500, 'message': e.message, 'data': None}), 500
+
+
+def _validate_resource_extra(res_type: str, source: str, extra: dict) -> str:
+    """
+    校验不同 type+source 组合的 extra 字段。
+
+    Returns:
+        错误信息，None 表示通过
+    """
+    if res_type == Resource.TYPE_MYSQL and source == Resource.SOURCE_ALIYUN:
+        url = (extra.get('url') or '').strip()
+        access_key_id = (extra.get('access_key_id') or '').strip()
+        access_key_secret = (extra.get('access_key_secret') or '').strip()
+        if not url:
+            return '数据库实例地址 (url) 不能为空'
+        if not access_key_id:
+            return 'AccessKey ID 不能为空'
+        if not access_key_secret:
+            return 'AccessKey Secret 不能为空'
+        return None
+
+    return f'暂不支持 type={res_type} + source={source} 的组合'

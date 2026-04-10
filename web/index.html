@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI任务管理系统</title>
-    <link rel="stylesheet" href="css/style.css?v=22">
+    <link rel="stylesheet" href="css/style.css?v=23">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked-highlight@2.1.1/lib/index.umd.min.js"></script>
@@ -990,6 +990,14 @@
                         <span class="nav-icon">🛒</span>
                         <span>订单管理</span>
                     </a>
+                    <a href="#" class="nav-item" data-view="permissions" style="display:none;">
+                        <span class="nav-icon">🔐</span>
+                        <span>权限配置</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="resources" style="display:none;">
+                        <span class="nav-icon">🗄️</span>
+                        <span>资源管理</span>
+                    </a>
                     <a href="#" class="nav-item user-only-nav" data-view="store" style="display:none;">
                         <span class="nav-icon">🛍️</span>
                         <span>商店</span>
@@ -1253,31 +1261,48 @@
                     </div>
                 </div>
 
-                <!-- 应用配置页面 -->
+                <!-- 应用配置向导页面 -->
                 <div id="client-config-view" class="view">
-                    <div class="view-header">
+                    <div class="view-header wizard-view-header">
                         <div class="view-header-left">
                             <button class="btn-back" id="client-config-back-btn">← 返回</button>
                             <h2 id="client-config-title">应用配置</h2>
                         </div>
-                        <div class="view-header-right" id="client-config-header-actions" style="display: none;">
-                            <button type="button" class="btn-secondary" id="client-config-cancel-btn">取消</button>
-                            <button type="button" class="btn-primary" id="client-config-save-btn">保存</button>
+                        <div class="view-header-right wizard-header-actions" id="wizard-header-actions">
+                            <button type="button" class="btn-secondary" id="wizard-cancel-btn">取消</button>
+                            <button type="button" class="btn-primary" id="wizard-save-btn">保存</button>
                         </div>
                     </div>
-                    <div class="config-tabs-nav">
-                        <button class="config-tab-btn active" data-config-tab="basic">基本信息</button>
-                        <button class="config-tab-btn" data-config-tab="env-vars" id="tab-btn-env-vars">环境变量</button>
-                        <button class="config-tab-btn" data-config-tab="repos" id="tab-btn-repos">代码仓库</button>
-                    </div>
-                    <div class="config-tab-panels">
-                        <!-- 基本信息 -->
-                        <div id="client-tab-basic" class="config-tab-panel active">
+
+                    <!-- 左右布局：左侧tab导航 + 右侧内容 -->
+                    <div class="wizard-layout">
+                        <!-- 左侧纵向tab栏 -->
+                        <div class="wizard-sidebar" id="wizard-sidebar">
+                            <div class="wizard-sidebar-tab active" data-step="0">基本信息</div>
+                            <div class="wizard-sidebar-tab" data-step="1">环境变量</div>
+                            <div class="wizard-sidebar-tab" data-step="2">代码仓库</div>
+                            <div class="wizard-sidebar-tab" data-step="3">云服务器</div>
+                            <div class="wizard-sidebar-tab" data-step="4">域名</div>
+                            <div class="wizard-sidebar-tab" data-step="5">数据库</div>
+                            <div class="wizard-sidebar-tab" data-step="6">支付</div>
+                            <div class="wizard-sidebar-tab" data-step="7">对象存储</div>
+                        </div>
+
+                    <!-- 右侧步骤内容 -->
+                    <div class="wizard-body">
+                        <!-- Step 0: 基本信息 -->
+                        <div id="wizard-step-0" class="wizard-step-panel active">
                             <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">基本信息</div>
+                                        <div class="config-section-subtitle">必填，应用的基本描述信息。</div>
+                                    </div>
+                                </div>
                                 <form id="client-basic-form">
                                     <div class="client-basic-grid">
                                         <div class="form-group client-basic-name">
-                                            <label>应用名称</label>
+                                            <label>应用名称 <span class="required-mark">*</span></label>
                                             <input type="text" id="cfg-client-name" placeholder="请输入名称（最多16个字符）" maxlength="16">
                                         </div>
                                         <div class="form-group client-basic-agent">
@@ -1295,40 +1320,217 @@
                                 </form>
                             </div>
                         </div>
-                        <!-- 环境变量 -->
-                        <div id="client-tab-env-vars" class="config-tab-panel">
+
+                        <!-- Step 1: 环境变量 -->
+                        <div id="wizard-step-1" class="wizard-step-panel">
                             <div class="config-section">
                                 <div class="config-section-toolbar">
                                     <div class="config-section-intro">
                                         <div class="config-section-title">环境变量</div>
-                                        <div class="config-section-subtitle">变量修改会在点击右上角保存后统一提交。</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。修改在下一步后统一保存。</div>
                                     </div>
                                     <button class="btn-secondary config-add-btn" id="add-env-var-btn" type="button">+ 新增变量</button>
                                 </div>
-                                <div class="config-section-tip" id="env-vars-tip"></div>
-                                <div id="env-vars-list" class="env-vars-list">
-                                    <!-- 动态填充 -->
+                                <div class="wizard-env-tabs" id="env-var-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
                                 </div>
+                                <div class="config-section-tip tip-warn" id="env-vars-tip">注意：仅在 docker私有化部署、官方云部署场景下环境变量才会生效。</div>
+                                <div id="env-vars-list" class="env-vars-list"></div>
                                 <div id="env-vars-empty" class="empty-state" style="display:none;">
                                     <p>暂无环境变量配置</p>
                                 </div>
                             </div>
                         </div>
-                        <!-- 代码仓库 -->
-                        <div id="client-tab-repos" class="config-tab-panel">
+
+                        <!-- Step 2: 代码仓库 -->
+                        <div id="wizard-step-2" class="wizard-step-panel">
                             <div class="config-section">
                                 <div class="config-section-toolbar">
                                     <div class="config-section-intro">
-                                        <div class="config-section-title">代码仓库</div>
-                                        <div class="config-section-subtitle">仓库修改会在点击右上角保存后统一提交。</div>
+                                        <div class="config-section-title">代码仓库 <span class="required-mark">*</span></div>
+                                        <div class="config-section-subtitle">必填，须指定唯一文档仓库。</div>
                                     </div>
                                     <button class="btn-secondary config-add-btn" id="cfg-add-repo-btn" type="button">+ 新增仓库</button>
                                 </div>
-                                <div class="config-section-tip tip-info" id="repos-tip">须指定唯一文档仓库。</div>
                                 <div class="repos-waterfall" id="cfg-repos-waterfall"></div>
                             </div>
                         </div>
+
+                        <!-- Step 3: 云服务器 -->
+                        <div id="wizard-step-3" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">云服务器</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置，保存时会校验 SSH 连通性。</div>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="server-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="server-form-container">
+                                    <div class="infra-form-grid">
+                                        <div class="form-group">
+                                            <label>登录账号</label>
+                                            <input type="text" id="cfg-server-name" placeholder="如 root">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>登录密码</label>
+                                            <input type="password" id="cfg-server-password" placeholder="SSH 登录密码">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>服务器 IP</label>
+                                            <input type="text" id="cfg-server-ip" placeholder="如 1.2.3.4">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 4: 域名 -->
+                        <div id="wizard-step-4" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">域名</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。</div>
+                                    </div>
+                                    <button class="btn-secondary config-add-btn" id="add-domain-btn" type="button">+ 新增域名</button>
+                                </div>
+                                <div class="wizard-env-tabs" id="domain-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="domains-list" class="infra-list"></div>
+                                <div id="domains-empty" class="empty-state" style="display:none;"><p>暂无域名配置</p></div>
+                            </div>
+                        </div>
+
+                        <!-- Step 5: 数据库 -->
+                        <div id="wizard-step-5" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">数据库</div>
+                                        <div class="config-section-subtitle">可跳过；支持多条配置，选择环境后配置。</div>
+                                    </div>
+                                    <div class="config-btn-group">
+                                        <button class="btn-secondary config-add-btn" id="gen-default-db-btn" type="button">生成默认数据库</button>
+                                        <button class="btn-secondary config-add-btn" id="add-database-btn" type="button">+ 新增数据库</button>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="database-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="databases-list" class="infra-list"></div>
+                                <div id="databases-empty" class="empty-state" style="display:none;"><p>暂无数据库配置</p></div>
+                            </div>
+                        </div>
+
+                        <!-- Step 6: 支付 -->
+                        <div id="wizard-step-6" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">支付</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。目前支持支付宝。</div>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="payment-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="payment-form-container">
+                                    <div class="form-group" style="margin-bottom:12px;">
+                                        <label>支付类型</label>
+                                        <select id="cfg-payment-type" class="status-select">
+                                            <option value="alipay">支付宝</option>
+                                        </select>
+                                    </div>
+                                    <div class="infra-form-grid">
+                                        <div class="form-group">
+                                            <label>AppID</label>
+                                            <input type="text" id="cfg-payment-appid" placeholder="支付宝应用 AppID">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>notify_url</label>
+                                            <input type="text" id="cfg-payment-notify-url" placeholder="异步通知回调 URL">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>return_url</label>
+                                            <input type="text" id="cfg-payment-return-url" placeholder="支付完成同步跳转 URL">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>gateway</label>
+                                            <input type="text" id="cfg-payment-gateway" placeholder="支付宝网关">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>app_encrypt_key</label>
+                                            <input type="text" id="cfg-payment-app-encrypt-key" placeholder="AES 加密密钥（可选）">
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-top:8px;">
+                                        <label>app_private_key（应用 RSA2 私钥）</label>
+                                        <textarea id="cfg-payment-app-private-key" rows="4" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+                                    </div>
+                                    <div class="form-group" style="margin-top:8px;">
+                                        <label>alipay_public_key（支付宝公钥）</label>
+                                        <textarea id="cfg-payment-alipay-public-key" rows="4" placeholder="支付宝公钥内容"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 7: 对象存储 -->
+                        <div id="wizard-step-7" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">对象存储</div>
+                                        <div class="config-section-subtitle">可跳过；选择环境后配置。目前支持腾讯云 COS。</div>
+                                    </div>
+                                </div>
+                                <div class="wizard-env-tabs" id="oss-env-tabs">
+                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
+                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
+                                </div>
+                                <div id="oss-form-container">
+                                    <div class="form-group" style="margin-bottom:12px;">
+                                        <label>存储类型</label>
+                                        <select id="cfg-oss-type" class="status-select">
+                                            <option value="cos">腾讯云 COS</option>
+                                        </select>
+                                    </div>
+                                    <div class="infra-form-grid">
+                                        <div class="form-group">
+                                            <label>SecretId</label>
+                                            <input type="text" id="cfg-oss-secret-id" placeholder="腾讯云 SecretId">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>SecretKey</label>
+                                            <input type="password" id="cfg-oss-secret-key" placeholder="腾讯云 SecretKey">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Region</label>
+                                            <input type="text" id="cfg-oss-region" placeholder="如 ap-guangzhou">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Bucket</label>
+                                            <input type="text" id="cfg-oss-bucket" placeholder="如 myapp-1234567890">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>base_url（公开访问域名前缀）</label>
+                                            <input type="text" id="cfg-oss-base-url" placeholder="如 https://xxx.cos.ap-guangzhou.myqcloud.com">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+                    </div><!-- /.wizard-layout -->
                 </div>
 
                 <!-- 秘钥视图 -->
@@ -1414,6 +1616,133 @@
                             <button id="orders-prev-btn" class="btn-secondary btn-small" type="button" disabled>上一页</button>
                             <span id="orders-page-info" class="commerce-page-info">-</span>
                             <button id="orders-next-btn" class="btn-secondary btn-small" type="button" disabled>下一页</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 权限配置视图（admin） -->
+                <div id="permissions-view" class="view">
+                    <div class="commerce-page-head">
+                        <div class="commerce-page-head-text">
+                            <h2 class="commerce-page-title">权限配置</h2>
+                            <p class="commerce-page-sub">管理系统权限校验规则，配置订阅限制和数量限制</p>
+                        </div>
+                        <button type="button" id="open-create-permission-btn" class="commerce-add-product-btn">
+                            <span class="commerce-add-icon">+</span> 新增配置
+                        </button>
+                    </div>
+                    <div class="card perm-card">
+                        <h3 class="section-title">权限列表</h3>
+                        <div id="permissions-list" class="perm-groups" aria-live="polite"></div>
+                    </div>
+
+                    <!-- 新增/编辑权限配置弹窗 -->
+                    <div id="permission-modal" class="commerce-modal-overlay" style="display:none;">
+                        <div class="commerce-modal perm-modal">
+                            <div class="commerce-modal-header">
+                                <h3 id="permission-modal-title">新增权限配置</h3>
+                                <button type="button" class="commerce-modal-close" id="close-permission-modal">&times;</button>
+                            </div>
+                            <form id="permission-form" class="commerce-form perm-form">
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">权限 Key <span class="required">*</span></label>
+                                    <input type="text" id="perm-key" class="commerce-input" placeholder="如 subscribed, official_cloud_client_count" maxlength="64" required>
+                                    <p class="perm-hint">字母、数字、下划线、短横线</p>
+                                </div>
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">校验类型 <span class="required">*</span></label>
+                                    <select id="perm-type" class="commerce-input" required>
+                                        <option value="subscribed">subscribed - 订阅限制</option>
+                                        <option value="count_limit">count_limit - 总量限制</option>
+                                    </select>
+                                </div>
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">产品 Key <span class="required">*</span></label>
+                                    <input type="text" id="perm-product-key" class="commerce-input" placeholder="关联的商品 key" maxlength="64" required>
+                                </div>
+                                <div class="commerce-form-group" id="perm-limit-group" style="display:none;">
+                                    <label class="commerce-label">数量上限 (limit) <span class="required">*</span></label>
+                                    <input type="number" id="perm-limit" class="commerce-input" placeholder="正整数" min="1" step="1">
+                                </div>
+                                <div class="commerce-modal-footer">
+                                    <button type="button" class="btn-secondary" id="cancel-permission-btn">取消</button>
+                                    <button type="submit" class="btn-primary" id="save-permission-btn">保存</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 资源管理视图（admin） -->
+                <div id="resources-view" class="view">
+                    <div class="commerce-page-head">
+                        <div class="commerce-page-head-text">
+                            <h2 class="commerce-page-title">资源管理</h2>
+                            <p class="commerce-page-sub">管理系统基础设施资源（数据库实例等），控制上架/下架状态</p>
+                        </div>
+                        <button type="button" id="open-create-resource-btn" class="commerce-add-product-btn">
+                            <span class="commerce-add-icon">+</span> 新增资源
+                        </button>
+                    </div>
+                    <div class="card">
+                        <h3 class="section-title">资源列表</h3>
+                        <div id="resources-list" aria-live="polite"></div>
+                    </div>
+
+                    <!-- 新增/编辑资源弹窗 -->
+                    <div id="resource-modal" class="commerce-modal-overlay" style="display:none;">
+                        <div class="commerce-modal resource-modal">
+                            <div class="commerce-modal-header">
+                                <h3 id="resource-modal-title">新增资源</h3>
+                                <button type="button" class="commerce-modal-close" id="close-resource-modal">&times;</button>
+                            </div>
+                            <form id="resource-form" class="commerce-form">
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">资源类型 <span class="required">*</span></label>
+                                    <select id="resource-type" class="commerce-input" required>
+                                        <option value="">请选择</option>
+                                        <option value="mysql">MySQL</option>
+                                    </select>
+                                </div>
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">资源来源 <span class="required">*</span></label>
+                                    <select id="resource-source" class="commerce-input" required>
+                                        <option value="">请选择</option>
+                                        <option value="aliyun">阿里云</option>
+                                    </select>
+                                </div>
+                                <div class="commerce-form-group">
+                                    <label class="commerce-label">可用环境 <span class="required">*</span></label>
+                                    <div class="resource-env-checkboxes">
+                                        <label class="resource-env-checkbox">
+                                            <input type="checkbox" name="resource-envs" value="test"> test（测试环境）
+                                        </label>
+                                        <label class="resource-env-checkbox">
+                                            <input type="checkbox" name="resource-envs" value="prod"> prod（生产环境）
+                                        </label>
+                                    </div>
+                                </div>
+                                <!-- 补充信息区域，动态显示 -->
+                                <div id="resource-extra-fields" style="display:none;">
+                                    <div class="resource-extra-divider">补充信息</div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">数据库实例地址 (URL) <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-url" class="commerce-input" placeholder="如 rm-bp1xxxxx.mysql.rds.aliyuncs.com">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">AccessKey ID <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-ak-id" class="commerce-input" placeholder="阿里云 AccessKey ID">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">AccessKey Secret <span class="required">*</span></label>
+                                        <input type="password" id="resource-extra-ak-secret" class="commerce-input" placeholder="阿里云 AccessKey Secret">
+                                    </div>
+                                </div>
+                                <div class="commerce-modal-footer">
+                                    <button type="button" class="btn-secondary" id="cancel-resource-btn">取消</button>
+                                    <button type="submit" class="btn-primary" id="save-resource-btn">保存</button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -1543,10 +1872,10 @@
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=11"></script>
+    <script src="js/api.js?v=13"></script>
     <script src="js/flow-chart.js?v=6"></script>
     <script src="js/okr.js?v=2"></script>
-    <script src="js/app.js?v=25"></script>
+    <script src="js/app.js?v=28"></script>
 </body>
 </html>
 

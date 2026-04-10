@@ -339,6 +339,7 @@ class ClientEnvVar(Base):
     client_id = Column(Integer, nullable=False, comment='关联客户端ID')
     key = Column(String(128), nullable=False, comment='环境变量名')
     value = Column(Text, nullable=True, comment='环境变量值')
+    env = Column(String(16), nullable=True, default=None, comment='环境标识：test/prod，NULL表示通用')
     deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
     updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
@@ -353,6 +354,7 @@ class ClientEnvVar(Base):
             'client_id': self.client_id,
             'key': self.key,
             'value': self.value or '',
+            'env': self.env or '',
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at)
         }
@@ -516,6 +518,281 @@ class Order(Base):
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at),
         }
+
+
+class ClientServer(Base):
+    """客户端云服务器配置表"""
+    __tablename__ = 'ai_task_client_servers'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
+    name = Column(String(128), nullable=False, default='', comment='登录账号')
+    password = Column(String(256), nullable=True, comment='登录密码')
+    ip = Column(String(64), nullable=False, default='', comment='云服务器IP')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_servers_client_env', 'client_id', 'env'),
+        Index('idx_client_servers_user_id', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'env': self.env,
+            'name': self.name or '',
+            'password': self.password or '',
+            'ip': self.ip or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class ClientDomain(Base):
+    """客户端域名配置表"""
+    __tablename__ = 'ai_task_client_domains'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
+    domain = Column(String(256), nullable=False, default='', comment='域名')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_domains_client_env', 'client_id', 'env'),
+        Index('idx_client_domains_user_id', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'env': self.env,
+            'domain': self.domain or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class ClientDatabase(Base):
+    """客户端数据库配置表"""
+    __tablename__ = 'ai_task_client_databases'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
+    db_type = Column(String(32), nullable=False, default='mysql', comment='数据库类型：mysql')
+    host = Column(String(256), nullable=False, default='', comment='数据库地址')
+    port = Column(Integer, nullable=False, default=3306, comment='数据库端口')
+    username = Column(String(128), nullable=False, default='', comment='用户名')
+    password = Column(String(256), nullable=True, comment='密码')
+    db_name = Column(String(128), nullable=False, default='', comment='数据库名称')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_databases_client_env', 'client_id', 'env'),
+        Index('idx_client_databases_user_id', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'env': self.env,
+            'db_type': self.db_type or 'mysql',
+            'host': self.host or '',
+            'port': self.port or 3306,
+            'username': self.username or '',
+            'password': self.password or '',
+            'db_name': self.db_name or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class ClientPayment(Base):
+    """客户端支付配置表"""
+    __tablename__ = 'ai_task_client_payments'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
+    payment_type = Column(String(32), nullable=False, default='alipay', comment='支付类型：alipay')
+    appid = Column(String(64), nullable=True, comment='支付宝应用ID')
+    app_private_key = Column(Text, nullable=True, comment='应用RSA2私钥')
+    alipay_public_key = Column(Text, nullable=True, comment='支付宝公钥')
+    notify_url = Column(String(512), nullable=True, comment='异步通知回调URL')
+    return_url = Column(String(512), nullable=True, comment='支付完成后同步跳转URL')
+    gateway = Column(String(256), nullable=True, comment='支付宝网关')
+    app_encrypt_key = Column(String(256), nullable=True, comment='接口内容AES加密密钥')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_payments_client_env', 'client_id', 'env'),
+        Index('idx_client_payments_user_id', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'env': self.env,
+            'payment_type': self.payment_type or 'alipay',
+            'appid': self.appid or '',
+            'app_private_key': self.app_private_key or '',
+            'alipay_public_key': self.alipay_public_key or '',
+            'notify_url': self.notify_url or '',
+            'return_url': self.return_url or '',
+            'gateway': self.gateway or '',
+            'app_encrypt_key': self.app_encrypt_key or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class ClientOss(Base):
+    """客户端对象存储配置表"""
+    __tablename__ = 'ai_task_client_oss'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
+    oss_type = Column(String(32), nullable=False, default='cos', comment='存储类型：cos（腾讯云）')
+    secret_id = Column(String(256), nullable=True, comment='SecretId')
+    secret_key = Column(String(256), nullable=True, comment='SecretKey')
+    region = Column(String(64), nullable=True, comment='地域')
+    bucket = Column(String(128), nullable=True, comment='Bucket名称')
+    base_url = Column(String(512), nullable=True, comment='公开访问域名前缀')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_oss_client_env', 'client_id', 'env'),
+        Index('idx_client_oss_user_id', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'env': self.env,
+            'oss_type': self.oss_type or 'cos',
+            'secret_id': self.secret_id or '',
+            'secret_key': self.secret_key or '',
+            'region': self.region or '',
+            'bucket': self.bucket or '',
+            'base_url': self.base_url or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class PermissionConfig(Base):
+    """权限配置表"""
+    __tablename__ = 'ai_task_permission_configs'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    key = Column(String(64), nullable=False, comment='权限 key（如 subscribed, official_cloud_client_count）')
+    type = Column(String(32), nullable=False, comment='权限校验类型：count_limit / subscribed')
+    product_key = Column(String(64), nullable=False, comment='关联的产品 key')
+    config_detail = Column(JSON, nullable=True, comment='具体权限配置（如 {"limit": 5}）')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
+                        onupdate=func.utc_timestamp(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间（软删除）')
+
+    TYPE_COUNT_LIMIT = 'count_limit'
+    TYPE_SUBSCRIBED = 'subscribed'
+    VALID_TYPES = [TYPE_COUNT_LIMIT, TYPE_SUBSCRIBED]
+
+    __table_args__ = (
+        Index('idx_permission_configs_key', 'key'),
+        Index('idx_permission_configs_key_product', 'key', 'product_key'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'type': self.type,
+            'product_key': self.product_key,
+            'config_detail': self.config_detail or {},
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
+class Resource(Base):
+    """资源表（admin 管理）"""
+    __tablename__ = 'ai_task_resources'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type = Column(String(32), nullable=False, comment='资源类型：mysql')
+    source = Column(String(32), nullable=False, comment='资源来源：aliyun')
+    envs = Column(JSON, nullable=False, comment='可用环境列表，如 ["test","prod"]')
+    extra = Column(JSON, nullable=True, comment='补充详细信息（不同 type+source 对应不同字段）')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='下架时间，NULL 表示上架中')
+
+    # 类型常量
+    TYPE_MYSQL = 'mysql'
+    VALID_TYPES = [TYPE_MYSQL]
+
+    # 来源常量
+    SOURCE_ALIYUN = 'aliyun'
+    VALID_SOURCES = [SOURCE_ALIYUN]
+
+    # 环境常量
+    VALID_ENVS = ['test', 'prod']
+
+    __table_args__ = (
+        Index('idx_resources_type_source', 'type', 'source'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'type': self.type,
+            'source': self.source,
+            'envs': self.envs or [],
+            'extra': self._safe_extra(),
+            'is_online': self.deleted_at is None,
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+    def _safe_extra(self):
+        """返回 extra 时隐藏敏感字段（AccessKey Secret 等）"""
+        raw = self.extra or {}
+        safe = dict(raw)
+        if 'access_key_secret' in safe:
+            val = safe['access_key_secret']
+            if val and len(val) > 6:
+                safe['access_key_secret'] = val[:3] + '***' + val[-3:]
+            else:
+                safe['access_key_secret'] = '***'
+        return safe
+
+    def get_raw_extra(self):
+        """返回原始 extra（含完整敏感字段，仅服务层使用）"""
+        return self.extra or {}
 
 
 class ChatMessage(Base):

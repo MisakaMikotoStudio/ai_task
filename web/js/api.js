@@ -117,19 +117,21 @@ const clientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
         });
     },
 
-    // 更新（可选 repos、env_vars 全量同步）
+    // 更新（可选 repos、env_vars、infrastructure 全量同步）
     async update(id, name, options = {}) {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -153,8 +155,24 @@ const clientAPI = {
         return request(`/client/${id}/copy`, {
             method: 'POST'
         });
+    },
+
+    // 生成默认数据库
+    async generateDefaultDatabase() {
+        return request('/client/generate-default-database', {
+            method: 'POST'
+        });
+    },
+
+    // 从模板生成默认应用
+    async createFromTemplate(appTypes) {
+        return request('/client/create-from-template', {
+            method: 'POST',
+            body: JSON.stringify({ app_types: appTypes })
+        });
     }
 };
+
 
 // 秘钥API
 const secretAPI = {
@@ -213,6 +231,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request('/admin/clients', {
             method: 'POST',
             body: JSON.stringify(body)
@@ -224,6 +243,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
         return request(`/admin/clients/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -237,6 +257,21 @@ const adminClientAPI = {
     async copy(id) {
         return request(`/admin/clients/${id}/copy`, {
             method: 'POST'
+        });
+    },
+
+    // 生成默认数据库
+    async generateDefaultDatabase() {
+        return request('/client/generate-default-database', {
+            method: 'POST'
+        });
+    },
+
+    // 从模板生成默认应用
+    async createFromTemplate(appTypes) {
+        return request('/client/create-from-template', {
+            method: 'POST',
+            body: JSON.stringify({ app_types: appTypes })
         });
     }
 };
@@ -304,6 +339,72 @@ const adminCommerceAPI = {
     async refundOrder(orderId) {
         return request(`/admin/orders/${orderId}/refund`, {
             method: 'POST'
+        });
+    }
+};
+
+const adminPermissionAPI = {
+    async list() {
+        return request('/admin/permissions');
+    },
+    async create(data) {
+        return request('/admin/permission', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    async update(id, data) {
+        return request(`/admin/permission/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    async remove(id) {
+        return request(`/admin/permission/${id}`, {
+            method: 'DELETE'
+        });
+    }
+};
+
+// 资源管理API（admin专用）
+const adminResourceAPI = {
+    async list() {
+        return request('/admin/resources');
+    },
+    async create(data) {
+        return request('/admin/resource', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    async update(id, data) {
+        return request(`/admin/resource/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    async offline(id) {
+        return request(`/admin/resource/${id}/offline`, {
+            method: 'POST'
+        });
+    },
+    async online(id) {
+        return request(`/admin/resource/${id}/online`, {
+            method: 'POST'
+        });
+    },
+    async remove(id) {
+        return request(`/admin/resource/${id}`, {
+            method: 'DELETE'
+        });
+    },
+    async listDatabases(resourceId, userId) {
+        return request(`/admin/resource/${resourceId}/databases?user_id=${userId}`);
+    },
+    async createDatabase(resourceId, userId) {
+        return request(`/admin/resource/${resourceId}/create-database`, {
+            method: 'POST',
+            body: JSON.stringify({ user_id: userId })
         });
     }
 };

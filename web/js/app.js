@@ -13,7 +13,7 @@ const currentUsername = document.getElementById('current-username');
 
 // 管理后台与主应用共用 index.html：pathname 以 /admin 结尾时为管理后台（与后端 Flask 路由 /admin 一致）
 const ADMIN_PAGE = /\/admin\/?$/.test(window.location.pathname);
-const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders']);
+const ADMIN_ALLOWED_VIEWS = new Set(['clients', 'secrets', 'products', 'orders', 'permissions', 'resources']);
 
 function getUrlBasePrefix() {
     // 把 /admin 或 /index.html 去掉，得到类似 "/v1" 的前缀（若无则返回 ""）
@@ -121,10 +121,11 @@ function showMainPage() {
 
     // 管理后台：仅 应用 / 秘钥 / 商品管理 / 订单管理（由 initNavigation 隐藏其余 nav）
     if (ADMIN_PAGE) {
-        document.querySelectorAll('.nav-item[data-view=”products”], .nav-item[data-view=”orders”]').forEach((el) => {
+        document.querySelectorAll('.nav-item[data-view=”products”], .nav-item[data-view=”orders”], .nav-item[data-view=”permissions”]').forEach((el) => {
             el.style.display = '';
         });
         initAdminCommerce();
+        initAdminPermissions();
         initSecrets();
         initClientSearch();
         loadClients();
@@ -306,6 +307,10 @@ function switchToView(view) {
         loadAdminOrders(1);
     } else if (view === 'store') {
         loadStoreProducts();
+    } else if (view === 'permissions') {
+        loadAdminPermissions();
+    } else if (view === 'resources') {
+        loadAdminResources();
     } else if (view === 'profile') {
         loadProfileUserInfo();
         loadMyServices();
@@ -395,7 +400,7 @@ function initForms() {
     
     // 添加客户端按钮
     document.getElementById('add-client-btn').addEventListener('click', () => {
-        openClientConfig(null, 'add');
+        showAddClientModal();
     });
     
     // 添加任务按钮
@@ -641,19 +646,67 @@ async function copyClient(id) {
     }
 }
 
-// ===== 客户端配置页面 =====
+// ===== 客户端配置向导页面 =====
 
-// 当前客户端配置页面状态
+// 向导步骤定义
+const WIZARD_STEPS = [
+    { id: 0, label: '基本信息', required: true },
+    { id: 1, label: '环境变量', required: false },
+    { id: 2, label: '代码仓库', required: true },
+    { id: 3, label: '云服务器', required: false },
+    { id: 4, label: '域名',     required: false },
+    { id: 5, label: '数据库',   required: false },
+    { id: 6, label: '支付',     required: false },
+    { id: 7, label: '对象存储', required: false },
+];
+
+// 当前向导状态
 let cfgClientId = null;      // null = 新建模式
 let cfgClientMode = 'add';   // 'add' | 'edit' | 'view'
+let cfgCurrentStep = 0;
 let cfgReposList = [];
-let cfgEnvVarsData = [];
+
+// 环境变量：按 env 分组 { test: [{key,value,...}], prod: [...] }
+let cfgEnvVarsByEnv = { test: [], prod: [] };
+let cfgEnvVarsCurrentEnv = 'test';
+
+// 云服务器：按 env 存储 { test: {name,password,ip}, prod: {name,password,ip} }
+let cfgServersByEnv = { test: { name: '', password: '', ip: '' }, prod: { name: '', password: '', ip: '' } };
+let cfgServerCurrentEnv = 'test';
+
+// 域名：按 env 存储 { test: ['...'], prod: ['...'] }
+let cfgDomainsByEnv = { test: [], prod: [] };
+let cfgDomainCurrentEnv = 'test';
+
+// 数据库：按 env 存储 { test: [{...}], prod: [{...}] }
+let cfgDatabasesByEnv = { test: [], prod: [] };
+let cfgDatabaseCurrentEnv = 'test';
+
+// 支付：按 env 存储 { test: {...}, prod: {...} }
+let cfgPaymentsByEnv = { test: {}, prod: {} };
+let cfgPaymentCurrentEnv = 'test';
+
+// 对象存储：按 env 存储 { test: {...}, prod: {...} }
+let cfgOssByEnv = { test: {}, prod: {} };
+let cfgOssCurrentEnv = 'test';
 
 function cfgResetClientConfigState() {
     cfgClientId = null;
     cfgClientMode = 'add';
+    cfgCurrentStep = 0;
     cfgReposList = [];
-    cfgEnvVarsData = [];
+    cfgEnvVarsByEnv = { test: [], prod: [] };
+    cfgEnvVarsCurrentEnv = 'test';
+    cfgServersByEnv = { test: { name: '', password: '', ip: '' }, prod: { name: '', password: '', ip: '' } };
+    cfgServerCurrentEnv = 'test';
+    cfgDomainsByEnv = { test: [], prod: [] };
+    cfgDomainCurrentEnv = 'test';
+    cfgDatabasesByEnv = { test: [], prod: [] };
+    cfgDatabaseCurrentEnv = 'test';
+    cfgPaymentsByEnv = { test: {}, prod: {} };
+    cfgPaymentCurrentEnv = 'test';
+    cfgOssByEnv = { test: {}, prod: {} };
+    cfgOssCurrentEnv = 'test';
 }
 
 function backToClients() {
@@ -662,7 +715,89 @@ function backToClients() {
     loadClients();
 }
 
-// 打开客户端配置页（替代弹窗）
+// 显示添加应用选择弹窗
+function showAddClientModal() {
+    const content = `
+        <div class="add-client-choice">
+            <div class="choice-group">
+                <label class="choice-option">
+                    <input type="radio" name="add-client-method" value="manual" checked>
+                    <span class="choice-label">手动填写应用配置</span>
+                    <span class="choice-desc">自定义配置应用的所有信息</span>
+                </label>
+                <label class="choice-option">
+                    <input type="radio" name="add-client-method" value="template">
+                    <span class="choice-label">从模板生成默认应用</span>
+                    <span class="choice-desc">快速创建包含默认数据库配置的应用</span>
+                </label>
+            </div>
+            <div id="template-config-section" style="display:none; margin-top: 16px;">
+                <div class="form-group">
+                    <label class="form-label">应用形态（多选）</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-option">
+                            <input type="checkbox" name="app-type" value="web" checked>
+                            <span>web - 网站</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn-secondary" id="add-client-modal-cancel">取消</button>
+                <button class="btn-primary" id="add-client-modal-confirm">确认</button>
+            </div>
+        </div>
+    `;
+    openModal('添加应用', content);
+
+    // 切换模板/手动时显示/隐藏模板配置区
+    const radios = document.querySelectorAll('input[name="add-client-method"]');
+    const templateSection = document.getElementById('template-config-section');
+    const confirmBtn = document.getElementById('add-client-modal-confirm');
+    radios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            const isTemplate = document.querySelector('input[name="add-client-method"]:checked').value === 'template';
+            templateSection.style.display = isTemplate ? 'block' : 'none';
+            confirmBtn.textContent = isTemplate ? '创建' : '确认';
+        });
+    });
+
+    // 取消按钮
+    document.getElementById('add-client-modal-cancel').addEventListener('click', () => {
+        closeModal();
+    });
+
+    // 确认/创建按钮
+    confirmBtn.addEventListener('click', async () => {
+        const method = document.querySelector('input[name="add-client-method"]:checked').value;
+        if (method === 'manual') {
+            closeModal();
+            openClientConfig(null, 'add');
+        } else {
+            // 模板创建
+            const appTypeCheckboxes = document.querySelectorAll('input[name="app-type"]:checked');
+            const appTypes = Array.from(appTypeCheckboxes).map(cb => cb.value);
+            if (appTypes.length === 0) {
+                showToast('请选择至少一种应用形态', 'error');
+                return;
+            }
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = '创建中...';
+            try {
+                await activeClientAPI.createFromTemplate(appTypes);
+                closeModal();
+                showToast('应用创建成功', 'success');
+                loadClients();
+            } catch (error) {
+                showToast(error.message || '创建失败', 'error');
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = '创建';
+            }
+        }
+    });
+}
+
+// 打开客户端配置向导
 async function openClientConfig(id, mode) {
     cfgResetClientConfigState();
     cfgClientId = id;
@@ -677,35 +812,15 @@ async function openClientConfig(id, mode) {
     const titleMap = { add: '新建应用', edit: '编辑应用', view: '查看应用' };
     document.getElementById('client-config-title').textContent = titleMap[mode] || '应用配置';
 
-    // Tab 切换逻辑
-    const tabBtns = document.querySelectorAll('.config-tab-btn');
-    const tabPanels = document.querySelectorAll('.config-tab-panel');
-
-    tabBtns.forEach(btn => {
-        btn.onclick = () => {
-            const tab = btn.dataset.configTab;
-            tabBtns.forEach(b => b.classList.remove('active'));
-            tabPanels.forEach(p => p.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(`client-tab-${tab}`).classList.add('active');
-        };
-    });
-
-    // 默认显示基本信息 tab
-    tabBtns.forEach(b => b.classList.remove('active'));
-    tabPanels.forEach(p => p.classList.remove('active'));
-    document.querySelector('[data-config-tab="basic"]').classList.add('active');
-    document.getElementById('client-tab-basic').classList.add('active');
-
     // 返回按钮
-    document.getElementById('client-config-back-btn').onclick = cfgCancelClientConfig;
+    document.getElementById('client-config-back-btn').onclick = () => {
+        cfgResetClientConfigState();
+        backToClients();
+    };
 
-    const envTab = document.getElementById('tab-btn-env-vars');
-    const reposTab = document.getElementById('tab-btn-repos');
-    envTab.disabled = false;
-    reposTab.disabled = false;
-    envTab.title = '';
-    reposTab.title = '';
+    // 取消 / 保存按钮
+    document.getElementById('wizard-cancel-btn').onclick = () => wizardCancel();
+    document.getElementById('wizard-save-btn').onclick = () => wizardSaveAll();
 
     // 加载 Agent 列表
     let agentOptions = ['claude sdk', 'claude cli'];
@@ -715,22 +830,42 @@ async function openClientConfig(id, mode) {
     } catch (e) { console.warn('获取Agent列表失败', e); }
 
     const agentSelect = document.getElementById('cfg-client-agent');
-    const officialCloudDeploySelect = document.getElementById('cfg-client-official-cloud-deploy');
     agentSelect.innerHTML = agentOptions.map(a =>
         `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`
     ).join('');
 
-    // 编辑/查看：一次 GET 拉取基本信息、仓库、环境变量
+    // 如果是编辑/查看模式，加载已有数据（一个接口返回所有内容，含基础设施）
     if (id !== null) {
         try {
             const clientResult = await activeClientAPI.get(id);
             const clientData = clientResult.data;
             cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
-            cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev }));
+
+            // 按环境分组加载环境变量
+            const envVars = clientData.env_vars || [];
+            cfgEnvVarsByEnv = { test: [], prod: [] };
+            envVars.forEach(ev => {
+                const envKey = ev.env || 'test';
+                if (!cfgEnvVarsByEnv[envKey]) cfgEnvVarsByEnv[envKey] = [];
+                cfgEnvVarsByEnv[envKey].push({ ...ev });
+            });
 
             document.getElementById('cfg-client-name').value = clientData.name;
             agentSelect.value = clientData.agent || 'claude sdk';
-            officialCloudDeploySelect.value = String(clientData.official_cloud_deploy ?? 0);
+            document.getElementById('cfg-client-official-cloud-deploy').value = String(clientData.official_cloud_deploy ?? 0);
+
+            // 基础设施配置（已包含在 client detail 响应中）
+            const infra = clientData.infrastructure || {};
+            cfgServersByEnv.test = infra.servers && infra.servers.test ? { ...infra.servers.test } : { name: '', password: '', ip: '' };
+            cfgServersByEnv.prod = infra.servers && infra.servers.prod ? { ...infra.servers.prod } : { name: '', password: '', ip: '' };
+            cfgDomainsByEnv.test = (infra.domains && infra.domains.test) || [];
+            cfgDomainsByEnv.prod = (infra.domains && infra.domains.prod) || [];
+            cfgDatabasesByEnv.test = (infra.databases && infra.databases.test) || [];
+            cfgDatabasesByEnv.prod = (infra.databases && infra.databases.prod) || [];
+            cfgPaymentsByEnv.test = (infra.payments && infra.payments.test) ? { ...infra.payments.test } : {};
+            cfgPaymentsByEnv.prod = (infra.payments && infra.payments.prod) ? { ...infra.payments.prod } : {};
+            cfgOssByEnv.test = (infra.oss && infra.oss.test) ? { ...infra.oss.test } : {};
+            cfgOssByEnv.prod = (infra.oss && infra.oss.prod) ? { ...infra.oss.prod } : {};
         } catch (error) {
             showToast(error.message, 'error');
             return;
@@ -738,51 +873,98 @@ async function openClientConfig(id, mode) {
     } else {
         document.getElementById('cfg-client-name').value = '';
         agentSelect.value = agentOptions[0] || 'claude sdk';
-        officialCloudDeploySelect.value = '0';
+        document.getElementById('cfg-client-official-cloud-deploy').value = '0';
     }
 
-    cfgApplyBasicFormMode();
-    cfgBindClientConfigHeader();
-
-    cfgRenderEnvVarsTab();
-    cfgRenderReposTab();
+    // 初始化向导
+    wizardGoToStep(0);
 }
 
-function cfgApplyBasicFormMode() {
-    const form = document.getElementById('client-basic-form');
-    if (form) {
-        form.onsubmit = (e) => e.preventDefault();
+// ---- 向导步骤导航 ----
+
+function wizardGoToStep(stepIndex) {
+    // 切换前先同步当前步骤的 DOM 数据到内存
+    wizardSyncCurrentStepFromDOM(cfgCurrentStep);
+    cfgCurrentStep = stepIndex;
+    wizardUpdateSidebar();
+    wizardShowStepPanel(stepIndex);
+    wizardRenderStepContent(stepIndex);
+    wizardUpdateHeaderActions();
+}
+
+function wizardUpdateSidebar() {
+    const tabs = document.querySelectorAll('.wizard-sidebar-tab');
+    tabs.forEach((tab, idx) => {
+        tab.classList.toggle('active', idx === cfgCurrentStep);
+        tab.onclick = () => wizardGoToStep(idx);
+    });
+}
+
+function wizardShowStepPanel(stepIndex) {
+    document.querySelectorAll('.wizard-step-panel').forEach((p, idx) => {
+        p.classList.toggle('active', idx === stepIndex);
+    });
+}
+
+function wizardRenderStepContent(stepIndex) {
+    const isView = (cfgClientMode === 'view');
+    switch (stepIndex) {
+        case 0: wizardRenderBasicStep(isView); break;
+        case 1: wizardRenderEnvVarsStep(isView); break;
+        case 2: wizardRenderReposStep(isView); break;
+        case 3: wizardRenderServerStep(isView); break;
+        case 4: wizardRenderDomainStep(isView); break;
+        case 5: wizardRenderDatabaseStep(isView); break;
+        case 6: wizardRenderPaymentStep(isView); break;
+        case 7: wizardRenderOssStep(isView); break;
     }
-    const basicInputs = document.querySelectorAll('#client-tab-basic input, #client-tab-basic select');
-    basicInputs.forEach(el => { el.disabled = (cfgClientMode === 'view'); });
+}
 
-    const headerActions = document.getElementById('client-config-header-actions');
-    if (headerActions) {
-        headerActions.style.display = (cfgClientMode === 'view') ? 'none' : 'flex';
+function wizardUpdateHeaderActions() {
+    const isView = (cfgClientMode === 'view');
+    const actionsDiv = document.getElementById('wizard-header-actions');
+    if (actionsDiv) actionsDiv.style.display = isView ? 'none' : '';
+}
+
+// 在切换 tab 前，同步当前步骤的 DOM 输入到内存状态
+function wizardSyncCurrentStepFromDOM(stepIndex) {
+    switch (stepIndex) {
+        case 1: wizardSyncEnvVarsFromDOM(); break;
+        case 3: wizardSyncServerFromDOM(); break;
+        case 4: wizardSyncDomainsFromDOM(); break;
+        case 6: wizardSyncPaymentFromDOM(); break;
+        case 7: wizardSyncOssFromDOM(); break;
     }
 }
 
-function cfgBindClientConfigHeader() {
-    const saveBtn = document.getElementById('client-config-save-btn');
-    const cancelBtn = document.getElementById('client-config-cancel-btn');
-    if (saveBtn) saveBtn.onclick = () => cfgUnifiedSaveClient();
-    if (cancelBtn) cancelBtn.onclick = () => cfgCancelClientConfig();
-}
+// ---- 取消 / 保存 ----
 
-function cfgCancelClientConfig() {
+function wizardCancel() {
     cfgResetClientConfigState();
     backToClients();
 }
 
-function cfgCollectBasicFields() {
+async function wizardSaveAll() {
+    // 先同步当前步骤 DOM 数据
+    wizardSyncCurrentStepFromDOM(cfgCurrentStep);
+
+    // 1. 验证基本信息
     const name = document.getElementById('cfg-client-name').value.trim();
     const agent = document.getElementById('cfg-client-agent').value;
     const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
-    return { name, agent, officialCloudDeploy };
-}
+    if (!name) { showToast('应用名称不能为空', 'error'); wizardGoToStep(0); return; }
+    if (name.length > 16) { showToast('应用名称最多 16 个字符', 'error'); wizardGoToStep(0); return; }
 
-function cfgBuildReposPayload() {
-    return cfgReposList.map(r => ({
+    // 2. 验证代码仓库
+    const reposErr = wizardValidateReposOnly();
+    if (reposErr) { showToast(reposErr, 'error'); wizardGoToStep(2); return; }
+
+    // 3. 验证环境变量
+    const envVarsErr = wizardValidateEnvVars();
+    if (envVarsErr) { showToast(envVarsErr, 'error'); wizardGoToStep(1); return; }
+
+    // 构建仓库数据
+    const repos = cfgReposList.map(r => ({
         desc: (r.desc || '').trim(),
         url: (r.url || '').trim(),
         token: r.token,
@@ -790,12 +972,60 @@ function cfgBuildReposPayload() {
         branch_prefix: r.branch_prefix || 'ai_',
         docs_repo: !!r.docs_repo
     }));
+
+    // 构建环境变量数据
+    const envVars = [];
+    for (const envKey of ['test', 'prod']) {
+        const items = cfgEnvVarsByEnv[envKey] || [];
+        for (const ev of items) {
+            const key = (ev.key || '').trim();
+            const value = (ev.value == null ? '' : String(ev.value));
+            envVars.push({ key, value, env: envKey });
+        }
+    }
+
+    // 构建基础设施配置
+    const infrastructure = {
+        servers: cfgServersByEnv,
+        domains: cfgDomainsByEnv,
+        databases: cfgDatabasesByEnv,
+        payments: cfgPaymentsByEnv,
+        oss: cfgOssByEnv,
+    };
+
+    try {
+        // 4. 一次性创建或更新应用（基本信息 + 仓库 + 环境变量 + 基础设施）
+        if (cfgClientId === null) {
+            const result = await activeClientAPI.create(name, {
+                agent,
+                official_cloud_deploy: officialCloudDeploy,
+                repos,
+                env_vars: envVars,
+                infrastructure,
+            });
+            cfgClientId = result.data.id;
+        } else {
+            await activeClientAPI.update(cfgClientId, name, {
+                agent,
+                official_cloud_deploy: officialCloudDeploy,
+                repos,
+                env_vars: envVars,
+                infrastructure,
+            });
+        }
+
+
+        showToast('应用配置保存成功', 'success');
+        cfgResetClientConfigState();
+        backToClients();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
 }
 
-function cfgValidateReposForSave() {
-    if (!cfgReposList.length) {
-        return '请至少添加一个代码仓库';
-    }
+// 纯前端验证仓库（不调用 API）
+function wizardValidateReposOnly() {
+    if (!cfgReposList.length) return '请至少添加一个代码仓库';
     let docs = 0;
     for (let i = 0; i < cfgReposList.length; i++) {
         const r = cfgReposList[i];
@@ -812,140 +1042,108 @@ function cfgValidateReposForSave() {
     return null;
 }
 
-function cfgBuildEnvVarsPayload() {
-    return cfgEnvVarsData.map(ev => ({
-        key: (ev.key || '').trim(),
-        value: ev.value == null ? '' : String(ev.value)
-    }));
-}
-
-async function cfgUnifiedSaveClient() {
-    if (cfgClientMode === 'view') return;
-
-    const { name, agent, officialCloudDeploy } = cfgCollectBasicFields();
-    if (!name) {
-        showToast('应用名称不能为空', 'error');
-        return;
-    }
-    if (name.length > 16) {
-        showToast('应用名称最多 16 个字符', 'error');
-        return;
-    }
-    if (cfgEnvVarsData.some(ev => !(ev.key || '').trim())) {
-        showToast('环境变量名称不能为空', 'error');
-        return;
-    }
-    const keys = cfgEnvVarsData.map(ev => (ev.key || '').trim()).filter(Boolean);
-    if (new Set(keys).size !== keys.length) {
-        showToast('环境变量名称不能重复', 'error');
-        return;
-    }
-
-    const repoErr = cfgValidateReposForSave();
-    if (repoErr) {
-        showToast(repoErr, 'error');
-        return;
-    }
-
-    const repos = cfgBuildReposPayload();
-    const env_vars = cfgBuildEnvVarsPayload();
-
-    try {
-        if (cfgClientId === null) {
-            await activeClientAPI.create(name, {
-                agent,
-                official_cloud_deploy: officialCloudDeploy,
-                repos,
-                env_vars
-            });
-            showToast('应用创建成功', 'success');
-        } else {
-            await activeClientAPI.update(cfgClientId, name, {
-                agent,
-                official_cloud_deploy: officialCloudDeploy,
-                repos,
-                env_vars
-            });
-            showToast('保存成功', 'success');
+// 纯前端验证环境变量
+function wizardValidateEnvVars() {
+    for (const envKey of ['test', 'prod']) {
+        const items = cfgEnvVarsByEnv[envKey] || [];
+        for (const ev of items) {
+            const key = (ev.key || '').trim();
+            const value = (ev.value == null ? '' : String(ev.value));
+            if (!key) return `环境 ${envKey} 中存在空变量名`;
+            if (!value) return `环境 ${envKey} 变量 ${key} 的值不能为空`;
         }
-        cfgResetClientConfigState();
-        backToClients();
-    } catch (error) {
-        showToast(error.message, 'error');
     }
+    return null;
 }
 
-// ---- 环境变量管理 ----
+// ---- Step 0: 基本信息 ----
 
-function cfgRenderEnvVarsTab() {
-    const tipEl = document.getElementById('env-vars-tip');
+function wizardRenderBasicStep(isView) {
+    const form = document.getElementById('client-basic-form');
+    if (form) form.onsubmit = (e) => e.preventDefault();
+    document.querySelectorAll('#wizard-step-0 input, #wizard-step-0 select').forEach(el => {
+        el.disabled = isView;
+    });
+}
+
+// ---- Step 1: 环境变量 ----
+
+function wizardRenderEnvVarsStep(isView) {
     const addBtn = document.getElementById('add-env-var-btn');
-
-    if (tipEl) {
-        tipEl.textContent = '注意：仅在 docker私有化部署、官方云部署场景下环境变量才会生效。';
-        tipEl.className = 'config-section-tip tip-warn';
-    }
-
     if (addBtn) {
-        addBtn.style.display = (cfgClientMode === 'view') ? 'none' : '';
-        addBtn.onclick = cfgAddEnvVar;
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].push({ key: '', value: '', env: cfgEnvVarsCurrentEnv });
+            wizardRenderEnvVarsList();
+        };
     }
-
-    cfgRenderEnvVarsList();
+    // 绑定环境切换 tab
+    const tabs = document.querySelectorAll('#env-var-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            // 保存当前 DOM 值到内存
+            wizardSyncEnvVarsFromDOM();
+            cfgEnvVarsCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardRenderEnvVarsList();
+        };
+    });
+    // 确保当前 tab 显示正确
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgEnvVarsCurrentEnv));
+    wizardRenderEnvVarsList();
 }
 
-function cfgRenderEnvVarsList() {
+function wizardSyncEnvVarsFromDOM() {
+    const list = document.getElementById('env-vars-list');
+    if (!list) return;
+    const rows = list.querySelectorAll('.env-var-row');
+    cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv] = [];
+    rows.forEach(row => {
+        const key = row.querySelector('.env-var-key-input')?.value || '';
+        const value = row.querySelector('.env-var-val-input')?.value || '';
+        cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].push({ key, value, env: cfgEnvVarsCurrentEnv });
+    });
+}
+
+function wizardRenderEnvVarsList() {
     const list = document.getElementById('env-vars-list');
     const empty = document.getElementById('env-vars-empty');
     if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv] || [];
 
-    if (cfgEnvVarsData.length === 0) {
+    if (items.length === 0) {
         list.innerHTML = '';
-        empty.style.display = '';
+        if (empty) empty.style.display = '';
         return;
     }
-    empty.style.display = 'none';
-
-    list.innerHTML = cfgEnvVarsData.map((ev, idx) => {
-        const disabledAttr = cfgClientMode === 'view' ? 'disabled' : '';
-        const actions = cfgClientMode !== 'view'
+    if (empty) empty.style.display = 'none';
+    const disabledAttr = isView ? 'disabled' : '';
+    list.innerHTML = items.map((ev, idx) => {
+        const actions = !isView
             ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteEnvVar(${idx})">删除</button>`
             : '';
         return `
         <div class="env-var-row env-var-row-editing" data-idx="${idx}">
-            <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}" ${disabledAttr}
-                oninput="cfgUpdateEnvVarField(${idx}, 'key', this.value)">
+            <input class="env-var-key-input" type="text" placeholder="变量名（如 MY_KEY）" value="${escapeHtml(ev.key || '')}" ${disabledAttr}>
             <span class="env-var-eq">=</span>
-            <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}" ${disabledAttr}
-                oninput="cfgUpdateEnvVarField(${idx}, 'value', this.value)">
+            <input class="env-var-val-input" type="text" placeholder="变量值" value="${escapeHtml(ev.value || '')}" ${disabledAttr}>
             <div class="env-var-actions">${actions}</div>
         </div>`;
     }).join('');
 }
 
-function cfgAddEnvVar() {
-    cfgEnvVarsData.push({ id: null, key: '', value: '' });
-    cfgRenderEnvVarsList();
-}
-
-function cfgUpdateEnvVarField(idx, field, value) {
-    if (!cfgEnvVarsData[idx]) {
-        return;
-    }
-    cfgEnvVarsData[idx][field] = value;
-}
-
 function cfgDeleteEnvVar(idx) {
-    cfgEnvVarsData.splice(idx, 1);
-    cfgRenderEnvVarsList();
+    cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].splice(idx, 1);
+    wizardRenderEnvVarsList();
 }
 
-// ---- 代码仓库管理 ----
 
-function cfgRenderReposTab() {
+// ---- Step 2: 代码仓库 ----
+
+function wizardRenderReposStep(isView) {
     const addBtn = document.getElementById('cfg-add-repo-btn');
-    const isView = (cfgClientMode === 'view');
-
     if (addBtn) {
         addBtn.style.display = isView ? 'none' : '';
         addBtn.onclick = () => {
@@ -954,7 +1152,6 @@ function cfgRenderReposTab() {
             cfgRenderReposWaterfall();
         };
     }
-
     cfgRenderReposWaterfall();
 }
 
@@ -1036,6 +1233,309 @@ function cfgRenderReposWaterfall() {
 function cfgRemoveRepo(index) {
     cfgReposList.splice(index, 1);
     cfgRenderReposWaterfall();
+}
+
+function wizardValidateRepos() {
+    return wizardValidateReposOnly();
+}
+
+// ---- Step 3: 云服务器 ----
+
+function wizardRenderServerStep(isView) {
+    const tabs = document.querySelectorAll('#server-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncServerFromDOM();
+            cfgServerCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardFillServerForm();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgServerCurrentEnv));
+    // 禁用/启用表单
+    document.querySelectorAll('#server-form-container input').forEach(el => { el.disabled = isView; });
+    wizardFillServerForm();
+}
+
+function wizardFillServerForm() {
+    const cfg = cfgServersByEnv[cfgServerCurrentEnv] || {};
+    document.getElementById('cfg-server-name').value = cfg.name || '';
+    document.getElementById('cfg-server-password').value = cfg.password || '';
+    document.getElementById('cfg-server-ip').value = cfg.ip || '';
+}
+
+function wizardSyncServerFromDOM() {
+    cfgServersByEnv[cfgServerCurrentEnv] = {
+        name: document.getElementById('cfg-server-name').value.trim(),
+        password: document.getElementById('cfg-server-password').value,
+        ip: document.getElementById('cfg-server-ip').value.trim(),
+    };
+}
+
+
+// ---- Step 4: 域名 ----
+
+function wizardRenderDomainStep(isView) {
+    const addBtn = document.getElementById('add-domain-btn');
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgDomainsByEnv[cfgDomainCurrentEnv].push('');
+            wizardRenderDomainList();
+        };
+    }
+    const tabs = document.querySelectorAll('#domain-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncDomainsFromDOM();
+            cfgDomainCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardRenderDomainList();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgDomainCurrentEnv));
+    wizardRenderDomainList();
+}
+
+function wizardSyncDomainsFromDOM() {
+    const list = document.getElementById('domains-list');
+    if (!list) return;
+    cfgDomainsByEnv[cfgDomainCurrentEnv] = Array.from(list.querySelectorAll('.domain-input'))
+        .map(inp => inp.value.trim()).filter(Boolean);
+}
+
+function wizardRenderDomainList() {
+    const list = document.getElementById('domains-list');
+    const empty = document.getElementById('domains-empty');
+    if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgDomainsByEnv[cfgDomainCurrentEnv] || [];
+    if (items.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.innerHTML = items.map((d, idx) => `
+        <div class="infra-list-row">
+            <input class="domain-input" type="text" value="${escapeHtml(d)}" placeholder="如 example.com" ${isView ? 'disabled' : ''}>
+            ${!isView ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteDomain(${idx})">删除</button>` : ''}
+        </div>`).join('');
+}
+
+function cfgDeleteDomain(idx) {
+    cfgDomainsByEnv[cfgDomainCurrentEnv].splice(idx, 1);
+    wizardRenderDomainList();
+}
+
+
+// ---- Step 5: 数据库 ----
+
+function wizardRenderDatabaseStep(isView) {
+    const addBtn = document.getElementById('add-database-btn');
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgDatabasesByEnv[cfgDatabaseCurrentEnv].push({
+                db_type: 'mysql', host: '', port: 3306, username: '', password: '', db_name: ''
+            });
+            wizardRenderDatabaseList();
+        };
+    }
+    const genBtn = document.getElementById('gen-default-db-btn');
+    if (genBtn) {
+        genBtn.style.display = isView ? 'none' : '';
+        genBtn.onclick = async () => {
+            genBtn.disabled = true;
+            genBtn.textContent = '创建中...';
+            try {
+                const apiObj = (typeof adminClientAPI !== 'undefined' && window.location.hash.includes('admin')) ? adminClientAPI : clientAPI;
+                const res = await apiObj.generateDefaultDatabase();
+                if (res.code === 200 && res.data) {
+                    cfgDatabasesByEnv[cfgDatabaseCurrentEnv].push(res.data);
+                    wizardRenderDatabaseList();
+                    showToast('默认数据库创建成功：' + res.data.db_name, 'success');
+                } else {
+                    showToast(res.message || '创建失败', 'error');
+                }
+            } catch (e) {
+                showToast(e.message || '创建数据库失败', 'error');
+            } finally {
+                genBtn.disabled = false;
+                genBtn.textContent = '生成默认数据库';
+            }
+        };
+    }
+    const tabs = document.querySelectorAll('#database-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            cfgDatabaseCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardRenderDatabaseList();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgDatabaseCurrentEnv));
+    wizardRenderDatabaseList();
+}
+
+function wizardRenderDatabaseList() {
+    const list = document.getElementById('databases-list');
+    const empty = document.getElementById('databases-empty');
+    if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgDatabasesByEnv[cfgDatabaseCurrentEnv] || [];
+    if (items.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    const disAttr = isView ? 'disabled' : '';
+    list.innerHTML = items.map((db, idx) => `
+        <div class="infra-card" data-db-idx="${idx}">
+            <div class="infra-card-header">
+                <span class="infra-card-label">#${idx + 1} MySQL</span>
+                ${!isView ? `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteDatabase(${idx})">删除</button>` : ''}
+            </div>
+            <div class="infra-form-grid">
+                <div class="form-group">
+                    <label>数据库地址</label>
+                    <input type="text" class="db-host" value="${escapeHtml(db.host || '')}" placeholder="如 127.0.0.1" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>端口</label>
+                    <input type="number" class="db-port" value="${db.port || 3306}" placeholder="3306" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" class="db-username" value="${escapeHtml(db.username || '')}" placeholder="root" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" class="db-password" value="${escapeHtml(db.password || '')}" placeholder="数据库密码" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>数据库名称</label>
+                    <input type="text" class="db-name" value="${escapeHtml(db.db_name || '')}" placeholder="mydb" ${disAttr}>
+                </div>
+            </div>
+        </div>`).join('');
+
+    // 绑定输入事件
+    list.querySelectorAll('.infra-card').forEach(card => {
+        const idx = parseInt(card.dataset.dbIdx);
+        card.addEventListener('input', (e) => {
+            const db = cfgDatabasesByEnv[cfgDatabaseCurrentEnv][idx];
+            if (!db) return;
+            if (e.target.classList.contains('db-host')) db.host = e.target.value;
+            if (e.target.classList.contains('db-port')) db.port = parseInt(e.target.value) || 3306;
+            if (e.target.classList.contains('db-username')) db.username = e.target.value;
+            if (e.target.classList.contains('db-password')) db.password = e.target.value;
+            if (e.target.classList.contains('db-name')) db.db_name = e.target.value;
+        });
+    });
+}
+
+function cfgDeleteDatabase(idx) {
+    cfgDatabasesByEnv[cfgDatabaseCurrentEnv].splice(idx, 1);
+    wizardRenderDatabaseList();
+}
+
+
+// ---- Step 6: 支付 ----
+
+function wizardRenderPaymentStep(isView) {
+    const tabs = document.querySelectorAll('#payment-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncPaymentFromDOM();
+            cfgPaymentCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardFillPaymentForm();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgPaymentCurrentEnv));
+    document.querySelectorAll('#payment-form-container input, #payment-form-container textarea, #payment-form-container select').forEach(el => {
+        el.disabled = isView;
+    });
+    wizardFillPaymentForm();
+}
+
+function wizardFillPaymentForm() {
+    const cfg = cfgPaymentsByEnv[cfgPaymentCurrentEnv] || {};
+    document.getElementById('cfg-payment-type').value = cfg.payment_type || 'alipay';
+    document.getElementById('cfg-payment-appid').value = cfg.appid || '';
+    document.getElementById('cfg-payment-notify-url').value = cfg.notify_url || '';
+    document.getElementById('cfg-payment-return-url').value = cfg.return_url || '';
+    document.getElementById('cfg-payment-gateway').value = cfg.gateway || '';
+    document.getElementById('cfg-payment-app-encrypt-key').value = cfg.app_encrypt_key || '';
+    document.getElementById('cfg-payment-app-private-key').value = cfg.app_private_key || '';
+    document.getElementById('cfg-payment-alipay-public-key').value = cfg.alipay_public_key || '';
+}
+
+function wizardSyncPaymentFromDOM() {
+    cfgPaymentsByEnv[cfgPaymentCurrentEnv] = {
+        payment_type: document.getElementById('cfg-payment-type').value,
+        appid: document.getElementById('cfg-payment-appid').value.trim(),
+        notify_url: document.getElementById('cfg-payment-notify-url').value.trim(),
+        return_url: document.getElementById('cfg-payment-return-url').value.trim(),
+        gateway: document.getElementById('cfg-payment-gateway').value.trim(),
+        app_encrypt_key: document.getElementById('cfg-payment-app-encrypt-key').value.trim(),
+        app_private_key: document.getElementById('cfg-payment-app-private-key').value.trim(),
+        alipay_public_key: document.getElementById('cfg-payment-alipay-public-key').value.trim(),
+    };
+}
+
+
+// ---- Step 7: 对象存储 ----
+
+function wizardRenderOssStep(isView) {
+    const tabs = document.querySelectorAll('#oss-env-tabs .wizard-env-tab');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            wizardSyncOssFromDOM();
+            cfgOssCurrentEnv = tab.dataset.env;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            wizardFillOssForm();
+        };
+    });
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgOssCurrentEnv));
+    document.querySelectorAll('#oss-form-container input, #oss-form-container select').forEach(el => {
+        el.disabled = isView;
+    });
+    wizardFillOssForm();
+}
+
+function wizardFillOssForm() {
+    const cfg = cfgOssByEnv[cfgOssCurrentEnv] || {};
+    document.getElementById('cfg-oss-type').value = cfg.oss_type || 'cos';
+    document.getElementById('cfg-oss-secret-id').value = cfg.secret_id || '';
+    document.getElementById('cfg-oss-secret-key').value = cfg.secret_key || '';
+    document.getElementById('cfg-oss-region').value = cfg.region || '';
+    document.getElementById('cfg-oss-bucket').value = cfg.bucket || '';
+    document.getElementById('cfg-oss-base-url').value = cfg.base_url || '';
+}
+
+function wizardSyncOssFromDOM() {
+    cfgOssByEnv[cfgOssCurrentEnv] = {
+        oss_type: document.getElementById('cfg-oss-type').value,
+        secret_id: document.getElementById('cfg-oss-secret-id').value.trim(),
+        secret_key: document.getElementById('cfg-oss-secret-key').value.trim(),
+        region: document.getElementById('cfg-oss-region').value.trim(),
+        bucket: document.getElementById('cfg-oss-bucket').value.trim(),
+        base_url: document.getElementById('cfg-oss-base-url').value.trim(),
+    };
+}
+
+
+// 兼容旧代码的 showAddTaskModal 别名
+function showAddTaskModal() {
+    showTaskEditModal(null, true);
 }
 
 // ===== 任务管理 =====
@@ -1815,10 +2315,6 @@ function getNodeStatusText(status) {
     return texts[status] || '待处理';
 }
 
-// 兼容旧的调用方式
-function showAddTaskModal() {
-    showTaskEditModal(null);
-}
 
 async function updateTaskStatus(taskId, status, selectElement) {
     try {
@@ -3463,6 +3959,513 @@ function scShowMergeRequestModal(storeKey) {
 
 function scCloseMergeRequestModal() {
     document.getElementById('sc-merge-modal').classList.remove('active');
+}
+
+// ===== 权限配置管理（admin） =====
+
+let _permEditId = null; // null=新增, number=编辑
+
+function initAdminPermissions() {
+    const openBtn = document.getElementById('open-create-permission-btn');
+    if (openBtn && openBtn.dataset.bound !== 'true') {
+        openBtn.addEventListener('click', () => showPermissionModal(null));
+        openBtn.dataset.bound = 'true';
+    }
+
+    const closeBtn = document.getElementById('close-permission-modal');
+    if (closeBtn && closeBtn.dataset.bound !== 'true') {
+        closeBtn.addEventListener('click', hidePermissionModal);
+        closeBtn.dataset.bound = 'true';
+    }
+
+    const cancelBtn = document.getElementById('cancel-permission-btn');
+    if (cancelBtn && cancelBtn.dataset.bound !== 'true') {
+        cancelBtn.addEventListener('click', hidePermissionModal);
+        cancelBtn.dataset.bound = 'true';
+    }
+
+    const typeSelect = document.getElementById('perm-type');
+    if (typeSelect && typeSelect.dataset.bound !== 'true') {
+        typeSelect.addEventListener('change', () => {
+            const limitGroup = document.getElementById('perm-limit-group');
+            limitGroup.style.display = typeSelect.value === 'count_limit' ? '' : 'none';
+        });
+        typeSelect.dataset.bound = 'true';
+    }
+
+    const form = document.getElementById('permission-form');
+    if (form && form.dataset.bound !== 'true') {
+        form.addEventListener('submit', handlePermissionSubmit);
+        form.dataset.bound = 'true';
+    }
+}
+
+function showPermissionModal(editItem) {
+    _permEditId = editItem ? editItem.id : null;
+    const modal = document.getElementById('permission-modal');
+    const title = document.getElementById('permission-modal-title');
+    const keyInput = document.getElementById('perm-key');
+    const typeSelect = document.getElementById('perm-type');
+    const productKeyInput = document.getElementById('perm-product-key');
+    const limitInput = document.getElementById('perm-limit');
+    const limitGroup = document.getElementById('perm-limit-group');
+
+    title.textContent = editItem ? '编辑权限配置' : '新增权限配置';
+
+    if (editItem) {
+        keyInput.value = editItem.key || '';
+        typeSelect.value = editItem.type || 'subscribed';
+        productKeyInput.value = editItem.product_key || '';
+        const detail = editItem.config_detail || {};
+        limitInput.value = detail.limit != null ? detail.limit : '';
+    } else {
+        keyInput.value = '';
+        typeSelect.value = 'subscribed';
+        productKeyInput.value = '';
+        limitInput.value = '';
+    }
+
+    limitGroup.style.display = typeSelect.value === 'count_limit' ? '' : 'none';
+    modal.style.display = '';
+}
+
+function hidePermissionModal() {
+    document.getElementById('permission-modal').style.display = 'none';
+    _permEditId = null;
+}
+
+async function handlePermissionSubmit(e) {
+    e.preventDefault();
+    const key = document.getElementById('perm-key').value.trim();
+    const type = document.getElementById('perm-type').value;
+    const productKey = document.getElementById('perm-product-key').value.trim();
+    const limitVal = document.getElementById('perm-limit').value.trim();
+
+    if (!key || !type || !productKey) {
+        alert('请填写所有必填项');
+        return;
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(key)) {
+        alert('权限 Key 仅允许字母、数字、下划线、短横线');
+        return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(productKey)) {
+        alert('产品 Key 仅允许字母、数字、下划线、短横线');
+        return;
+    }
+
+    const payload = { key, type, product_key: productKey };
+
+    if (type === 'count_limit') {
+        const limit = parseInt(limitVal, 10);
+        if (!limit || limit <= 0) {
+            alert('count_limit 类型必须填写正整数的数量上限');
+            return;
+        }
+        payload.config_detail = { limit };
+    } else {
+        payload.config_detail = {};
+    }
+
+    const saveBtn = document.getElementById('save-permission-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+
+    try {
+        let res;
+        if (_permEditId) {
+            res = await adminPermissionAPI.update(_permEditId, payload);
+        } else {
+            res = await adminPermissionAPI.create(payload);
+        }
+        if (res.code === 200 || res.code === 201) {
+            hidePermissionModal();
+            loadAdminPermissions();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (err) {
+        alert(err.message || '请求失败');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+    }
+}
+
+async function loadAdminPermissions() {
+    const container = document.getElementById('permissions-list');
+    if (!container) return;
+    container.innerHTML = '<p class="perm-loading">加载中…</p>';
+
+    try {
+        const res = await adminPermissionAPI.list();
+        if (res.code !== 200) {
+            container.innerHTML = `<p class="perm-empty">加载失败: ${res.message || '未知错误'}</p>`;
+            return;
+        }
+        const groups = res.data || [];
+        if (groups.length === 0) {
+            container.innerHTML = '<p class="perm-empty">暂无权限配置，点击右上角「新增配置」添加</p>';
+            return;
+        }
+        container.innerHTML = groups.map(renderPermissionGroup).join('');
+
+        // 绑定操作按钮
+        container.querySelectorAll('.perm-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = JSON.parse(btn.dataset.item);
+                showPermissionModal(item);
+            });
+        });
+        container.querySelectorAll('.perm-delete-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = parseInt(btn.dataset.id, 10);
+                if (!confirm('确定删除该权限配置？')) return;
+                try {
+                    const res = await adminPermissionAPI.remove(id);
+                    if (res.code === 200) {
+                        loadAdminPermissions();
+                    } else {
+                        alert(res.message || '删除失败');
+                    }
+                } catch (err) {
+                    alert(err.message || '删除失败');
+                }
+            });
+        });
+    } catch (err) {
+        container.innerHTML = `<p class="perm-empty">加载失败: ${err.message || '网络错误'}</p>`;
+    }
+}
+
+function renderPermissionGroup(group) {
+    const typeLabel = group.type === 'count_limit' ? '总量限制' : '订阅限制';
+    const typeBadge = group.type === 'count_limit'
+        ? '<span class="perm-type-badge perm-type-count">count_limit</span>'
+        : '<span class="perm-type-badge perm-type-sub">subscribed</span>';
+
+    const productRows = (group.products || []).map(p => {
+        const detail = p.config_detail || {};
+        const limitText = detail.limit != null ? `上限: ${detail.limit}` : '-';
+        const itemData = JSON.stringify({
+            id: p.id,
+            key: group.key,
+            type: group.type,
+            product_key: p.product_key,
+            config_detail: detail,
+        }).replace(/"/g, '&quot;');
+
+        return `<tr>
+            <td>${escapeHTML(p.product_key)}</td>
+            <td>${group.type === 'count_limit' ? limitText : '<span class="perm-text-muted">不适用</span>'}</td>
+            <td class="perm-actions-cell">
+                <button type="button" class="perm-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
+                <button type="button" class="perm-delete-btn perm-action-btn perm-action-danger" data-id="${p.id}" title="删除">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="perm-group-card">
+        <div class="perm-group-header">
+            <div class="perm-group-title">
+                <span class="perm-key-label">${escapeHTML(group.key)}</span>
+                ${typeBadge}
+            </div>
+            <span class="perm-type-desc">${typeLabel}</span>
+        </div>
+        <table class="perm-table">
+            <thead><tr><th>产品 Key</th><th>配置详情</th><th>操作</th></tr></thead>
+            <tbody>${productRows || '<tr><td colspan="3" class="perm-text-muted">暂无产品配置</td></tr>'}</tbody>
+        </table>
+    </div>`;
+}
+
+function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+}
+
+// ===== 资源管理（admin） =====
+
+let currentEditResourceId = null;
+
+function initResources() {
+    const createBtn = document.getElementById('open-create-resource-btn');
+    if (createBtn && createBtn.dataset.bound !== 'true') {
+        createBtn.addEventListener('click', () => showResourceModal(null));
+        createBtn.dataset.bound = 'true';
+    }
+    const closeBtn = document.getElementById('close-resource-modal');
+    if (closeBtn && closeBtn.dataset.bound !== 'true') {
+        closeBtn.addEventListener('click', hideResourceModal);
+        closeBtn.dataset.bound = 'true';
+    }
+    const cancelBtn = document.getElementById('cancel-resource-btn');
+    if (cancelBtn && cancelBtn.dataset.bound !== 'true') {
+        cancelBtn.addEventListener('click', hideResourceModal);
+        cancelBtn.dataset.bound = 'true';
+    }
+    const form = document.getElementById('resource-form');
+    if (form && form.dataset.bound !== 'true') {
+        form.addEventListener('submit', handleResourceFormSubmit);
+        form.dataset.bound = 'true';
+    }
+    // 监听类型和来源选择变化，动态显示补充信息
+    const typeSelect = document.getElementById('resource-type');
+    const sourceSelect = document.getElementById('resource-source');
+    if (typeSelect && typeSelect.dataset.bound !== 'true') {
+        typeSelect.addEventListener('change', toggleResourceExtraFields);
+        typeSelect.dataset.bound = 'true';
+    }
+    if (sourceSelect && sourceSelect.dataset.bound !== 'true') {
+        sourceSelect.addEventListener('change', toggleResourceExtraFields);
+        sourceSelect.dataset.bound = 'true';
+    }
+}
+
+function toggleResourceExtraFields() {
+    const type = document.getElementById('resource-type').value;
+    const source = document.getElementById('resource-source').value;
+    const extraFields = document.getElementById('resource-extra-fields');
+    if (type === 'mysql' && source === 'aliyun') {
+        extraFields.style.display = '';
+    } else {
+        extraFields.style.display = 'none';
+    }
+}
+
+function showResourceModal(item) {
+    const modal = document.getElementById('resource-modal');
+    const title = document.getElementById('resource-modal-title');
+    const form = document.getElementById('resource-form');
+
+    form.reset();
+    document.getElementById('resource-extra-fields').style.display = 'none';
+
+    if (item) {
+        currentEditResourceId = item.id;
+        title.textContent = '编辑资源';
+        document.getElementById('resource-type').value = item.type || '';
+        document.getElementById('resource-source').value = item.source || '';
+        // 设置环境复选框
+        const envCheckboxes = document.querySelectorAll('input[name="resource-envs"]');
+        const envs = item.envs || [];
+        envCheckboxes.forEach(cb => {
+            cb.checked = envs.includes(cb.value);
+        });
+        // 设置补充信息
+        const extra = item.extra || {};
+        document.getElementById('resource-extra-url').value = extra.url || '';
+        document.getElementById('resource-extra-ak-id').value = extra.access_key_id || '';
+        document.getElementById('resource-extra-ak-secret').value = '';
+        toggleResourceExtraFields();
+    } else {
+        currentEditResourceId = null;
+        title.textContent = '新增资源';
+    }
+    modal.style.display = 'flex';
+}
+
+function hideResourceModal() {
+    document.getElementById('resource-modal').style.display = 'none';
+    currentEditResourceId = null;
+}
+
+async function handleResourceFormSubmit(e) {
+    e.preventDefault();
+    const saveBtn = document.getElementById('save-resource-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+
+    try {
+        const type = document.getElementById('resource-type').value;
+        const source = document.getElementById('resource-source').value;
+
+        if (!type || !source) {
+            alert('请选择资源类型和来源');
+            return;
+        }
+
+        const envCheckboxes = document.querySelectorAll('input[name="resource-envs"]:checked');
+        const envs = Array.from(envCheckboxes).map(cb => cb.value);
+        if (envs.length === 0) {
+            alert('请至少选择一个可用环境');
+            return;
+        }
+
+        const extra = {};
+        if (type === 'mysql' && source === 'aliyun') {
+            const url = document.getElementById('resource-extra-url').value.trim();
+            const akId = document.getElementById('resource-extra-ak-id').value.trim();
+            const akSecret = document.getElementById('resource-extra-ak-secret').value.trim();
+            if (!url || !akId) {
+                alert('请填写数据库实例地址和 AccessKey ID');
+                return;
+            }
+            extra.url = url;
+            extra.access_key_id = akId;
+            if (akSecret) {
+                extra.access_key_secret = akSecret;
+            } else if (!currentEditResourceId) {
+                alert('请填写 AccessKey Secret');
+                return;
+            }
+        }
+
+        const payload = { type, source, envs, extra };
+
+        let res;
+        if (currentEditResourceId) {
+            // 编辑时如果没填 secret，不传该字段（保留原值）
+            if (type === 'mysql' && source === 'aliyun' && !extra.access_key_secret) {
+                delete payload.extra.access_key_secret;
+            }
+            res = await adminResourceAPI.update(currentEditResourceId, payload);
+        } else {
+            res = await adminResourceAPI.create(payload);
+        }
+
+        if (res.code === 200 || res.code === 201) {
+            hideResourceModal();
+            loadAdminResources();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (err) {
+        alert(err.message || '请求失败');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+    }
+}
+
+async function loadAdminResources() {
+    initResources();
+    const container = document.getElementById('resources-list');
+    if (!container) return;
+    container.innerHTML = '<p class="perm-loading">加载中…</p>';
+
+    try {
+        const res = await adminResourceAPI.list();
+        if (res.code !== 200) {
+            container.innerHTML = `<p class="perm-empty">加载失败: ${res.message || '未知错误'}</p>`;
+            return;
+        }
+        const resources = res.data || [];
+        if (resources.length === 0) {
+            container.innerHTML = '<p class="perm-empty">暂无资源，点击右上角「新增资源」添加</p>';
+            return;
+        }
+        container.innerHTML = `
+            <table class="data-table resource-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>类型</th>
+                        <th>来源</th>
+                        <th>可用环境</th>
+                        <th>实例地址</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${resources.map(renderResourceRow).join('')}
+                </tbody>
+            </table>`;
+
+        // 绑定操作按钮
+        container.querySelectorAll('.resource-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = JSON.parse(btn.dataset.item);
+                showResourceModal(item);
+            });
+        });
+        container.querySelectorAll('.resource-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = parseInt(btn.dataset.id, 10);
+                const action = btn.dataset.action;
+                try {
+                    const res = action === 'offline'
+                        ? await adminResourceAPI.offline(id)
+                        : await adminResourceAPI.online(id);
+                    if (res.code === 200) {
+                        loadAdminResources();
+                    } else {
+                        alert(res.message || '操作失败');
+                    }
+                } catch (err) {
+                    alert(err.message || '操作失败');
+                }
+            });
+        });
+        container.querySelectorAll('.resource-delete-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = parseInt(btn.dataset.id, 10);
+                if (!confirm('确定删除该资源？此操作不可恢复。')) return;
+                try {
+                    const res = await adminResourceAPI.remove(id);
+                    if (res.code === 200) {
+                        loadAdminResources();
+                    } else {
+                        alert(res.message || '删除失败');
+                    }
+                } catch (err) {
+                    alert(err.message || '删除失败');
+                }
+            });
+        });
+    } catch (err) {
+        container.innerHTML = `<p class="perm-empty">加载失败: ${err.message || '网络错误'}</p>`;
+    }
+}
+
+function renderResourceRow(resource) {
+    const typeLabels = { mysql: 'MySQL' };
+    const sourceLabels = { aliyun: '阿里云' };
+    const envLabels = { test: '测试', prod: '生产' };
+
+    const envsHtml = (resource.envs || []).map(e =>
+        `<span class="resource-env-tag">${envLabels[e] || e}</span>`
+    ).join(' ');
+
+    const extra = resource.extra || {};
+    const instanceUrl = extra.url || '-';
+
+    const statusClass = resource.is_online ? 'resource-status-online' : 'resource-status-offline';
+    const statusText = resource.is_online ? '上架' : '下架';
+    const toggleAction = resource.is_online ? 'offline' : 'online';
+    const toggleText = resource.is_online ? '下架' : '上架';
+
+    const itemData = JSON.stringify({
+        id: resource.id,
+        type: resource.type,
+        source: resource.source,
+        envs: resource.envs,
+        extra: resource.extra,
+    }).replace(/"/g, '&quot;');
+
+    const createdAt = resource.created_at
+        ? new Date(resource.created_at).toLocaleDateString('zh-CN')
+        : '-';
+
+    return `<tr>
+        <td>${resource.id}</td>
+        <td>${typeLabels[resource.type] || resource.type}</td>
+        <td>${sourceLabels[resource.source] || resource.source}</td>
+        <td>${envsHtml}</td>
+        <td class="resource-url-cell" title="${escapeHTML(instanceUrl)}">${escapeHTML(instanceUrl)}</td>
+        <td><span class="resource-status-badge ${statusClass}">${statusText}</span></td>
+        <td>${createdAt}</td>
+        <td class="perm-actions-cell">
+            <button type="button" class="resource-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
+            <button type="button" class="resource-toggle-btn perm-action-btn" data-id="${resource.id}" data-action="${toggleAction}" title="${toggleText}">${resource.is_online ? '⏸️' : '▶️'}</button>
+            <button type="button" class="resource-delete-btn perm-action-btn perm-action-danger" data-id="${resource.id}" title="删除">🗑️</button>
+        </td>
+    </tr>`;
 }
 
 // ===== 商店 =====
