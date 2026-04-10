@@ -17,6 +17,9 @@ from dao.models import Resource
 
 logger = logging.getLogger(__name__)
 
+# 缓存：连接地址 → 实例 ID，避免每次都搜索全地域
+_instance_id_cache: Dict[str, str] = {}
+
 
 class ResourceMySQLError(Exception):
     """MySQL 资源操作失败"""
@@ -24,6 +27,69 @@ class ResourceMySQLError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
+
+
+def _resolve_instance_id(client, connection_url: str) -> str:
+    """
+    通过连接地址在各地域搜索真实的 RDS 实例 ID。
+
+    阿里云 RDS 连接地址格式：{instance_id}{suffix}.mysql.rds.aliyuncs.com
+    其中 suffix 可能为 'ro'（只读）、'vo'（VPC）等，不属于实例 ID。
+    因此不能直接从 URL 截取，需要通过 API 反查。
+
+    Args:
+        client: 阿里云 RDS Client（全局 endpoint）
+        connection_url: 资源配置中的连接地址
+
+    Returns:
+        真实的实例 ID
+
+    Raises:
+        ResourceMySQLError: 无法找到匹配的实例
+    """
+    from alibabacloud_rds20140815 import models as rds_models
+
+    # 先查缓存
+    cached = _instance_id_cache.get(connection_url)
+    if cached:
+        return cached
+
+    # 搜索的地域列表（覆盖国内主要地域）
+    regions = [
+        'cn-hangzhou', 'cn-shanghai', 'cn-shenzhen', 'cn-beijing',
+        'cn-qingdao', 'cn-zhangjiakou', 'cn-huhehaote', 'cn-chengdu',
+        'cn-guangzhou', 'cn-wulanchabu', 'cn-nanjing', 'cn-fuzhou',
+        'cn-hongkong',
+    ]
+
+    for region in regions:
+        try:
+            req = rds_models.DescribeDBInstancesRequest(
+                region_id=region,
+                page_size=100,
+            )
+            resp = client.describe_dbinstances(req)
+            instances = resp.body.items.dbinstance or []
+            for inst in instances:
+                # 检查连接地址是否匹配：实例的连接地址是 {instance_id}.mysql.rds.aliyuncs.com
+                # 而资源配置中可能是 {instance_id}{suffix}.mysql.rds.aliyuncs.com
+                if connection_url.startswith(inst.dbinstance_id):
+                    logger.info(
+                        "_resolve_instance_id: found instance_id=%s in region=%s for url=%s",
+                        inst.dbinstance_id, region, connection_url,
+                    )
+                    _instance_id_cache[connection_url] = inst.dbinstance_id
+                    return inst.dbinstance_id
+        except Exception as e:
+            logger.warning(
+                "_resolve_instance_id: failed to search region=%s, error=%s",
+                region, str(e)[:100],
+            )
+            continue
+
+    raise ResourceMySQLError(
+        f"无法从连接地址 {connection_url} 找到对应的 RDS 实例，请检查资源配置"
+    )
 
 
 def _build_rds_client(resource: Resource):
@@ -52,17 +118,8 @@ def _build_rds_client(resource: Resource):
     if not url:
         raise ResourceMySQLError("资源缺少数据库实例地址 (url)")
 
-    # 从 url 解析 endpoint 地域；url 格式如 rm-bp1xxxxx.mysql.rds.aliyuncs.com
-    # endpoint 默认使用 rds.aliyuncs.com，如果 url 中包含地域信息则尝试提取
+    # 使用全局 endpoint，通过 API 反查真实实例 ID
     endpoint = "rds.aliyuncs.com"
-    if '.rds.' in url:
-        # 例如 rm-xxx.mysql.rds.cn-shanghai.aliyuncs.com → rds.cn-shanghai.aliyuncs.com
-        parts = url.split('.rds.')
-        if len(parts) == 2:
-            endpoint = f"rds.{parts[1]}"
-
-    # instance_id 为 url 中 . 之前的部分，如 rm-bp1xxxxx
-    instance_id = url.split('.')[0] if '.' in url else url
 
     config = Config(
         access_key_id=access_key_id,
@@ -70,6 +127,10 @@ def _build_rds_client(resource: Resource):
         endpoint=endpoint,
     )
     client = Client(config)
+
+    # 从连接地址反查真实实例 ID（连接地址可能包含 VPC 等后缀如 'vo'）
+    instance_id = _resolve_instance_id(client=client, connection_url=url)
+
     return client, instance_id
 
 
