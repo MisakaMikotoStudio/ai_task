@@ -4,13 +4,21 @@
 GitHub 代码仓库服务层 —— 通过 GitHub REST API 管理组织下的仓库
 
 功能：
+- 使用 GitHub App 凭据（app_id + private_key）生成 JWT 并创建 Installation Access Token
 - 在 GitHub 组织下创建仓库
-- 为单个仓库创建具有 admin 权限的 fine-grained access token
+- 为单个仓库创建仅具有 admin 权限的 scoped Installation Access Token
 - 组合流程：创建仓库 + 创建访问 token（用于默认应用初始化）
+
+认证方式说明：
+- 资源 extra 中存储 GitHub App 凭据：organization、app_id、admin_token（App 私钥 PEM）
+- 通过 app_id + private_key 生成 JWT，再通过 JWT 获取 Installation Access Token
+- Installation Access Token 可以限定只对某几个仓库有效，且权限可控
 """
 
 import logging
-from typing import Dict
+import math
+import time
+from typing import Dict, Optional
 
 import requests
 
@@ -31,44 +39,238 @@ class GitHubServiceError(Exception):
 
 def _get_resource_config(resource: Resource) -> Dict[str, str]:
     """
-    从 Resource 对象中提取 GitHub 配置信息
+    从 Resource 对象中提取 GitHub App 配置信息
 
     Args:
         resource: Resource 对象（type=code_repo, source=github）
 
     Returns:
-        {"organization": "...", "admin_token": "..."}
+        {"organization": "...", "app_id": "...", "admin_token": "..."}
 
     Raises:
         GitHubServiceError: 配置缺失
     """
     extra = resource.get_raw_extra()
     organization = (extra.get('organization') or '').strip()
+    app_id = (extra.get('app_id') or '').strip()
     admin_token = (extra.get('admin_token') or '').strip()
 
     if not organization:
         raise GitHubServiceError("资源缺少 GitHub Organization 配置")
+    if not app_id:
+        raise GitHubServiceError("资源缺少 GitHub App ID 配置")
     if not admin_token:
-        raise GitHubServiceError("资源缺少 GitHub Admin Token 配置")
+        raise GitHubServiceError("资源缺少 GitHub App Private Key (admin_token) 配置")
 
     return {
         'organization': organization,
+        'app_id': app_id,
         'admin_token': admin_token,
     }
 
 
-def _make_headers(admin_token: str) -> Dict[str, str]:
+def _generate_app_jwt(app_id: str, private_key_pem: str) -> str:
+    """
+    使用 GitHub App ID 和私钥生成 JWT（RS256）。
+
+    JWT 有效期 10 分钟（GitHub 要求最长 10 分钟）。
+
+    Args:
+        app_id: GitHub App ID
+        private_key_pem: GitHub App 私钥（PEM 格式）
+
+    Returns:
+        JWT 字符串
+
+    Raises:
+        GitHubServiceError: JWT 生成失败
+    """
+    try:
+        import jwt
+    except ImportError:
+        raise GitHubServiceError(
+            "PyJWT 库未安装，请执行 pip install PyJWT[crypto] 以支持 GitHub App 认证"
+        )
+
+    now = int(time.time())
+    payload = {
+        'iat': now - 60,       # 签发时间（向前偏移 60 秒，容忍时钟偏差）
+        'exp': now + (10 * 60),  # 过期时间（10 分钟后）
+        'iss': str(app_id),    # GitHub App ID
+    }
+
+    try:
+        token = jwt.encode(
+            payload,
+            private_key_pem,
+            algorithm='RS256',
+        )
+        return token
+    except Exception as e:
+        logger.error("_generate_app_jwt: failed, app_id=%s, error=%s", app_id, str(e))
+        raise GitHubServiceError(f"GitHub App JWT 生成失败：{str(e)}")
+
+
+def _get_installation_id(jwt_token: str, organization: str) -> int:
+    """
+    获取 GitHub App 在指定组织中的 Installation ID。
+
+    Args:
+        jwt_token: GitHub App JWT
+        organization: 组织名称
+
+    Returns:
+        Installation ID
+
+    Raises:
+        GitHubServiceError: 获取失败或 App 未安装在该组织
+    """
+    headers = {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': f'Bearer {jwt_token}',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+
+    url = f"{GITHUB_API_BASE}/orgs/{organization}/installation"
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        logger.info(
+            "_get_installation_id: org=%s, status=%d",
+            organization, resp.status_code,
+        )
+
+        if resp.status_code == 404:
+            raise GitHubServiceError(
+                f"GitHub App 未安装到组织 {organization}，请先在 GitHub 上安装 App"
+            )
+        if resp.status_code != 200:
+            raise GitHubServiceError(
+                f"获取 Installation 失败（HTTP {resp.status_code}）：{resp.text[:200]}"
+            )
+
+        data = resp.json()
+        installation_id = data.get('id')
+        if not installation_id:
+            raise GitHubServiceError(
+                f"获取 Installation ID 失败：响应中缺少 id 字段"
+            )
+
+        return installation_id
+
+    except GitHubServiceError:
+        raise
+    except requests.RequestException as e:
+        raise GitHubServiceError(f"获取 Installation 网络请求失败：{str(e)}")
+    except Exception as e:
+        raise GitHubServiceError(f"获取 Installation 失败：{str(e)}")
+
+
+def _create_installation_token(
+    jwt_token: str,
+    installation_id: int,
+    repository_ids: Optional[list] = None,
+    permissions: Optional[Dict[str, str]] = None,
+) -> str:
+    """
+    创建 GitHub App Installation Access Token。
+
+    可选限定到特定仓库和权限范围。
+
+    Args:
+        jwt_token: GitHub App JWT
+        installation_id: Installation ID
+        repository_ids: 限定的仓库 ID 列表（None 表示所有已安装的仓库）
+        permissions: 权限范围，如 {"contents": "write", "administration": "write"}
+
+    Returns:
+        Installation Access Token
+
+    Raises:
+        GitHubServiceError: 创建失败
+    """
+    headers = {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': f'Bearer {jwt_token}',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+
+    url = f"{GITHUB_API_BASE}/app/installations/{installation_id}/access_tokens"
+    payload = {}
+    if repository_ids:
+        payload['repository_ids'] = repository_ids
+    if permissions:
+        payload['permissions'] = permissions
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        logger.info(
+            "_create_installation_token: installation_id=%s, status=%d, scoped_repos=%s",
+            installation_id, resp.status_code,
+            len(repository_ids) if repository_ids else 'all',
+        )
+
+        if resp.status_code not in (200, 201):
+            raise GitHubServiceError(
+                f"创建 Installation Token 失败（HTTP {resp.status_code}）：{resp.text[:200]}"
+            )
+
+        data = resp.json()
+        token = data.get('token', '')
+        if not token:
+            raise GitHubServiceError("创建 Installation Token 失败：响应中缺少 token 字段")
+
+        return token
+
+    except GitHubServiceError:
+        raise
+    except requests.RequestException as e:
+        raise GitHubServiceError(f"创建 Installation Token 网络请求失败：{str(e)}")
+    except Exception as e:
+        raise GitHubServiceError(f"创建 Installation Token 失败：{str(e)}")
+
+
+def _get_installation_token_for_org(resource: Resource) -> str:
+    """
+    获取组织级别的 Installation Access Token（用于创建仓库等操作）。
+
+    Args:
+        resource: Resource 对象
+
+    Returns:
+        Installation Access Token
+
+    Raises:
+        GitHubServiceError: 获取失败
+    """
+    config = _get_resource_config(resource=resource)
+    jwt_token = _generate_app_jwt(
+        app_id=config['app_id'],
+        private_key_pem=config['admin_token'],
+    )
+    installation_id = _get_installation_id(
+        jwt_token=jwt_token,
+        organization=config['organization'],
+    )
+    return _create_installation_token(
+        jwt_token=jwt_token,
+        installation_id=installation_id,
+    )
+
+
+def _make_headers(token: str) -> Dict[str, str]:
     """构建 GitHub API 请求头"""
     return {
         'Accept': 'application/vnd.github+json',
-        'Authorization': f'Bearer {admin_token}',
+        'Authorization': f'Bearer {token}',
         'X-GitHub-Api-Version': '2022-11-28',
     }
 
 
 def create_org_repo(resource: Resource, repo_name: str, description: str = '', private: bool = True) -> Dict:
     """
-    在 GitHub 组织下创建仓库
+    在 GitHub 组织下创建仓库。
+
+    使用 Installation Token 认证（而非直接使用 admin 凭据）。
 
     Args:
         resource: Resource 对象（type=code_repo, source=github）
@@ -90,8 +292,10 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
     """
     config = _get_resource_config(resource=resource)
     organization = config['organization']
-    admin_token = config['admin_token']
-    headers = _make_headers(admin_token=admin_token)
+
+    # 获取 Installation Token 用于创建仓库
+    installation_token = _get_installation_token_for_org(resource=resource)
+    headers = _make_headers(token=installation_token)
 
     url = f"{GITHUB_API_BASE}/orgs/{organization}/repos"
     payload = {
@@ -109,7 +313,6 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
         )
 
         if resp.status_code == 422:
-            # 仓库可能已存在
             error_data = resp.json()
             errors = error_data.get('errors', [])
             for err in errors:
@@ -151,45 +354,46 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
         raise GitHubServiceError(f"创建仓库失败：{str(e)}")
 
 
-def create_repo_scoped_token(
-    resource: Resource,
-    repo_name: str,
-    token_note: str = '',
-) -> str:
+def create_repo_scoped_token(resource: Resource, repo_name: str) -> str:
     """
-    为指定仓库创建具有 admin 权限的 fine-grained access token。
+    为指定仓库创建仅具有 admin 权限的 Installation Access Token。
 
-    使用 GitHub App installation token 或 Personal Access Token 的方式
-    通过 GitHub API 为仓库创建 scoped token。
-
-    注意：GitHub REST API 不直接支持通过 API 创建 fine-grained PAT。
-    这里采用的方案是：通过 admin_token（需具有组织 admin 权限）
-    调用 GitHub App API 为指定仓库授权，返回仅对该仓库有 admin 权限的 token。
-
-    如果资源的 admin_token 是一个 GitHub App 的 installation token，
-    可以通过 Create an installation access token API 创建 scoped token。
-
-    当前实现：直接使用 admin_token 调用 GitHub App installations API。
-    如果 admin_token 不支持此操作，则回退到直接返回 admin_token（降级方案）。
+    通过 GitHub App JWT 认证，创建限定到单个仓库的 Installation Access Token，
+    该 Token 仅对目标仓库有效，不会暴露组织管理员的凭据。
 
     Args:
         resource: Resource 对象
         repo_name: 仓库名称（不含组织前缀）
-        token_note: token 备注
 
     Returns:
-        仓库访问 token
+        仓库 scoped Installation Access Token
 
     Raises:
         GitHubServiceError: 创建失败
     """
     config = _get_resource_config(resource=resource)
     organization = config['organization']
-    admin_token = config['admin_token']
-    headers = _make_headers(admin_token=admin_token)
 
-    # 获取仓库 ID（用于 scoped token 限定）
+    # 1. 生成 App JWT
+    jwt_token = _generate_app_jwt(
+        app_id=config['app_id'],
+        private_key_pem=config['admin_token'],
+    )
+
+    # 2. 获取 Installation ID
+    installation_id = _get_installation_id(
+        jwt_token=jwt_token,
+        organization=organization,
+    )
+
+    # 3. 获取仓库 ID（使用 Installation Token 查询）
+    org_token = _create_installation_token(
+        jwt_token=jwt_token,
+        installation_id=installation_id,
+    )
+    headers = _make_headers(token=org_token)
     repo_url = f"{GITHUB_API_BASE}/repos/{organization}/{repo_name}"
+
     try:
         resp = requests.get(repo_url, headers=headers, timeout=30)
         if resp.status_code != 200:
@@ -202,58 +406,23 @@ def create_repo_scoped_token(
     except Exception as e:
         raise GitHubServiceError(f"获取仓库信息失败：{str(e)}")
 
-    # 尝试通过 GitHub App Installation API 创建 scoped token
-    # 先获取 app installations
-    try:
-        installations_url = f"{GITHUB_API_BASE}/orgs/{organization}/installations"
-        resp = requests.get(installations_url, headers=headers, timeout=30)
+    # 4. 创建仅对该仓库有效的 scoped Installation Token
+    scoped_token = _create_installation_token(
+        jwt_token=jwt_token,
+        installation_id=installation_id,
+        repository_ids=[repo_id],
+        permissions={
+            'contents': 'write',
+            'metadata': 'read',
+            'administration': 'write',
+        },
+    )
 
-        if resp.status_code == 200:
-            installations = resp.json().get('installations', [])
-            if installations:
-                installation_id = installations[0]['id']
-
-                # 创建 scoped installation token
-                token_url = f"{GITHUB_API_BASE}/app/installations/{installation_id}/access_tokens"
-                token_payload = {
-                    'repository_ids': [repo_id],
-                    'permissions': {
-                        'contents': 'write',
-                        'metadata': 'read',
-                        'administration': 'write',
-                    },
-                }
-                token_resp = requests.post(
-                    token_url, json=token_payload, headers=headers, timeout=30
-                )
-
-                if token_resp.status_code in (200, 201):
-                    token_data = token_resp.json()
-                    scoped_token = token_data.get('token', '')
-                    if scoped_token:
-                        logger.info(
-                            "create_repo_scoped_token: org=%s, repo=%s, via installation",
-                            organization, repo_name,
-                        )
-                        return scoped_token
-
-        # 如果 GitHub App 方式不可用，回退使用 admin_token
-        logger.warning(
-            "create_repo_scoped_token: GitHub App installation not available for org=%s, "
-            "falling back to admin_token for repo=%s",
-            organization, repo_name,
-        )
-        return admin_token
-
-    except GitHubServiceError:
-        raise
-    except Exception as e:
-        logger.warning(
-            "create_repo_scoped_token: failed to create scoped token, org=%s, repo=%s, "
-            "error=%s, falling back to admin_token",
-            organization, repo_name, str(e),
-        )
-        return admin_token
+    logger.info(
+        "create_repo_scoped_token: org=%s, repo=%s, repo_id=%s, token created",
+        organization, repo_name, repo_id,
+    )
+    return scoped_token
 
 
 def setup_repo_for_user(
@@ -264,11 +433,11 @@ def setup_repo_for_user(
     is_docs_repo: bool = False,
 ) -> Dict:
     """
-    为用户创建仓库并生成访问 token 的组合流程。
+    为用户创建仓库并生成 scoped access token 的组合流程。
 
     流程：
-    1. 在组织下创建仓库
-    2. 为该仓库创建 scoped access token
+    1. 在组织下创建仓库（使用 Installation Token）
+    2. 为该仓库创建 scoped Installation Access Token（仅对该仓库有效）
     3. 返回完整的仓库信息
 
     Args:
@@ -283,7 +452,7 @@ def setup_repo_for_user(
             "repo_name": "...",
             "full_name": "org/repo_name",
             "url": "https://github.com/org/repo_name.git",
-            "token": "...",
+            "token": "ghs_xxxxx",
             "default_branch": "main",
             "is_docs_repo": True/False,
         }
@@ -310,11 +479,10 @@ def setup_repo_for_user(
         private=True,
     )
 
-    # 2. 创建 scoped token
+    # 2. 创建仅对该仓库有效的 scoped token
     token = create_repo_scoped_token(
         resource=resource,
         repo_name=repo_name,
-        token_note=f"user_{user_id}_{repo_name}",
     )
 
     logger.info(
