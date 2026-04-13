@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-客户端仓库与环境变量同步服务
+客户端配置同步服务 —— 仓库配置与环境变量的全量同步
 """
 
 import logging

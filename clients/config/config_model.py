@@ -13,7 +13,7 @@ import uuid
 from rpc.apiserver_rpc import ApiServerRpc
 from config.base_checker import BaseChecker
 from utils import git_utils
-from utils import git_utils_advanced
+from utils import git_workflow_utils
 from agents.base_agent import BaseAgent
 from agents import get_agent_by_name
 from config.api_server_checker import ApiServerChecker
@@ -70,7 +70,7 @@ class GitRepoConfig:
         """
         if self.default_branch:
             return
-        detected_branch = git_utils_advanced.detect_default_branch_from_url(auth_url=self.auth_url, repo_name=self.name)
+        detected_branch = git_workflow_utils.detect_default_branch_from_url(auth_url=self.auth_url, repo_name=self.name)
         if not detected_branch:
             logger.error(f"检测默认分支失败: {self.name} ({self.url})")
             return

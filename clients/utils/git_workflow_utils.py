@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Git 仓库高级操作
-提供分支同步、rebase、PR 创建、差异比较等高级功能
+Git 工作流操作
+提供分支同步、rebase、PR 创建、差异比较、批量提交推送等工作流功能
 """
 
 import logging

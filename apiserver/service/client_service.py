@@ -267,7 +267,7 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
     Raises:
         ClientSaveError
     """
-    from service.client_repo_service import save_client_repos, save_client_env_vars
+    from service.client_config_service import save_client_repos, save_client_env_vars
     from service.client_infra_service import save_all_infrastructure
 
     err = _normalize_client_payload(data)
@@ -336,13 +336,15 @@ from service.client_infra_service import (  # noqa: E402, F401
     InfraConfigError,
     check_servers_ssh,
     check_ssh_connectivity,
-    create_client_from_template,
-    generate_default_database,
     get_client_infrastructure,
     save_all_infrastructure,
     save_client_infrastructure,
 )
-from service.client_repo_service import (  # noqa: E402, F401
+from service.client_template_service import (  # noqa: E402, F401
+    create_client_from_template,
+    generate_default_database,
+)
+from service.client_config_service import (  # noqa: E402, F401
     parse_repo_name_from_url,
     save_client_env_vars,
     save_client_repos,
