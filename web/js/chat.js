@@ -620,6 +620,39 @@ function handleInputKeydown(e) {
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendMessage(); }
 }
 
+async function handlePasteImages(e, target) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    const imageFiles = [];
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) imageFiles.push(file);
+        }
+    }
+    if (imageFiles.length === 0) return;
+
+    e.preventDefault();
+
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? welcomePendingImages : pendingImages;
+
+    for (const file of imageFiles) {
+        if (file.size > 10 * 1024 * 1024) {
+            showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error');
+            continue;
+        }
+        try {
+            const res = await chatAPI.uploadImage(file);
+            list.push(res.data);
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+    renderPendingImages(target);
+}
+
 function autoResize(el) {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 180) + 'px';

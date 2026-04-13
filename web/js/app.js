@@ -2874,6 +2874,7 @@ function initStandaloneChatPanel() {
                 scSendNewChat();
             }
         });
+        textarea.addEventListener('paste', (e) => scHandlePasteImages(e, 'welcome'));
     }
 
     // 客户端选择变化时缓存
@@ -2908,6 +2909,7 @@ function initStandaloneChatPanel() {
             }
         });
         detailInput.addEventListener('input', () => scAutoResize(detailInput));
+        detailInput.addEventListener('paste', (e) => scHandlePasteImages(e, 'detail'));
     }
 
     // Merge default branch
@@ -3319,6 +3321,39 @@ function scCollectAndClearImages(target) {
     list.length = 0;
     scRenderPendingImages(target);
     return images;
+}
+
+async function scHandlePasteImages(e, target) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    const imageFiles = [];
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) imageFiles.push(file);
+        }
+    }
+    if (imageFiles.length === 0) return;
+
+    e.preventDefault();
+
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? scWelcomePendingImages : scDetailPendingImages;
+
+    for (const file of imageFiles) {
+        if (file.size > 10 * 1024 * 1024) {
+            showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error');
+            continue;
+        }
+        try {
+            const res = await chatAPI.uploadImage(file);
+            list.push(res.data);
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+    scRenderPendingImages(target);
 }
 
 function scRenderMsgImages(images) {

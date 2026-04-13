@@ -1411,6 +1411,7 @@
                         rows="1"
                         onkeydown="handleWelcomeInputKeydown(event)"
                         oninput="autoResize(this)"
+                        onpaste="handlePasteImages(event, 'welcome')"
                     ></textarea>
                     <input type="file" id="welcome-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple style="display:none" onchange="handleImageSelect(event, 'welcome')">
                     <div class="composer-footer">
@@ -1456,6 +1457,7 @@
                         rows="1"
                         onkeydown="handleInputKeydown(event)"
                         oninput="autoResize(this)"
+                        onpaste="handlePasteImages(event, 'active')"
                     ></textarea>
                     <input type="file" id="active-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple style="display:none" onchange="handleImageSelect(event, 'active')">
                     <div class="composer-footer">
