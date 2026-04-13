@@ -12,6 +12,7 @@ from typing import Optional
 
 from agents.base_agent import BaseAgent
 from config.config_model import ClientConfig
+from worker.execute_marker import write_last_execute_marker
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,9 @@ class BaseWorker(threading.Thread):
             logger.error(f"[{self.trace_id}] 节点 {self.worker_name} 执行失败: {e}")
             self.exception_handler(e)
         finally:
+            work_dir = getattr(self, "work_dir", None)
+            if isinstance(work_dir, str) and work_dir:
+                write_last_execute_marker(work_dir)
             self._cleanup_managed_processes()
 
     def stop(self):

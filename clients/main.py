@@ -10,7 +10,9 @@ import os
 import shutil
 import time
 from typing import Dict
+
 from worker.code_develop_woker import CodeDevelopWorker
+from worker.execute_marker import LAST_EXECUTE_MARKER_NAME
 
 # 配置日志格式
 logging.basicConfig(
@@ -19,6 +21,9 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# 存在 LAST_EXECUTE_MARKER_NAME 且其 mtime 距现在不足此时长则不删除任务目录（秒）
+WORK_DIR_DELETE_MIN_AGE_SEC = 24 * 3600
 
 from worker.task_worker import TaskWorker
 from config.config_model import ClientConfig
@@ -63,11 +68,25 @@ class ClientRunner:
         """与 CodeDevelopWorker.work_dir 一致：workspace / worker_key"""
         return os.path.join(self.client_config.workspace, CodeDevelopWorker.worker_key)
 
+    def _task_work_dir_path(self, task_key: str) -> str:
+        return os.path.join(self._code_develop_work_root(), task_key)
+
     def _remove_task_work_dir(self, task_key: str) -> None:
-        """删除单个任务的工作目录（释放磁盘，避免堆积）。"""
-        path = os.path.join(self._code_develop_work_root(), task_key)
+        """若存在执行时间戳文件且其更新时间未超过 WORK_DIR_DELETE_MIN_AGE_SEC 则跳过删除。"""
+        path = self._task_work_dir_path(task_key)
         if not os.path.isdir(path):
             return
+        marker = os.path.join(path, LAST_EXECUTE_MARKER_NAME)
+        if os.path.isfile(marker):
+            try:
+                age = time.time() - os.path.getmtime(marker)
+            except OSError:
+                age = WORK_DIR_DELETE_MIN_AGE_SEC
+            if age < WORK_DIR_DELETE_MIN_AGE_SEC:
+                logger.info(
+                    f"任务工作目录在 {WORK_DIR_DELETE_MIN_AGE_SEC // 3600} 小时内有执行完成记录，暂不删除: {path}"
+                )
+                return
         try:
             shutil.rmtree(path)
             logger.info(f"已删除任务工作目录: {path}")
@@ -90,11 +109,7 @@ class ClientRunner:
                 continue
             if name in running_task_keys or name in self.task_threads:
                 continue
-            try:
-                shutil.rmtree(path)
-                logger.info(f"已删除孤立任务工作目录: {path}")
-            except OSError as e:
-                logger.warning(f"删除孤立任务工作目录失败 {path}: {e}")
+            self._remove_task_work_dir(name)
     
     def cleanup_finished_threads(self, running_task_keys: set):
         """清理已结束的线程，以及不在 running tasks 中的任务"""
