@@ -158,6 +158,77 @@ def download_image_to_file(config: OssConfig, oss_path: str, local_path: str):
         f.write(file_content)
 
 
+def get_sts_temp_credentials(config: OssConfig, user_id: int, duration_seconds: int = 1800) -> dict:
+    """
+    为指定用户生成 STS 临时凭证，限定只能访问 chat/images/{user_id}/* 路径。
+
+    Args:
+        config: OSS 配置
+        user_id: 用户 ID，用于限定访问路径
+        duration_seconds: 凭证有效期（秒），默认 1800（30 分钟）
+
+    Returns:
+        {
+            'tmp_secret_id': str,
+            'tmp_secret_key': str,
+            'session_token': str,
+            'expired_time': int,  # Unix 时间戳
+            'region': str,
+            'bucket': str,
+            'allow_prefix': str,  # 允许访问的路径前缀
+        }
+    """
+    try:
+        from sts.sts import Sts
+    except ImportError:
+        raise RuntimeError("请安装 qcloud-python-sts: pip install qcloud-python-sts")
+
+    allow_prefix = f'chat/images/{user_id}/*'
+
+    # 从 bucket 名称中提取 appid（格式: bucketname-appid）
+    bucket_parts = config.bucket.rsplit('-', 1)
+    if len(bucket_parts) != 2:
+        raise ValueError(f"Bucket 名称格式不正确，期望格式 bucketname-appid: {config.bucket}")
+    appid = bucket_parts[1]
+
+    resource = f'qcs::cos:{config.region}:uid/{appid}:{config.bucket}/{allow_prefix}'
+
+    sts_config = {
+        'secret_id': config.secret_id,
+        'secret_key': config.secret_key,
+        'duration_seconds': duration_seconds,
+        'bucket': config.bucket,
+        'region': config.region,
+        'allow_prefix': allow_prefix,
+        'policy': {
+            'version': '2.0',
+            'statement': [
+                {
+                    'action': [
+                        'name/cos:GetObject',
+                    ],
+                    'effect': 'allow',
+                    'resource': [resource],
+                },
+            ],
+        },
+    }
+
+    sts = Sts(sts_config)
+    response = sts.get_credential()
+
+    credentials = response.get('credentials', {})
+    return {
+        'tmp_secret_id': credentials.get('tmpSecretId', ''),
+        'tmp_secret_key': credentials.get('tmpSecretKey', ''),
+        'session_token': credentials.get('sessionToken', ''),
+        'expired_time': int(response.get('expiredTime', 0)),
+        'region': config.region,
+        'bucket': config.bucket,
+        'allow_prefix': f'chat/images/{user_id}/',
+    }
+
+
 def _get_extension(filename: str, content_type: str) -> str:
     """根据文件名或 content_type 获取扩展名"""
     ext_map = {

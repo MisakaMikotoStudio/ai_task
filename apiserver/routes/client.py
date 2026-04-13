@@ -4,10 +4,13 @@
 客户端相关路由
 """
 
+import logging
 import secrets
 import string
 
 from flask import Blueprint, request, jsonify, g, current_app
+
+logger = logging.getLogger(__name__)
 
 from dao.client_dao import (
     create_client, get_clients_by_user, get_client_by_id,
@@ -426,14 +429,17 @@ def get_client_config_api(client_id):
     # 获取环境变量（官方云部署/容器启动场景有效）
     env_vars = get_client_env_vars(client_id, request.user_info.user_id)
 
-    # OSS 配置（供客户端直接下载聊天图片）
+    # OSS 配置：为当前用户生成 STS 临时凭证，限定只能访问 chat/images/{user_id}/ 目录
     config = current_app.config['APP_CONFIG']
-    oss_data = {
-        'secret_id': config.oss.secret_id,
-        'secret_key': config.oss.secret_key,
-        'region': config.oss.region,
-        'bucket': config.oss.bucket,
-    }
+    oss_data = None
+    try:
+        from service import oss_service
+        oss_data = oss_service.get_sts_temp_credentials(
+            config=config.oss,
+            user_id=request.user_info.user_id,
+        )
+    except Exception as e:
+        logger.warning("生成 STS 临时凭证失败: %s", e)
 
     return jsonify({
         'code': 200,

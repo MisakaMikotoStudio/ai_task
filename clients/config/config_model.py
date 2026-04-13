@@ -88,11 +88,14 @@ class GitRepoConfig:
 
 @dataclass
 class OssConfig:
-    """OSS 对象存储配置（用于客户端直接下载聊天图片）"""
-    secret_id: str = ""
-    secret_key: str = ""
+    """OSS 对象存储配置（STS 临时凭证，限定用户目录访问）"""
+    secret_id: str = ""       # tmp_secret_id
+    secret_key: str = ""      # tmp_secret_key
+    session_token: str = ""   # STS session token
+    expired_time: int = 0     # 凭证过期时间（Unix 时间戳）
     region: str = "ap-guangzhou"
     bucket: str = ""
+    allow_prefix: str = ""    # 允许访问的路径前缀
 
 
 @dataclass
@@ -157,16 +160,19 @@ class ClientConfig:
 
         self.login_user_name = remote_config.get('login_user_name', '')
 
-        # 解析 OSS 配置（用于客户端下载聊天图片）
+        # 解析 OSS 配置（STS 临时凭证，限定用户目录访问）
         oss_data = remote_config.get('oss')
         if oss_data and isinstance(oss_data, dict):
             self.oss = OssConfig(
-                secret_id=oss_data.get('secret_id', ''),
-                secret_key=oss_data.get('secret_key', ''),
+                secret_id=oss_data.get('tmp_secret_id', ''),
+                secret_key=oss_data.get('tmp_secret_key', ''),
+                session_token=oss_data.get('session_token', ''),
+                expired_time=int(oss_data.get('expired_time', 0)),
                 region=oss_data.get('region', 'ap-guangzhou'),
                 bucket=oss_data.get('bucket', ''),
+                allow_prefix=oss_data.get('allow_prefix', ''),
             )
-            logger.debug("OSS 配置已加载")
+            logger.debug("OSS STS 临时凭证已加载, allow_prefix=%s", self.oss.allow_prefix)
         else:
             self.oss = None
 
