@@ -5997,6 +5997,8 @@ textarea:focus {
     font-size: 13px;
     color: var(--text-primary);
     transition: var(--transition);
+    white-space: nowrap;
+    flex: none;
 }
 
 .add-client-choice .checkbox-option:hover {
