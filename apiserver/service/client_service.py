@@ -877,7 +877,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
        d. 绑定仓库到应用
     4. 对于 test、prod 两个环境：
        a. 查找可用的 MySQL Resource
-       b. 生成 db_name = u{user_id}_{env}_{秒级时间戳}（以字母开头，满足 Aliyun RDS 命名规则）
+       b. 生成 db_name = {env}_{user_id}_{yyyyMMddHHmmss}
        c. 写入 ClientDatabase 记录
        d. 调用资源服务在云上创建数据库 + 专属账号
        e. 回写连接信息到 ClientDatabase
@@ -894,6 +894,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
     """
     import random
     import time
+    from datetime import datetime, timezone
     from dao.resource_dao import get_online_resources_by_type_source
     from service.resource_mysql_service import create_database_with_name, ResourceMySQLError
 
@@ -951,7 +952,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
             continue
 
         resource = resources[0]
-        db_name = f"u{user_id}_{env}_{int(time.time())}"
+        db_name = f"{env}_{user_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
         # 先写入 ClientDatabase 记录
         record_id = add_client_database(
