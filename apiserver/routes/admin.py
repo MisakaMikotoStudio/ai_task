@@ -624,10 +624,18 @@ def create_resource_api():
     """新增资源"""
     data = request.get_json(silent=True) or {}
 
+    res_name = (data.get('name') or '').strip()
     res_type = (data.get('type') or '').strip()
     source = (data.get('source') or '').strip()
     envs = data.get('envs')
     extra = data.get('extra')
+
+    if not res_name:
+        return jsonify({'code': 400, 'message': '资源名称不能为空', 'data': None}), 400
+    if len(res_name) > 64:
+        return jsonify({'code': 400, 'message': '资源名称不能超过64个字符', 'data': None}), 400
+    if resource_dao.check_resource_name_exists(name=res_name):
+        return jsonify({'code': 400, 'message': f'资源名称 "{res_name}" 已被占用', 'data': None}), 400
 
     if not res_type:
         return jsonify({'code': 400, 'message': 'type 不能为空', 'data': None}), 400
@@ -655,6 +663,7 @@ def create_resource_api():
 
     with get_db_session():
         resource = resource_dao.create_resource(
+            name=res_name,
             type=res_type,
             source=source,
             envs=envs,
@@ -670,10 +679,23 @@ def update_resource_api(resource_id: int):
     """更新资源"""
     data = request.get_json(silent=True) or {}
 
+    res_name = data.get('name')
     res_type = (data.get('type') or '').strip()
     source = (data.get('source') or '').strip()
     envs = data.get('envs')
     extra = data.get('extra')
+
+    # name 校验（仅在提供了 name 时）
+    update_name = None
+    if res_name is not None:
+        res_name = res_name.strip()
+        if not res_name:
+            return jsonify({'code': 400, 'message': '资源名称不能为空', 'data': None}), 400
+        if len(res_name) > 64:
+            return jsonify({'code': 400, 'message': '资源名称不能超过64个字符', 'data': None}), 400
+        if resource_dao.check_resource_name_exists(name=res_name, exclude_id=resource_id):
+            return jsonify({'code': 400, 'message': f'资源名称 "{res_name}" 已被占用', 'data': None}), 400
+        update_name = res_name
 
     if res_type and res_type not in Resource.VALID_TYPES:
         return jsonify({'code': 400, 'message': f'type 仅支持: {", ".join(Resource.VALID_TYPES)}', 'data': None}), 400
@@ -695,7 +717,7 @@ def update_resource_api(resource_id: int):
             return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
         final_type = res_type or existing.type
         final_source = source or existing.source
-        # 合并 extra：前端编辑时可能省略敏感字段（如 private_key、access_key_secret），
+        # 合并 extra：前端编辑时可能省略敏感字段（如 private_key、access_key_secret、login_password），
         # 需要保留原值而非覆盖为空
         merged_extra = dict(existing.get_raw_extra())
         merged_extra.update(extra)
@@ -707,6 +729,7 @@ def update_resource_api(resource_id: int):
     with get_db_session():
         resource = resource_dao.update_resource(
             resource_id=resource_id,
+            name=update_name,
             type=res_type or None,
             source=source or None,
             envs=envs,
@@ -839,6 +862,18 @@ def _validate_resource_extra(res_type: str, source: str, extra: dict) -> str:
             return 'GitHub App ID 不能为空'
         if not private_key:
             return 'GitHub App Private Key 不能为空'
+        return None
+
+    if res_type == Resource.TYPE_CLOUD_SERVER and source == Resource.SOURCE_TENCENT_CLOUD:
+        login_user = (extra.get('login_user') or '').strip()
+        login_password = (extra.get('login_password') or '').strip()
+        server_ip = (extra.get('server_ip') or '').strip()
+        if not login_user:
+            return '登录账号不能为空'
+        if not login_password:
+            return '登录密码不能为空'
+        if not server_ip:
+            return '服务器IP不能为空'
         return None
 
     return f'暂不支持 type={res_type} + source={source} 的组合'
