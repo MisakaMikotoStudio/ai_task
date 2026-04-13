@@ -485,7 +485,44 @@ def update_client_repo_token(repo_id: int, user_id: int, token: str) -> bool:
         return affected > 0
 
 
-def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:    
+def update_client_repo_after_creation(
+    repo_id: int,
+    user_id: int,
+    token: str,
+    default_branch: str = 'main',
+) -> bool:
+    """
+    仓库创建完成后回写 token 和 default_branch。
+
+    在 GitHub API 创建仓库后调用，将实际的 token 和 default_branch 更新到数据库记录。
+    当使用模板创建仓库时 default_branch 可能与初始值 'main' 不同。
+
+    Args:
+        repo_id: 仓库配置 ID
+        user_id: 用户 ID
+        token: 访问 token
+        default_branch: 仓库默认分支名
+
+    Returns:
+        是否更新成功
+    """
+    with get_db_session() as session:
+        update_fields = {}
+        if token:
+            update_fields[ClientRepo.token] = token
+        if default_branch:
+            update_fields[ClientRepo.default_branch] = default_branch
+        if not update_fields:
+            return False
+        affected = session.query(ClientRepo).filter(
+            ClientRepo.id == repo_id,
+            ClientRepo.user_id == user_id,
+            ClientRepo.deleted_at.is_(None),
+        ).update(update_fields)
+        return affected > 0
+
+
+def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:
     if user_id is None:
         """
         获取 official_cloud_deploy 类型为 1 的客户端，同时 JOIN 其所属用户的官方云部署有效秘钥。

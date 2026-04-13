@@ -373,6 +373,109 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
         raise GitHubServiceError(f"创建仓库失败：{str(e)}")
 
 
+def create_org_repo_from_template(
+    resource: Resource,
+    repo_name: str,
+    template_owner: str,
+    template_repo: str,
+    description: str = '',
+    private: bool = True,
+) -> Dict:
+    """
+    使用 GitHub 模板仓库 API 在组织下创建新仓库。
+
+    通过 POST /repos/{template_owner}/{template_repo}/generate 创建新仓库，
+    新仓库将包含模板仓库默认分支的所有文件。
+
+    Args:
+        resource: Resource 对象（type=code_repo, source=github）
+        repo_name: 新仓库名称
+        template_owner: 模板仓库所有者（组织名或用户名）
+        template_repo: 模板仓库名称
+        description: 仓库描述
+        private: 是否为私有仓库（默认 True）
+
+    Returns:
+        {
+            "repo_name": "...",
+            "full_name": "org/repo_name",
+            "url": "https://github.com/org/repo_name.git",
+            "default_branch": "main",
+            "repo_id": 123456,
+        }
+
+    Raises:
+        GitHubServiceError: 创建失败
+    """
+    config = _get_resource_config(resource=resource)
+    organization = config['organization']
+
+    installation_token = _get_installation_token_for_org(resource=resource)
+    headers = _make_headers(token=installation_token)
+
+    url = f"{GITHUB_API_BASE}/repos/{template_owner}/{template_repo}/generate"
+    payload = {
+        'owner': organization,
+        'name': repo_name,
+        'description': description,
+        'private': private,
+        'include_all_branches': False,
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        logger.info(
+            "create_org_repo_from_template: template=%s/%s, target=%s/%s, status=%d",
+            template_owner, template_repo, organization, repo_name, resp.status_code,
+        )
+
+        if resp.status_code == 422:
+            error_data = resp.json()
+            errors = error_data.get('errors', [])
+            for err in errors:
+                if err.get('message', '').startswith('name already exists'):
+                    raise GitHubServiceError(
+                        f"仓库 {organization}/{repo_name} 已存在于 GitHub"
+                    )
+            raise GitHubServiceError(
+                f"从模板创建仓库失败（422）：{error_data.get('message', resp.text)}"
+            )
+
+        if resp.status_code == 403:
+            raise GitHubServiceError(
+                f"从模板创建仓库失败（HTTP 403 权限不足）：{resp.text[:200]}"
+            )
+
+        if resp.status_code not in (200, 201):
+            raise GitHubServiceError(
+                f"从模板创建仓库失败（HTTP {resp.status_code}）：{resp.text[:200]}"
+            )
+
+        data = resp.json()
+        return {
+            'repo_name': data['name'],
+            'full_name': data['full_name'],
+            'url': data['clone_url'],
+            'default_branch': data.get('default_branch', 'main'),
+            'repo_id': data['id'],
+        }
+
+    except GitHubServiceError:
+        raise
+    except requests.RequestException as e:
+        logger.error(
+            "create_org_repo_from_template network error: template=%s/%s, target=%s/%s, error=%s",
+            template_owner, template_repo, organization, repo_name, str(e),
+        )
+        raise GitHubServiceError(f"从模板创建仓库网络请求失败：{str(e)}")
+    except Exception as e:
+        logger.error(
+            "create_org_repo_from_template unexpected error: template=%s/%s, target=%s/%s, error=%s",
+            template_owner, template_repo, organization, repo_name, str(e),
+        )
+        raise GitHubServiceError(f"从模板创建仓库失败：{str(e)}")
+
+
 def create_repo_scoped_token(resource: Resource, repo_name: str) -> str:
     """
     为指定仓库创建仅具有 admin 权限的 Installation Access Token。
@@ -450,12 +553,14 @@ def setup_repo_for_user(
     repo_name: str,
     description: str = '',
     is_docs_repo: bool = False,
+    template_owner: str = '',
+    template_repo: str = '',
 ) -> Dict:
     """
     为用户创建仓库并生成 scoped access token 的组合流程。
 
     流程：
-    1. 在组织下创建仓库（使用 Installation Token）
+    1. 在组织下创建仓库（若指定模板则优先从模板创建，失败自动降级为空仓库）
     2. 为该仓库创建 scoped Installation Access Token（仅对该仓库有效）
     3. 返回完整的仓库信息
 
@@ -465,6 +570,8 @@ def setup_repo_for_user(
         repo_name: 仓库名称
         description: 仓库描述
         is_docs_repo: 是否为文档仓库
+        template_owner: 模板仓库所有者（为空则创建空仓库）
+        template_repo: 模板仓库名称（为空则创建空仓库）
 
     Returns:
         {
@@ -483,20 +590,44 @@ def setup_repo_for_user(
     organization = config['organization']
 
     logger.info(
-        "setup_repo_for_user: user_id=%s, org=%s, repo=%s, is_docs=%s",
+        "setup_repo_for_user: user_id=%s, org=%s, repo=%s, is_docs=%s, template=%s/%s",
         user_id, organization, repo_name, is_docs_repo,
+        template_owner or '-', template_repo or '-',
     )
 
-    # 1. 创建仓库
+    # 1. 创建仓库（优先从模板创建，失败降级为空仓库）
     repo_type = "文档仓库" if is_docs_repo else "代码仓库"
     repo_desc = description or f"用户 {user_id} 的{repo_type}"
 
-    repo_info = create_org_repo(
-        resource=resource,
-        repo_name=repo_name,
-        description=repo_desc,
-        private=True,
-    )
+    repo_info = None
+    if template_owner and template_repo:
+        try:
+            repo_info = create_org_repo_from_template(
+                resource=resource,
+                repo_name=repo_name,
+                template_owner=template_owner,
+                template_repo=template_repo,
+                description=repo_desc,
+                private=True,
+            )
+            logger.info(
+                "setup_repo_for_user: created from template %s/%s, user_id=%s, repo=%s",
+                template_owner, template_repo, user_id, repo_name,
+            )
+        except GitHubServiceError as e:
+            logger.warning(
+                "setup_repo_for_user: template creation failed, falling back to empty repo, "
+                "user_id=%s, repo=%s, template=%s/%s, error=%s",
+                user_id, repo_name, template_owner, template_repo, e.message,
+            )
+
+    if repo_info is None:
+        repo_info = create_org_repo(
+            resource=resource,
+            repo_name=repo_name,
+            description=repo_desc,
+            private=True,
+        )
 
     # 2. 创建仅对该仓库有效的 scoped token
     token = create_repo_scoped_token(

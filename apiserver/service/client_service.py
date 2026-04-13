@@ -1020,9 +1020,8 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
     """
     import random
     from dao.resource_dao import get_online_resources_by_type_source
-    from dao.client_dao import get_repo_by_url, add_client_repo, update_client_repo_token
     from service.github_service import (
-        GitHubServiceError, setup_repo_for_user, build_repo_url,
+        GitHubServiceError, build_repo_url,
     )
 
     # 1. 随机选择一个 code_repo 资源
@@ -1059,7 +1058,7 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
         description=f"用户 {user_id} 的文档仓库",
     )
 
-    # 3. 代码仓库: {user_id}_app_{timestamp}
+    # 3. 代码仓库: {user_id}_app_{timestamp}（从模板创建）
     code_repo_name = f"{user_id}_app_{timestamp}"
     _ensure_and_bind_repo(
         resource=resource,
@@ -1069,6 +1068,8 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
         repo_name=code_repo_name,
         is_docs_repo=False,
         description=f"用户 {user_id} 的代码仓库",
+        template_owner='MisakaMikotoStudio',
+        template_repo='template',
     )
 
 
@@ -1080,6 +1081,8 @@ def _ensure_and_bind_repo(
     repo_name: str,
     is_docs_repo: bool,
     description: str,
+    template_owner: str = '',
+    template_repo: str = '',
 ) -> None:
     """
     确保仓库存在并绑定到应用。
@@ -1089,9 +1092,9 @@ def _ensure_and_bind_repo(
     2. 如果已存在：直接绑定到当前应用（新增一条 ClientRepo 记录指向同一 URL）
     3. 如果不存在：
        a. 先新建数据库记录
-       b. 调用 GitHub API 创建仓库
+       b. 调用 GitHub API 创建仓库（若指定模板则优先从模板创建）
        c. 创建仓库 scoped token
-       d. 回写 token 到数据库记录
+       d. 回写 token 和 default_branch 到数据库记录
 
     Args:
         resource: Resource 对象
@@ -1101,8 +1104,10 @@ def _ensure_and_bind_repo(
         repo_name: 仓库名称
         is_docs_repo: 是否为文档仓库
         description: 仓库描述
+        template_owner: 模板仓库所有者（为空则创建空仓库）
+        template_repo: 模板仓库名称（为空则创建空仓库）
     """
-    from dao.client_dao import get_repo_by_url, add_client_repo, update_client_repo_token
+    from dao.client_dao import get_repo_by_url, add_client_repo, update_client_repo_after_creation
     from service.github_service import GitHubServiceError, setup_repo_for_user, build_repo_url
 
     repo_url = build_repo_url(organization=organization, repo_name=repo_name)
@@ -1155,20 +1160,24 @@ def _ensure_and_bind_repo(
             repo_name=repo_name,
             description=description,
             is_docs_repo=is_docs_repo,
+            template_owner=template_owner,
+            template_repo=template_repo,
         )
 
-        # 回写 token 到数据库记录
+        # 回写 token 和 default_branch 到数据库记录
         token = result.get('token', '')
-        if token:
-            update_client_repo_token(
+        default_branch = result.get('default_branch', 'main')
+        if token or default_branch != 'main':
+            update_client_repo_after_creation(
                 repo_id=repo_record_id,
                 user_id=user_id,
                 token=token,
+                default_branch=default_branch,
             )
 
         logger.info(
-            "_ensure_and_bind_repo: github repo created, user_id=%s, repo=%s/%s, type=%s",
-            user_id, organization, repo_name, repo_type_label,
+            "_ensure_and_bind_repo: github repo created, user_id=%s, repo=%s/%s, type=%s, default_branch=%s",
+            user_id, organization, repo_name, repo_type_label, default_branch,
         )
     except GitHubServiceError as e:
         logger.error(
