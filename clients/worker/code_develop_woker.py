@@ -148,6 +148,15 @@ class CodeDevelopWorker(BaseWorker):
                 repo_config=git_repo,
                 trace_id=self.trace_id,
             )
+            # 认证失败时调用 apiserver 刷新 token 后重试一次
+            if not git_result.success and git_utils.git_error_is_auth_failure(git_result.message):
+                logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} 认证失败，尝试刷新 token")
+                if self.client_config.refresh_repo_token(repo_config=git_repo):
+                    git_result = git_utils.clone_or_sync_repo(
+                        work_dir=self.git_repo_cache_dir,
+                        repo_config=git_repo,
+                        trace_id=self.trace_id,
+                    )
             if not git_result.success:
                 raise Exception(f"代码仓库 {git_repo.name} 准备失败: {git_result.message}")
         # 工作目录仓库同步(优先同步文档仓库)
@@ -200,6 +209,17 @@ class CodeDevelopWorker(BaseWorker):
                 main_branch=base_branch,
                 trace_id=self.trace_id,
             )
+            # 认证失败时调用 apiserver 刷新 token 后重试一次
+            if not diff_result.success and git_utils.git_error_is_auth_failure(diff_result.message):
+                logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} collect_diff 认证失败，尝试刷新 token")
+                if self.client_config.refresh_repo_token(repo_config=git_repo):
+                    git_utils.update_remote_auth_url(work_repo_dir, git_repo.auth_url, trace_id=self.trace_id)
+                    diff_result = git_utils.collect_remote_branch_diff_info(
+                        repo_dir=work_repo_dir,
+                        dev_branch=dev_branch,
+                        main_branch=base_branch,
+                        trace_id=self.trace_id,
+                    )
             if not diff_result.success:
                 logger.warning(f"[{self.trace_id}] 检查 {diff_label} 分支差异失败: repo={git_repo.name}, {diff_result.message}")
                 continue
@@ -347,6 +367,21 @@ class CodeDevelopWorker(BaseWorker):
             default_branch=default_branch,
             trace_id=self.trace_id,
         )
+        # 认证失败时调用 apiserver 刷新 token 后重试一次
+        if not git_result.success and git_utils.git_error_is_auth_failure(git_result.message):
+            logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} sync_and_rebase 认证失败，尝试刷新 token")
+            if self.client_config.refresh_repo_token(repo_config=git_repo):
+                git_utils.update_remote_auth_url(
+                    work_repo_dir,
+                    git_repo.auth_url,
+                    trace_id=self.trace_id,
+                )
+                git_result = git_utils.sync_and_rebase_branch(
+                    repo_dir=work_repo_dir,
+                    dev_branch=dev_branch,
+                    default_branch=default_branch,
+                    trace_id=self.trace_id,
+                )
         if git_result.success:
             return
         if 'conflict' not in git_result.message.lower():

@@ -512,3 +512,86 @@ def build_repo_url(organization: str, repo_name: str) -> str:
         https://github.com/{organization}/{repo_name}.git
     """
     return f"https://github.com/{organization}/{repo_name}.git"
+
+
+def _parse_github_url(url: str):
+    """
+    从 GitHub 仓库 URL 中解析出组织名和仓库名。
+
+    支持格式：
+    - https://github.com/org/repo.git
+    - https://github.com/org/repo
+
+    Args:
+        url: 仓库 URL
+
+    Returns:
+        (organization, repo_name) 元组，解析失败返回 (None, None)
+    """
+    if not url:
+        return None, None
+
+    url = url.strip().rstrip('/')
+    if url.endswith('.git'):
+        url = url[:-4]
+
+    parts = url.split('github.com/')
+    if len(parts) != 2:
+        return None, None
+
+    path = parts[1].strip('/')
+    segments = path.split('/')
+    if len(segments) != 2:
+        return None, None
+
+    return segments[0], segments[1]
+
+
+def refresh_repo_token_by_url(repo_url: str) -> str:
+    """
+    根据仓库 URL 重新生成 scoped Installation Access Token。
+
+    从仓库 URL 解析出组织名和仓库名，找到匹配的 code_repo Resource，
+    然后生成新的仅对该仓库有效的 Installation Access Token。
+
+    Args:
+        repo_url: 仓库 URL（如 https://github.com/org/repo.git）
+
+    Returns:
+        新的 scoped token
+
+    Raises:
+        GitHubServiceError: 刷新失败
+    """
+    from dao.resource_dao import get_online_resources_by_type_source
+
+    org, repo_name = _parse_github_url(url=repo_url)
+    if not org or not repo_name:
+        raise GitHubServiceError(f"无法从 URL 解析出组织和仓库名：{repo_url}")
+
+    resources = get_online_resources_by_type_source(
+        type='code_repo',
+        source='github',
+    )
+    matched_resource = None
+    for r in resources:
+        extra = r.get_raw_extra()
+        if (extra.get('organization') or '').strip() == org:
+            matched_resource = r
+            break
+
+    if not matched_resource:
+        raise GitHubServiceError(
+            f"未找到组织 {org} 对应的代码仓库资源，无法刷新 token"
+        )
+
+    new_token = create_repo_scoped_token(
+        resource=matched_resource,
+        repo_name=repo_name,
+    )
+
+    logger.info(
+        "refresh_repo_token_by_url: org=%s, repo=%s, token refreshed",
+        org, repo_name,
+    )
+    return new_token
