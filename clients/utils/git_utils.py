@@ -81,6 +81,21 @@ def _git_error_suggests_index_lock(message: str) -> bool:
     )
 
 
+def git_error_is_auth_failure(message: str) -> bool:
+    """检查 Git 错误信息是否表示认证失败（token 过期或无效）。"""
+    if not message:
+        return False
+    lower = message.lower()
+    return any(kw in lower for kw in (
+        "authentication failed",
+        "could not read username",
+        "invalid credentials",
+        "http basic: access denied",
+        "the requested url returned error: 401",
+        "the requested url returned error: 403",
+    ))
+
+
 # ──────────────────────────────────────────────────────
 #  URL 工具
 # ──────────────────────────────────────────────────────
