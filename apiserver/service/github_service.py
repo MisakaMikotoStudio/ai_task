@@ -16,7 +16,6 @@ GitHub 代码仓库服务层 —— 通过 GitHub REST API 管理组织下的仓
 """
 
 import logging
-import math
 import time
 from typing import Dict, Optional
 

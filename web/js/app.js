@@ -2254,8 +2254,14 @@ function parseSimpleMarkdown(text) {
     
     let html = escapeHtml(text);
     
-    // 链接: [text](url)
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    // 链接: [text](url) - 仅允许 http/https/mailto 协议，防止 javascript: XSS
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, text, url) {
+        const decoded = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+        if (/^(https?:|mailto:)/i.test(decoded.trim())) {
+            return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+        }
+        return text;
+    });
     
     // 加粗: **text**
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -3290,7 +3296,10 @@ function scParseMsgExtra(extra) {
 function scRenderOutput(output) {
     if (!output) return '';
     if (typeof marked !== 'undefined') {
-        try { return marked.parse(output); } catch (_) {}
+        try {
+            const html = marked.parse(output);
+            return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+        } catch (_) {}
     }
     return `<p>${escapeHtml(output).replace(/\n/g, '<br>')}</p>`;
 }
@@ -4290,7 +4299,7 @@ function renderPermissionGroup(group) {
         }).replace(/"/g, '&quot;');
 
         return `<tr>
-            <td>${escapeHTML(p.product_key)}</td>
+            <td>${escapeHtml(p.product_key)}</td>
             <td>${group.type === 'count_limit' ? limitText : '<span class="perm-text-muted">不适用</span>'}</td>
             <td class="perm-actions-cell">
                 <button type="button" class="perm-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
@@ -4302,7 +4311,7 @@ function renderPermissionGroup(group) {
     return `<div class="perm-group-card">
         <div class="perm-group-header">
             <div class="perm-group-title">
-                <span class="perm-key-label">${escapeHTML(group.key)}</span>
+                <span class="perm-key-label">${escapeHtml(group.key)}</span>
                 ${typeBadge}
             </div>
             <span class="perm-type-desc">${typeLabel}</span>
@@ -4312,12 +4321,6 @@ function renderPermissionGroup(group) {
             <tbody>${productRows || '<tr><td colspan="3" class="perm-text-muted">暂无产品配置</td></tr>'}</tbody>
         </table>
     </div>`;
-}
-
-function escapeHTML(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
 }
 
 // ===== 资源管理（admin） =====
@@ -4683,11 +4686,11 @@ function renderResourceRow(resource) {
 
     return `<tr>
         <td>${resource.id}</td>
-        <td class="resource-url-cell" title="${escapeHTML(resource.name || '')}">${escapeHTML(resource.name || '-')}</td>
+        <td class="resource-url-cell" title="${escapeHtml(resource.name || '')}">${escapeHtml(resource.name || '-')}</td>
         <td>${typeLabels[resource.type] || resource.type}</td>
         <td>${sourceLabels[resource.source] || resource.source}</td>
         <td>${envsHtml}</td>
-        <td class="resource-url-cell" title="${escapeHTML(instanceInfo)}">${escapeHTML(instanceInfo)}</td>
+        <td class="resource-url-cell" title="${escapeHtml(instanceInfo)}">${escapeHtml(instanceInfo)}</td>
         <td><span class="resource-status-badge ${statusClass}">${statusText}</span></td>
         <td>${createdAt}</td>
         <td class="perm-actions-cell">
@@ -4739,7 +4742,7 @@ function renderStoreProductCard(product) {
   <div class="store-product-header">${iconHtml}</div>
   <div class="store-product-body">
     <div class="store-product-title">${escapeHtml(product.title)}</div>
-    <div class="store-product-desc">${product.desc || ''}</div>
+    <div class="store-product-desc">${escapeHtml(product.desc || '')}</div>
     <div class="store-product-meta">
       <span class="store-product-price">¥${product.price.toFixed(2)}</span>
       <span class="store-product-expire">${escapeHtml(expireText)}</span>
@@ -4774,14 +4777,6 @@ async function handleStoreBuy(e) {
         btn.disabled = false;
         btn.textContent = originalText;
     }
-}
-
-function escapeHtml(str) {
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
 }
 
 // ===== 我的（个人中心）=====
