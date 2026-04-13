@@ -733,6 +733,10 @@ function showAddClientModal() {
             </div>
             <div id="template-config-section" style="display:none; margin-top: 16px;">
                 <div class="form-group">
+                    <label class="form-label">应用名称</label>
+                    <input type="text" id="template-app-name" class="form-input" placeholder="留空则自动生成" maxlength="16">
+                </div>
+                <div class="form-group">
                     <label class="form-label">应用形态（多选）</label>
                     <div class="checkbox-group">
                         <label class="checkbox-option">
@@ -781,10 +785,11 @@ function showAddClientModal() {
                 showToast('请选择至少一种应用形态', 'error');
                 return;
             }
+            const appName = (document.getElementById('template-app-name').value || '').trim();
             confirmBtn.disabled = true;
             confirmBtn.textContent = '创建中...';
             try {
-                await activeClientAPI.createFromTemplate(appTypes);
+                await activeClientAPI.createFromTemplate(appTypes, appName);
                 closeModal();
                 showToast('应用创建成功', 'success');
                 loadClients();

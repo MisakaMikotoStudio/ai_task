@@ -151,7 +151,8 @@ def create_from_template_api():
 
     Request Body:
         {
-            "app_types": ["web"]  # 应用形态列表，必填，目前仅支持 "web"
+            "app_types": ["web"],  # 应用形态列表，必填，目前仅支持 "web"
+            "name": "我的应用"     # 应用名称，可选，留空则自动生成
         }
 
     Response:
@@ -169,11 +170,13 @@ def create_from_template_api():
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
     app_types = data.get('app_types', [])
+    app_name = data.get('name', '').strip() if data.get('name') else ''
 
     try:
         client_id = create_client_from_template(
             user_id=request.user_info.user_id,
             app_types=app_types,
+            app_name=app_name,
         )
         response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
         if not response_data:
