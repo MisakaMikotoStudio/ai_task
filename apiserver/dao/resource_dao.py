@@ -19,6 +19,7 @@ def create_resource(
     source: str,
     envs: List[str],
     extra: Optional[Dict[str, Any]] = None,
+    name: str = '',
 ) -> Resource:
     """
     创建资源
@@ -28,12 +29,14 @@ def create_resource(
         source: 资源来源（如 aliyun）
         envs: 可用环境列表（如 ["test", "prod"]）
         extra: 补充详细信息
+        name: 资源名称
 
     Returns:
         新创建的 Resource 对象
     """
     with get_db_session() as session:
         resource = Resource(
+            name=name,
             type=type,
             source=source,
             envs=envs,
@@ -83,6 +86,7 @@ def update_resource(
     source: Optional[str] = None,
     envs: Optional[List[str]] = None,
     extra: Optional[Dict[str, Any]] = None,
+    name: Optional[str] = None,
 ) -> Optional[Resource]:
     """
     更新资源信息
@@ -93,6 +97,7 @@ def update_resource(
         source: 资源来源
         envs: 可用环境列表
         extra: 补充详细信息
+        name: 资源名称
 
     Returns:
         更新后的 Resource 对象，不存在则返回 None
@@ -103,6 +108,8 @@ def update_resource(
         ).first()
         if not resource:
             return None
+        if name is not None:
+            resource.name = name
         if type is not None:
             resource.type = type
         if source is not None:
@@ -193,3 +200,44 @@ def get_online_resources_by_type_source(
         if env:
             resources = [r for r in resources if env in (r.envs or [])]
         return resources
+
+
+def check_resource_name_exists(
+    name: str,
+    exclude_id: Optional[int] = None,
+) -> bool:
+    """
+    检查资源名称是否已被占用（仅在上架中的资源中检查）
+
+    Args:
+        name: 资源名称
+        exclude_id: 排除的资源 ID（编辑时排除自身）
+
+    Returns:
+        是否已存在
+    """
+    with get_db_session() as session:
+        query = session.query(Resource).filter(
+            Resource.name == name,
+            Resource.deleted_at.is_(None),
+        )
+        if exclude_id is not None:
+            query = query.filter(Resource.id != exclude_id)
+        return query.first() is not None
+
+
+def get_online_resource_by_name(name: str) -> Optional[Resource]:
+    """
+    根据名称获取上架中的资源
+
+    Args:
+        name: 资源名称
+
+    Returns:
+        Resource 对象或 None
+    """
+    with get_db_session() as session:
+        return session.query(Resource).filter(
+            Resource.name == name,
+            Resource.deleted_at.is_(None),
+        ).first()

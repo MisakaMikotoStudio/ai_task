@@ -4366,6 +4366,16 @@ function initResources() {
         });
         toggleSecretBtn.dataset.bound = 'true';
     }
+    const toggleLoginPwdBtn = document.getElementById('toggle-login-password');
+    if (toggleLoginPwdBtn && toggleLoginPwdBtn.dataset.bound !== 'true') {
+        toggleLoginPwdBtn.addEventListener('click', () => {
+            const input = document.getElementById('resource-extra-login-password');
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            toggleLoginPwdBtn.textContent = isPassword ? '🙈' : '👁️';
+        });
+        toggleLoginPwdBtn.dataset.bound = 'true';
+    }
 }
 
 function toggleResourceExtraFields() {
@@ -4373,6 +4383,7 @@ function toggleResourceExtraFields() {
     const source = document.getElementById('resource-source').value;
     const mysqlFields = document.getElementById('resource-extra-fields');
     const githubFields = document.getElementById('resource-extra-github-fields');
+    const cloudServerFields = document.getElementById('resource-extra-cloud-server-fields');
     const sourceSelect = document.getElementById('resource-source');
 
     // 根据资源类型动态过滤来源选项
@@ -4383,6 +4394,8 @@ function toggleResourceExtraFields() {
             opt.style.display = opt.value === 'aliyun' ? '' : 'none';
         } else if (type === 'code_repo') {
             opt.style.display = opt.value === 'github' ? '' : 'none';
+        } else if (type === 'cloud_server') {
+            opt.style.display = opt.value === 'self_managed' ? '' : 'none';
         } else {
             opt.style.display = '';
         }
@@ -4390,6 +4403,7 @@ function toggleResourceExtraFields() {
 
     mysqlFields.style.display = (type === 'mysql' && source === 'aliyun') ? '' : 'none';
     githubFields.style.display = (type === 'code_repo' && source === 'github') ? '' : 'none';
+    cloudServerFields.style.display = (type === 'cloud_server' && source === 'self_managed') ? '' : 'none';
 }
 
 function showResourceModal(item) {
@@ -4403,10 +4417,15 @@ function showResourceModal(item) {
     const toggleBtn = document.getElementById('toggle-ak-secret');
     if (toggleBtn) toggleBtn.textContent = '👁️';
     document.getElementById('resource-extra-github-fields').style.display = 'none';
+    document.getElementById('resource-extra-cloud-server-fields').style.display = 'none';
+    document.getElementById('resource-extra-login-password').type = 'password';
+    const toggleLoginBtn = document.getElementById('toggle-login-password');
+    if (toggleLoginBtn) toggleLoginBtn.textContent = '👁️';
 
     if (item) {
         currentEditResourceId = item.id;
         title.textContent = '编辑资源';
+        document.getElementById('resource-name').value = item.name || '';
         document.getElementById('resource-type').value = item.type || '';
         document.getElementById('resource-source').value = item.source || '';
         // 设置环境复选框
@@ -4423,6 +4442,9 @@ function showResourceModal(item) {
         document.getElementById('resource-extra-organization').value = extra.organization || '';
         document.getElementById('resource-extra-app-id').value = extra.app_id || '';
         document.getElementById('resource-extra-private-key').value = extra.private_key || '';
+        document.getElementById('resource-extra-login-user').value = extra.login_user || '';
+        document.getElementById('resource-extra-login-password').value = extra.login_password || '';
+        document.getElementById('resource-extra-server-ip').value = extra.server_ip || '';
         toggleResourceExtraFields();
     } else {
         currentEditResourceId = null;
@@ -4443,9 +4465,14 @@ async function handleResourceFormSubmit(e) {
     saveBtn.textContent = '保存中…';
 
     try {
+        const name = document.getElementById('resource-name').value.trim();
         const type = document.getElementById('resource-type').value;
         const source = document.getElementById('resource-source').value;
 
+        if (!name) {
+            alert('请填写资源名称');
+            return;
+        }
         if (!type || !source) {
             alert('请选择资源类型和来源');
             return;
@@ -4495,9 +4522,29 @@ async function handleResourceFormSubmit(e) {
                 alert('请填写 GitHub App Private Key（PEM 格式，非 Client Secret）');
                 return;
             }
+        } else if (type === 'cloud_server' && source === 'self_managed') {
+            const loginUser = document.getElementById('resource-extra-login-user').value.trim();
+            const loginPassword = document.getElementById('resource-extra-login-password').value.trim();
+            const serverIp = document.getElementById('resource-extra-server-ip').value.trim();
+            if (!loginUser) {
+                alert('请填写登录账号');
+                return;
+            }
+            if (!serverIp) {
+                alert('请填写服务器IP');
+                return;
+            }
+            extra.login_user = loginUser;
+            extra.server_ip = serverIp;
+            if (loginPassword) {
+                extra.login_password = loginPassword;
+            } else if (!currentEditResourceId) {
+                alert('请填写登录密码');
+                return;
+            }
         }
 
-        const payload = { type, source, envs, extra };
+        const payload = { name, type, source, envs, extra };
 
         let res;
         if (currentEditResourceId) {
@@ -4507,6 +4554,9 @@ async function handleResourceFormSubmit(e) {
             }
             if (type === 'code_repo' && source === 'github' && !extra.private_key) {
                 delete payload.extra.private_key;
+            }
+            if (type === 'cloud_server' && source === 'self_managed' && !extra.login_password) {
+                delete payload.extra.login_password;
             }
             res = await adminResourceAPI.update(currentEditResourceId, payload);
         } else {
@@ -4549,6 +4599,7 @@ async function loadAdminResources() {
                 <thead>
                     <tr>
                         <th>ID</th>
+                        <th>名称</th>
                         <th>类型</th>
                         <th>来源</th>
                         <th>可用环境</th>
@@ -4594,8 +4645,8 @@ async function loadAdminResources() {
 }
 
 function renderResourceRow(resource) {
-    const typeLabels = { mysql: 'MySQL', code_repo: '代码仓库' };
-    const sourceLabels = { aliyun: '阿里云', github: 'GitHub' };
+    const typeLabels = { mysql: 'MySQL', code_repo: '代码仓库', cloud_server: '云服务器' };
+    const sourceLabels = { aliyun: '阿里云', github: 'GitHub', self_managed: '自管理' };
     const envLabels = { test: '测试', prod: '生产' };
 
     const envsHtml = (resource.envs || []).map(e =>
@@ -4603,9 +4654,14 @@ function renderResourceRow(resource) {
     ).join(' ');
 
     const extra = resource.extra || {};
-    const instanceUrl = resource.type === 'code_repo'
-        ? (extra.organization || '-')
-        : (extra.url || '-');
+    let instanceInfo = '-';
+    if (resource.type === 'code_repo') {
+        instanceInfo = extra.organization || '-';
+    } else if (resource.type === 'cloud_server') {
+        instanceInfo = extra.server_ip || '-';
+    } else {
+        instanceInfo = extra.url || '-';
+    }
 
     const statusClass = resource.is_online ? 'resource-status-online' : 'resource-status-offline';
     const statusText = resource.is_online ? '上架' : '下架';
@@ -4614,6 +4670,7 @@ function renderResourceRow(resource) {
 
     const itemData = JSON.stringify({
         id: resource.id,
+        name: resource.name,
         type: resource.type,
         source: resource.source,
         envs: resource.envs,
@@ -4626,10 +4683,11 @@ function renderResourceRow(resource) {
 
     return `<tr>
         <td>${resource.id}</td>
+        <td class="resource-url-cell" title="${escapeHTML(resource.name || '')}">${escapeHTML(resource.name || '-')}</td>
         <td>${typeLabels[resource.type] || resource.type}</td>
         <td>${sourceLabels[resource.source] || resource.source}</td>
         <td>${envsHtml}</td>
-        <td class="resource-url-cell" title="${escapeHTML(instanceUrl)}">${escapeHTML(instanceUrl)}</td>
+        <td class="resource-url-cell" title="${escapeHTML(instanceInfo)}">${escapeHTML(instanceInfo)}</td>
         <td><span class="resource-status-badge ${statusClass}">${statusText}</span></td>
         <td>${createdAt}</td>
         <td class="perm-actions-cell">

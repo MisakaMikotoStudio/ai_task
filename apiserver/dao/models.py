@@ -743,8 +743,9 @@ class Resource(Base):
     __tablename__ = 'ai_task_resources'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    type = Column(String(32), nullable=False, comment='资源类型：mysql')
-    source = Column(String(32), nullable=False, comment='资源来源：aliyun')
+    name = Column(String(64), nullable=False, server_default='', comment='资源名称，唯一标识')
+    type = Column(String(32), nullable=False, comment='资源类型：mysql/code_repo/cloud_server')
+    source = Column(String(32), nullable=False, comment='资源来源：aliyun/github/self_managed')
     envs = Column(JSON, nullable=False, comment='可用环境列表，如 ["test","prod"]')
     extra = Column(JSON, nullable=True, comment='补充详细信息（不同 type+source 对应不同字段）')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
@@ -754,12 +755,14 @@ class Resource(Base):
     # 类型常量
     TYPE_MYSQL = 'mysql'
     TYPE_CODE_REPO = 'code_repo'
-    VALID_TYPES = [TYPE_MYSQL, TYPE_CODE_REPO]
+    TYPE_CLOUD_SERVER = 'cloud_server'
+    VALID_TYPES = [TYPE_MYSQL, TYPE_CODE_REPO, TYPE_CLOUD_SERVER]
 
     # 来源常量
     SOURCE_ALIYUN = 'aliyun'
     SOURCE_GITHUB = 'github'
-    VALID_SOURCES = [SOURCE_ALIYUN, SOURCE_GITHUB]
+    SOURCE_SELF_MANAGED = 'self_managed'
+    VALID_SOURCES = [SOURCE_ALIYUN, SOURCE_GITHUB, SOURCE_SELF_MANAGED]
 
     # 环境常量
     VALID_ENVS = ['test', 'prod']
@@ -771,6 +774,7 @@ class Resource(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'name': self.name or '',
             'type': self.type,
             'source': self.source,
             'envs': self.envs or [],
@@ -784,7 +788,7 @@ class Resource(Base):
         """返回 extra 时隐藏敏感字段（AccessKey Secret、private_key 等）"""
         raw = self.extra or {}
         safe = dict(raw)
-        for key in ('access_key_secret', 'private_key'):
+        for key in ('access_key_secret', 'private_key', 'login_password'):
             if key in safe:
                 val = safe[key]
                 if val and len(val) > 6:
