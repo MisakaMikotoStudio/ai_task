@@ -1073,7 +1073,7 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
     """
     import random
     from dao.resource_dao import get_online_resources_by_type_source
-    from service.github_service import (
+    from service.git_service import (
         GitHubServiceError, build_repo_url,
     )
 
@@ -1161,7 +1161,7 @@ def _ensure_and_bind_repo(
         template_repo: 模板仓库名称（为空则创建空仓库）
     """
     from dao.client_dao import get_repo_by_url, add_client_repo, update_client_repo_after_creation
-    from service.github_service import GitHubServiceError, setup_repo_for_user, build_repo_url
+    from service.git_service import GitHubServiceError, setup_repo_for_user, build_repo_url
 
     repo_url = build_repo_url(organization=organization, repo_name=repo_name)
     repo_type_label = "文档仓库" if is_docs_repo else "代码仓库"

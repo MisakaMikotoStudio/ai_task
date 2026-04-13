@@ -872,6 +872,122 @@ def create_github_pr_if_not_exists(
 
 
 # ──────────────────────────────────────────────────────
+#  通用 git 命令封装（供 worker 等模块复用）
+# ──────────────────────────────────────────────────────
+
+def run_git_command_or_raise(
+    args: list,
+    cwd: str,
+    timeout: int = 60,
+    trace_id: Optional[str] = None,
+) -> str:
+    """
+    执行 git 命令，成功返回 stdout，失败抛出 Exception。
+
+    与 _run_git_command 的区别：本函数面向调用方不需要 GitResult 的场景，
+    直接返回字符串或抛异常，简化调用代码。
+
+    Args:
+        args: git 子命令参数列表（不含 'git' 前缀）
+        cwd: 工作目录
+        timeout: 超时秒数
+        trace_id: 追踪 ID
+
+    Returns:
+        命令标准输出（已 strip）
+
+    Raises:
+        Exception: 命令执行失败
+    """
+    result = _run_git_command(
+        cmd=['git'] + args,
+        cwd=cwd,
+        timeout=timeout,
+        trace_id=trace_id,
+    )
+    if not result.success:
+        raise Exception(f"[{cwd}] git {' '.join(args)} 失败: {result.message}")
+    return result.message
+
+
+def check_repo_accessible(
+    auth_url: str,
+    timeout: int = 30,
+    trace_id: Optional[str] = None,
+) -> GitResult:
+    """
+    检查 Git 仓库是否可访问（通过 git ls-remote --exit-code）。
+
+    Args:
+        auth_url: 带认证信息的仓库 URL
+        timeout: 超时秒数
+        trace_id: 追踪 ID
+
+    Returns:
+        GitResult，success=True 表示可访问
+    """
+    return _run_git_command(
+        cmd=['git', 'ls-remote', '--exit-code', auth_url],
+        timeout=timeout,
+        trace_id=trace_id,
+    )
+
+
+def find_git_repos_in_dir(parent_dir: str) -> list:
+    """
+    查找指定目录下一层子目录中的所有 git 仓库路径。
+
+    Args:
+        parent_dir: 父目录
+
+    Returns:
+        git 仓库路径列表
+    """
+    repo_dirs = []
+    if not os.path.isdir(parent_dir):
+        return repo_dirs
+    for name in os.listdir(parent_dir):
+        repo_dir = os.path.join(parent_dir, name)
+        if not os.path.isdir(repo_dir):
+            continue
+        if os.path.isdir(os.path.join(repo_dir, ".git")):
+            repo_dirs.append(repo_dir)
+    return repo_dirs
+
+
+def commit_and_push_all_repos(
+    work_dir: str,
+    commit_message: str = "default-commit-msg",
+    trace_id: Optional[str] = None,
+) -> None:
+    """
+    遍历工作目录下所有 git 仓库，自动提交未暂存修改并推送。
+
+    Args:
+        work_dir: 包含多个 git 仓库的工作目录
+        commit_message: 提交信息
+        trace_id: 追踪 ID
+    """
+    repo_dirs = find_git_repos_in_dir(parent_dir=work_dir)
+    if not repo_dirs:
+        logger.warning(f"[trace_id={trace_id}] 工作目录下未发现 git 仓库: {work_dir}")
+        return
+
+    for repo_dir in repo_dirs:
+        status = run_git_command_or_raise(
+            args=["status", "--porcelain"],
+            cwd=repo_dir,
+            trace_id=trace_id,
+        )
+        if status:
+            logger.info(f"[trace_id={trace_id}] 检测到未提交修改，自动提交: {repo_dir}")
+            run_git_command_or_raise(args=["add", "-A"], cwd=repo_dir, trace_id=trace_id)
+            run_git_command_or_raise(args=["commit", "-m", commit_message], cwd=repo_dir, trace_id=trace_id)
+        logger.info(f"[trace_id={trace_id}] 自动执行 git push: {repo_dir}")
+        run_git_command_or_raise(args=["push"], cwd=repo_dir, trace_id=trace_id)
+
+
+# ──────────────────────────────────────────────────────
 #  使用示例
 # ──────────────────────────────────────────────────────
 

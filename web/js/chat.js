@@ -73,17 +73,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// ===== Helpers =====
-function formatTime(dateStr) {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-        return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    }
-    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' +
-        d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-}
+// ===== Helpers（共享函数来自 chat-helpers.js）=====
+function formatTime(dateStr) { return chatFormatTime(dateStr); }
 
 // ===== Standalone info =====
 async function loadStandaloneInfo() {
@@ -412,47 +403,16 @@ function renderFeed() {
     marked.use({ renderer, breaks: true, gfm: true });
 })();
 
-function renderOutput(output) {
-    if (!output) return '';
-    if (typeof marked !== 'undefined') {
-        try { return marked.parse(output); } catch (_) {}
-    }
-    return `<p>${escapeHtml(output).replace(/\n/g, '<br>')}</p>`;
-}
-
-function getOutputCacheKey(msg) {
-    // 用 updated_at + output 长度做区分，避免相同内容在轮询渲染时重复 marked.parse
-    const updated = msg.updated_at || msg.created_at || '';
-    const outputLen = msg.output ? String(msg.output).length : 0;
-    return `${msg.id}|${msg.status}|${updated}|${outputLen}`;
-}
-
-function renderOutputCached(msg) {
-    if (!msg || !msg.output) return '';
-    const key = getOutputCacheKey(msg);
-    const cached = outputHtmlCache.get(key);
-    if (cached) return cached;
-
-    const html = renderOutput(msg.output);
-    outputHtmlCache.set(key, html);
-
-    // 防止缓存无限增长
-    if (outputHtmlCache.size > 1000) outputHtmlCache.clear();
-    return html;
-}
+function renderOutput(output) { return chatRenderOutput(output); }
+function getOutputCacheKey(msg) { return chatGetOutputCacheKey(msg); }
+function renderOutputCached(msg) { return chatRenderOutputCached(msg, outputHtmlCache); }
 
 function scrollToBottom() {
     const feed = document.getElementById('chat-feed');
     setTimeout(() => { feed.scrollTop = feed.scrollHeight; }, 50);
 }
 
-function parseMsgExtra(extra) {
-    if (!extra) return {};
-    if (typeof extra === 'string') {
-        try { return JSON.parse(extra); } catch { return {}; }
-    }
-    return extra;
-}
+function parseMsgExtra(extra) { return chatParseMsgExtra(extra); }
 
 function showMergeRequestModal(storeKey) {
     const body = document.getElementById('merge-request-body');
@@ -555,13 +515,7 @@ function updateComposerState() {
 }
 
 // ===== Polling =====
-function getMessagesFingerprint(list) {
-    // 用 id/status/更新时间做轻量指纹，避免 JSON.stringify 带来的大开销
-    return (list || []).map(m => {
-        const updated = m.updated_at || m.created_at || '';
-        return `${m.id}:${m.status}:${updated}`;
-    }).join('|');
-}
+function getMessagesFingerprint(list) { return chatGetMessagesFingerprint(list); }
 
 function startPolling() {
     if (pollTimer) return;
@@ -736,81 +690,28 @@ function renderPendingImages(target) {
     const isWelcome = (target === 'welcome');
     const list = isWelcome ? welcomePendingImages : pendingImages;
     const containerId = isWelcome ? 'welcome-pending-images' : 'pending-images';
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    if (list.length === 0) {
-        container.innerHTML = '';
-        container.style.display = 'none';
-        return;
-    }
-
-    container.style.display = 'flex';
-    container.innerHTML = list.map((img, i) => `
-        <div class="pending-image-item">
-            <span class="pending-image-name" title="${escapeHtml(img.filename)}">
-                📎 ${escapeHtml(img.filename)}
-            </span>
-            <button class="pending-image-remove" onclick="removePendingImage(${i}, '${target}')" title="移除">×</button>
-        </div>
-    `).join('');
+    chatRenderPendingImages(list, containerId, 'removePendingImage', target);
 }
 
 function collectAndClearImages(target) {
     const isWelcome = (target === 'welcome');
     const list = isWelcome ? welcomePendingImages : pendingImages;
-    const images = list.slice();
-    list.length = 0;
-    renderPendingImages(target);
-    return images;
+    const containerId = isWelcome ? 'welcome-pending-images' : 'pending-images';
+    return chatCollectAndClearImages(list, containerId, 'removePendingImage', target);
 }
 
 // ===== Message image display helpers =====
 
 function renderMsgImages(images) {
-    if (!images || !Array.isArray(images) || images.length === 0) return '';
-    const items = images.map(img => {
-        const ossPath = escapeHtml(img.oss_path || '');
-        const filename = escapeHtml(img.filename || 'image');
-        return `<span class="msg-image-link" onclick="viewChatImage('${ossPath}', '${filename}')" title="点击查看">📎 ${filename}</span>`;
-    }).join('');
-    return `<div class="msg-image-list">${items}</div>`;
+    return chatRenderMsgImages(images, 'viewChatImage');
 }
 
 function viewChatImage(ossPath, filename) {
-    const modal = document.getElementById('image-preview-modal');
-    const img = document.getElementById('image-preview-img');
-    const title = document.getElementById('image-preview-title');
-
-    title.textContent = filename;
-    img.src = '';
-    img.alt = filename;
-
-    // 通过预签名 URL 直接从 COS 下载，不经过 apiserver 代理
-    chatAPI.getPresignedImageUrl(ossPath)
-    .then(res => {
-        if (res.code !== 200 || !res.data || !res.data.url) {
-            throw new Error(res.message || '获取预签名 URL 失败');
-        }
-        img.src = res.data.url;
-    })
-    .catch(e => {
-        img.alt = '图片加载失败';
-        showToast('图片加载失败: ' + e.message, 'error');
-    });
-
-    modal.classList.add('show');
+    chatViewImage(ossPath, filename, 'image-preview-modal', 'image-preview-img', 'image-preview-title');
 }
 
 function closeImagePreviewModal() {
-    const modal = document.getElementById('image-preview-modal');
-    const img = document.getElementById('image-preview-img');
-    modal.classList.remove('show');
-    // 释放 blob URL
-    if (img.src && img.src.startsWith('blob:')) {
-        URL.revokeObjectURL(img.src);
-    }
-    img.src = '';
+    chatCloseImagePreview('image-preview-modal', 'image-preview-img');
 }
 
 // ===== Terminate =====

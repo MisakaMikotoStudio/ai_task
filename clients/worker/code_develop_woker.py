@@ -8,7 +8,6 @@ import logging
 import os
 import traceback
 import threading
-import subprocess
 from typing import Optional, List
 from utils import git_utils
 import shutil
@@ -713,51 +712,12 @@ class CodeDevelopWorker(BaseWorker):
     def _get_chat_branch_name(self, git_repo: GitRepoConfig) -> str:
         return self._get_task_branch_name(git_repo) + "_" + str(self.task['chat_id'])
 
-    def _iter_git_repos_in_work_dir(self) -> List[str]:
-        """遍历当前工作目录下一层子目录中的 git 仓库路径。"""
-        repo_dirs: List[str] = []
-        if not os.path.isdir(self.work_dir):
-            return repo_dirs
-        for name in os.listdir(self.work_dir):
-            repo_dir = os.path.join(self.work_dir, name)
-            if not os.path.isdir(repo_dir):
-                continue
-            if os.path.isdir(os.path.join(repo_dir, ".git")):
-                repo_dirs.append(repo_dir)
-        return repo_dirs
-
-    def _run_git_cmd(self, repo_dir: str, args: List[str]) -> str:
-        """在指定仓库执行 git 命令。"""
-        cmd = ["git"] + args
-        result = subprocess.run(
-            cmd,
-            cwd=repo_dir,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-            timeout=60,
-        )
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            stdout = (result.stdout or "").strip()
-            detail = stderr or stdout or "unknown error"
-            raise Exception(f"[{repo_dir}] {' '.join(cmd)} 失败: {detail}")
-        return (result.stdout or "").strip()
-
     def _commit_and_push_all_git_repos(self):
         """兜底处理：遍历工作目录下所有 git 仓库，自动提交并推送。"""
-        repo_dirs = self._iter_git_repos_in_work_dir()
-        if not repo_dirs:
-            logger.warning(f"[{self.trace_id}] 工作目录下未发现 git 仓库: {self.work_dir}")
-            return
-
-        for repo_dir in repo_dirs:
-            status = self._run_git_cmd(repo_dir, ["status", "--porcelain"])
-            if status:
-                logger.info(f"[{self.trace_id}] 检测到未提交修改，自动提交: {repo_dir}")
-                self._run_git_cmd(repo_dir, ["add", "-A"])
-                self._run_git_cmd(repo_dir, ["commit", "-m", "default-commit-msg"])
-            logger.info(f"[{self.trace_id}] 自动执行 git push: {repo_dir}")
-            self._run_git_cmd(repo_dir, ["push"])
+        from utils.git_utils import commit_and_push_all_repos
+        commit_and_push_all_repos(
+            work_dir=self.work_dir,
+            commit_message="default-commit-msg",
+            trace_id=self.trace_id,
+        )
 
