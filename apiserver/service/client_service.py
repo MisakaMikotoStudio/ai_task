@@ -863,12 +863,12 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
 VALID_APP_TYPES = ['web']
 
 
-def create_client_from_template(user_id: int, app_types: list) -> int:
+def create_client_from_template(user_id: int, app_types: list, app_name: str = '') -> int:
     """
     从模板生成默认应用：创建 Client，创建默认仓库（文档 + 代码），然后在 test/prod 环境下各创建一个默认数据库。
 
     流程：
-    1. 生成不重复的应用名称
+    1. 使用用户指定的名称或自动生成不重复的应用名称
     2. 创建 Client 记录
     3. 创建默认仓库：
        a. 随机选择一个 code_repo 类型的资源
@@ -885,6 +885,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
     Args:
         user_id: 用户 ID
         app_types: 应用形态列表，如 ["web"]
+        app_name: 用户指定的应用名称，为空则自动生成
 
     Returns:
         新创建的客户端 ID
@@ -905,17 +906,22 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
         if at not in VALID_APP_TYPES:
             raise ClientSaveError(f'不支持的应用形态：{at}')
 
-    # 生成不重复的应用名称
+    # 确定应用名称：优先使用用户指定名称，否则自动生成
     timestamp = int(time.time())
-    base_name = f"默认应用_{timestamp}"
-    client_name = base_name[:16]
-    retries = 0
-    while check_client_name_exists(user_id, client_name):
-        retries += 1
-        if retries > 5:
-            raise ClientSaveError('应用名称生成失败，请稍后重试')
-        suffix = f"_{retries}"
-        client_name = base_name[:16 - len(suffix)] + suffix
+    if app_name:
+        client_name = app_name[:16]
+        if check_client_name_exists(user_id, client_name):
+            raise ClientSaveError(f'应用名称 "{client_name}" 已存在，请更换名称')
+    else:
+        base_name = f"默认应用_{timestamp}"
+        client_name = base_name[:16]
+        retries = 0
+        while check_client_name_exists(user_id, client_name):
+            retries += 1
+            if retries > 5:
+                raise ClientSaveError('应用名称生成失败，请稍后重试')
+            suffix = f"_{retries}"
+            client_name = base_name[:16 - len(suffix)] + suffix
 
     # 创建 Client
     client_id = create_client(

@@ -165,10 +165,14 @@ const clientAPI = {
     },
 
     // 从模板生成默认应用
-    async createFromTemplate(appTypes) {
+    async createFromTemplate(appTypes, appName) {
+        const payload = { app_types: appTypes };
+        if (appName) {
+            payload.name = appName;
+        }
         return request('/client/create-from-template', {
             method: 'POST',
-            body: JSON.stringify({ app_types: appTypes })
+            body: JSON.stringify(payload)
         });
     }
 };
@@ -268,10 +272,14 @@ const adminClientAPI = {
     },
 
     // 从模板生成默认应用
-    async createFromTemplate(appTypes) {
+    async createFromTemplate(appTypes, appName) {
+        const payload = { app_types: appTypes };
+        if (appName) {
+            payload.name = appName;
+        }
         return request('/client/create-from-template', {
             method: 'POST',
-            body: JSON.stringify({ app_types: appTypes })
+            body: JSON.stringify(payload)
         });
     }
 };
