@@ -20,7 +20,7 @@ async function initAPIConfig() {
                     const pathPart = path_prefix || '/api';
                     API_BASE = hostPart + pathPart;
                 }
-                console.log('API Server configured:', API_BASE);
+                // API_BASE configured from server_config.js
             }
         }
     } catch (error) {
@@ -264,14 +264,14 @@ const adminClientAPI = {
         });
     },
 
-    // 生成默认数据库
+    // 生成默认数据库（复用 /client 路由，管理员通过 token 鉴权）
     async generateDefaultDatabase() {
         return request('/client/generate-default-database', {
             method: 'POST'
         });
     },
 
-    // 从模板生成默认应用
+    // 从模板生成默认应用（复用 /client 路由，管理员通过 token 鉴权）
     async createFromTemplate(appTypes, appName) {
         const payload = { app_types: appTypes };
         if (appName) {

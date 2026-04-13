@@ -50,19 +50,39 @@ def _is_skip_subscribe_endpoint() -> bool:
     return bool(view_func and getattr(view_func, '_skip_subscribe', False))
 
 
+_SENSITIVE_LOG_KEYS = frozenset({
+    'password', 'token', 'secret', 'private_key', 'app_private_key',
+    'alipay_public_key', 'app_encrypt_key', 'access_key_secret',
+    'secret_key', 'secret_id', 'admin_password', 'app_password',
+})
+
+
+def _redact_sensitive(obj):
+    """递归脱敏字典/列表中的敏感字段值。"""
+    if isinstance(obj, dict):
+        return {
+            k: ('***' if k in _SENSITIVE_LOG_KEYS else _redact_sensitive(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_redact_sensitive(item) for item in obj]
+    return obj
+
+
 def _request_body_for_log():
-    """提取用于日志的请求体/参数摘要（不记录文件内容）。"""
+    """提取用于日志的请求体/参数摘要（不记录文件内容，自动脱敏敏感字段）。"""
     if request.method in ('GET', 'HEAD', 'OPTIONS', 'TRACE'):
         args = dict(request.args)
-        return args if args else None
+        return _redact_sensitive(args) if args else None
     ct = (request.content_type or '') or ''
     if 'multipart/form-data' in ct:
         fields = request.form.to_dict()
-        return {'_multipart': True, 'fields': fields} if fields else {'_multipart': True}
+        return _redact_sensitive({'_multipart': True, 'fields': fields}) if fields else {'_multipart': True}
     if request.is_json:
-        return request.get_json(silent=True)
+        body = request.get_json(silent=True)
+        return _redact_sensitive(body) if body else None
     if request.form:
-        return request.form.to_dict()
+        return _redact_sensitive(request.form.to_dict())
     raw = request.get_data(cache=True)
     if not raw:
         return None
@@ -73,7 +93,7 @@ def _request_body_for_log():
     if len(text) > 4096:
         return text[:4096] + '...(truncated)'
     try:
-        return json.loads(text)
+        return _redact_sensitive(json.loads(text))
     except Exception:
         return text
 
@@ -184,7 +204,7 @@ def _do_auth_check():
         user_id = user_session.user_id
         user_info = user_dao.get_user_by_id(user_id)
         if not user_info:
-            logger.error(f"无效的Token: {token}", extra={'trace_id': trace_id})
+            logger.error("无效的Token: %s***", token[:8] if token else '', extra={'trace_id': trace_id})
             return jsonify({"code": 401, "message": "无效的认证信息"}), 401
     except Exception as e:
         logger.error(f"Token验证异常: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)

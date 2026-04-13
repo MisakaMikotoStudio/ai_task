@@ -21,7 +21,6 @@ from dao.client_dao import (
     get_client_env_vars,
     update_client_repo_token,
 )
-from flask import current_app
 from service.client_service import (
     AVAILABLE_AGENTS,
     get_client_detail,
@@ -90,11 +89,14 @@ def create_client_api():
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    client_id = save_client(
-        user_id=request.user_info.user_id,
-        data=data,
-        client_id=None,
-    )
+    try:
+        client_id = save_client(
+            user_id=request.user_info.user_id,
+            data=data,
+            client_id=None,
+        )
+    except ClientSaveError as e:
+        return jsonify({'code': 400, 'message': str(e)}), 400
     response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
@@ -299,7 +301,10 @@ def update_client_api(client_id):
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    save_client(user_id=request.user_info.user_id, data=data, client_id=client_id)
+    try:
+        save_client(user_id=request.user_info.user_id, data=data, client_id=client_id)
+    except ClientSaveError as e:
+        return jsonify({'code': 400, 'message': str(e)}), 400
     response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
@@ -332,7 +337,7 @@ def delete_client_api(client_id):
             {"code": 401, "message": "缺少认证token"}
     """
     if not delete_client(client_id, request.user_info.user_id):
-        return jsonify({'code': 404, 'message': '客户端不存在'}), 400
+        return jsonify({'code': 404, 'message': '客户端不存在'}), 404
     
     return jsonify({'code': 200, 'message': '客户端删除成功'})
 
