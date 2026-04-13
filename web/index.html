@@ -1828,11 +1828,16 @@
                             </div>
                             <form id="resource-form" class="commerce-form">
                                 <div class="commerce-form-group">
+                                    <label class="commerce-label">资源名称 <span class="required">*</span></label>
+                                    <input type="text" id="resource-name" class="commerce-input" placeholder="唯一标识，如 prod-server-1" maxlength="64" required>
+                                </div>
+                                <div class="commerce-form-group">
                                     <label class="commerce-label">资源类型 <span class="required">*</span></label>
                                     <select id="resource-type" class="commerce-input" required>
                                         <option value="">请选择</option>
                                         <option value="mysql">MySQL</option>
                                         <option value="code_repo">代码仓库</option>
+                                        <option value="cloud_server">云服务器</option>
                                     </select>
                                 </div>
                                 <div class="commerce-form-group">
@@ -1841,6 +1846,7 @@
                                         <option value="">请选择</option>
                                         <option value="aliyun">阿里云</option>
                                         <option value="github">GitHub</option>
+                                        <option value="tencent_cloud">腾讯云</option>
                                     </select>
                                 </div>
                                 <div class="commerce-form-group">
@@ -1887,6 +1893,25 @@
                                     <div class="commerce-form-group">
                                         <label class="commerce-label">App Private Key (PEM) <span class="required">*</span></label>
                                         <textarea id="resource-extra-private-key" class="commerce-input" rows="4" placeholder="在 GitHub App Settings > Private keys 中生成，格式为 -----BEGIN RSA PRIVATE KEY-----（注意：不是 Client Secret）"></textarea>
+                                    </div>
+                                </div>
+                                <!-- 补充信息区域（云服务器 + 自管理），动态显示 -->
+                                <div id="resource-extra-cloud-server-fields" style="display:none;">
+                                    <div class="resource-extra-divider">补充信息</div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">登录账号 <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-login-user" class="commerce-input" placeholder="如 root">
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">登录密码 <span class="required">*</span></label>
+                                        <div class="resource-secret-wrap">
+                                            <input type="password" id="resource-extra-login-password" class="commerce-input" placeholder="SSH 登录密码">
+                                            <button type="button" class="resource-secret-toggle" id="toggle-login-password" title="显示/隐藏">&#128065;&#65039;</button>
+                                        </div>
+                                    </div>
+                                    <div class="commerce-form-group">
+                                        <label class="commerce-label">服务器IP <span class="required">*</span></label>
+                                        <input type="text" id="resource-extra-server-ip" class="commerce-input" placeholder="如 1.2.3.4">
                                     </div>
                                 </div>
                                 <div class="commerce-modal-footer">
