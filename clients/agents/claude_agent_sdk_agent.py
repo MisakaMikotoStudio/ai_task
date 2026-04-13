@@ -37,7 +37,7 @@ class ClaudeAgentSdkAgent(BaseAgent):
         trace_id: str,
         cwd: str,
         prompt: str,
-        timeout: Optional[int] = 1800,
+        timeout: Optional[int] = 36000,
         session_id: Optional[str] = None,
         popen_factory: Optional[Callable[..., Any]] = None,
         process_cleanup: Optional[Callable[[Any], None]] = None,

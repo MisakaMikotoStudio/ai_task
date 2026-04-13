@@ -126,7 +126,7 @@ class BaseWorker(threading.Thread):
         prompt: str,
         cwd: str,
         session_id: Optional[str] = None,
-        timeout: Optional[int] = 1800,
+        timeout: Optional[int] = 36000,
     ):
         """通过统一托管入口调用 agent，确保底层子进程可被 stop() 终止。"""
         if self.stop_requested:
