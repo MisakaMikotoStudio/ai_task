@@ -1029,7 +1029,7 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
     for env in VALID_ENVS:
         cloud_server_resources = get_online_resources_by_type_source(
             type='cloud_server',
-            source='self_managed',
+            source='tencent_cloud',
             env=env,
         )
         if not cloud_server_resources:

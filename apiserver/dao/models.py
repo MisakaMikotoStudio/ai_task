@@ -745,7 +745,7 @@ class Resource(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(64), nullable=False, server_default='', comment='资源名称，唯一标识')
     type = Column(String(32), nullable=False, comment='资源类型：mysql/code_repo/cloud_server')
-    source = Column(String(32), nullable=False, comment='资源来源：aliyun/github/self_managed')
+    source = Column(String(32), nullable=False, comment='资源来源：aliyun/github/tencent_cloud')
     envs = Column(JSON, nullable=False, comment='可用环境列表，如 ["test","prod"]')
     extra = Column(JSON, nullable=True, comment='补充详细信息（不同 type+source 对应不同字段）')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
@@ -761,8 +761,8 @@ class Resource(Base):
     # 来源常量
     SOURCE_ALIYUN = 'aliyun'
     SOURCE_GITHUB = 'github'
-    SOURCE_SELF_MANAGED = 'self_managed'
-    VALID_SOURCES = [SOURCE_ALIYUN, SOURCE_GITHUB, SOURCE_SELF_MANAGED]
+    SOURCE_TENCENT_CLOUD = 'tencent_cloud'
+    VALID_SOURCES = [SOURCE_ALIYUN, SOURCE_GITHUB, SOURCE_TENCENT_CLOUD]
 
     # 环境常量
     VALID_ENVS = ['test', 'prod']

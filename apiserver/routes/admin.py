@@ -864,7 +864,7 @@ def _validate_resource_extra(res_type: str, source: str, extra: dict) -> str:
             return 'GitHub App Private Key 不能为空'
         return None
 
-    if res_type == Resource.TYPE_CLOUD_SERVER and source == Resource.SOURCE_SELF_MANAGED:
+    if res_type == Resource.TYPE_CLOUD_SERVER and source == Resource.SOURCE_TENCENT_CLOUD:
         login_user = (extra.get('login_user') or '').strip()
         login_password = (extra.get('login_password') or '').strip()
         server_ip = (extra.get('server_ip') or '').strip()

@@ -4395,7 +4395,7 @@ function toggleResourceExtraFields() {
         } else if (type === 'code_repo') {
             opt.style.display = opt.value === 'github' ? '' : 'none';
         } else if (type === 'cloud_server') {
-            opt.style.display = opt.value === 'self_managed' ? '' : 'none';
+            opt.style.display = opt.value === 'tencent_cloud' ? '' : 'none';
         } else {
             opt.style.display = '';
         }
@@ -4403,7 +4403,7 @@ function toggleResourceExtraFields() {
 
     mysqlFields.style.display = (type === 'mysql' && source === 'aliyun') ? '' : 'none';
     githubFields.style.display = (type === 'code_repo' && source === 'github') ? '' : 'none';
-    cloudServerFields.style.display = (type === 'cloud_server' && source === 'self_managed') ? '' : 'none';
+    cloudServerFields.style.display = (type === 'cloud_server' && source === 'tencent_cloud') ? '' : 'none';
 }
 
 function showResourceModal(item) {
@@ -4522,7 +4522,7 @@ async function handleResourceFormSubmit(e) {
                 alert('请填写 GitHub App Private Key（PEM 格式，非 Client Secret）');
                 return;
             }
-        } else if (type === 'cloud_server' && source === 'self_managed') {
+        } else if (type === 'cloud_server' && source === 'tencent_cloud') {
             const loginUser = document.getElementById('resource-extra-login-user').value.trim();
             const loginPassword = document.getElementById('resource-extra-login-password').value.trim();
             const serverIp = document.getElementById('resource-extra-server-ip').value.trim();
@@ -4555,7 +4555,7 @@ async function handleResourceFormSubmit(e) {
             if (type === 'code_repo' && source === 'github' && !extra.private_key) {
                 delete payload.extra.private_key;
             }
-            if (type === 'cloud_server' && source === 'self_managed' && !extra.login_password) {
+            if (type === 'cloud_server' && source === 'tencent_cloud' && !extra.login_password) {
                 delete payload.extra.login_password;
             }
             res = await adminResourceAPI.update(currentEditResourceId, payload);
@@ -4646,7 +4646,7 @@ async function loadAdminResources() {
 
 function renderResourceRow(resource) {
     const typeLabels = { mysql: 'MySQL', code_repo: '代码仓库', cloud_server: '云服务器' };
-    const sourceLabels = { aliyun: '阿里云', github: 'GitHub', self_managed: '自管理' };
+    const sourceLabels = { aliyun: '阿里云', github: 'GitHub', tencent_cloud: '腾讯云' };
     const envLabels = { test: '测试', prod: '生产' };
 
     const envsHtml = (resource.envs || []).map(e =>
