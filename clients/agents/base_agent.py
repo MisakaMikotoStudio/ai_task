@@ -30,7 +30,7 @@ class BaseAgent(ABC):
         cwd: str,
         prompt: str, 
         session_id: Optional[str] = None,
-        timeout: Optional[int] = 1800,
+        timeout: Optional[int] = 36000,
         popen_factory: Optional[Callable[..., Any]] = None,
         process_cleanup: Optional[Callable[[Any], None]] = None,
         stop_event: Optional[Any] = None,
