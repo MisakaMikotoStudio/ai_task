@@ -386,7 +386,7 @@ def upload_chat_image_api():
     上传聊天图片到 OSS（私有读写）。
     登录 + 订阅校验由全局 auth_plugin 中间件统一处理。
     """
-    from service import oss_utils
+    from service import oss_service
 
     user = request.user_info
     config = current_app.config['APP_CONFIG']
@@ -409,7 +409,7 @@ def upload_chat_image_api():
         return jsonify({'code': 400, 'message': '图片大小不能超过 10MB'}), 400
 
     try:
-        result = oss_utils.upload_chat_image(
+        result = oss_service.upload_chat_image(
             config=config.oss,
             file_storage=file,
             user_id=user.user_id,
@@ -427,7 +427,7 @@ def get_chat_image_api():
     代理下载聊天图片（私有读写，前端无法直接访问 COS）。
     校验：登录 + 路径归属当前用户。
     """
-    from service import oss_utils
+    from service import oss_service
 
     user = request.user_info
     config = current_app.config['APP_CONFIG']
@@ -442,7 +442,7 @@ def get_chat_image_api():
         return jsonify({'code': 403, 'message': '无权访问该图片'}), 403
 
     try:
-        file_content, content_type = oss_utils.download_chat_image(
+        file_content, content_type = oss_service.download_chat_image(
             config=config.oss,
             oss_path=oss_path,
         )

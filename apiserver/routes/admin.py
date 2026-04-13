@@ -30,7 +30,7 @@ from dao.secret_dao import get_user_secrets, create_user_secret, delete_user_sec
 from dao.client_dao import get_clients_by_user, delete_client, check_client_name_exists
 from dao.heartbeat_dao import get_heartbeats_by_user
 
-from service import oss_utils, order_service
+from service import oss_service, order_service
 from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_client, ClientSaveError
 
 logger = logging.getLogger(__name__)
@@ -260,7 +260,7 @@ def upload_icon():
         return jsonify({'code': 400, 'message': '图片大小不能超过 10MB', 'data': None}), 400
 
     try:
-        url = oss_utils.upload_image(config=config.oss, file_storage=file)
+        url = oss_service.upload_image(config=config.oss, file_storage=file)
     except Exception as e:
         logger.exception("OSS 上传失败")
         return jsonify({'code': 500, 'message': f'上传失败: {e}', 'data': None}), 500
