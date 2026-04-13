@@ -391,9 +391,6 @@ def upload_chat_image_api():
     user = request.user_info
     config = current_app.config['APP_CONFIG']
 
-    if not config.oss.enabled:
-        return jsonify({'code': 500, 'message': 'OSS 服务未启用'}), 500
-
     file = request.files.get('file')
     if not file:
         return jsonify({'code': 400, 'message': '缺少 file 字段'}), 400
@@ -443,9 +440,6 @@ def get_chat_image_api():
     expected_prefix = f'chat/images/{user.user_id}/'
     if not oss_path.startswith(expected_prefix):
         return jsonify({'code': 403, 'message': '无权访问该图片'}), 403
-
-    if not config.oss.enabled:
-        return jsonify({'code': 500, 'message': 'OSS 服务未启用'}), 500
 
     try:
         file_content, content_type = oss_utils.download_chat_image(

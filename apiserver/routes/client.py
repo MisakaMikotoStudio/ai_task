@@ -428,14 +428,12 @@ def get_client_config_api(client_id):
 
     # OSS 配置（供客户端直接下载聊天图片）
     config = current_app.config['APP_CONFIG']
-    oss_data = None
-    if config.oss.enabled:
-        oss_data = {
-            'secret_id': config.oss.secret_id,
-            'secret_key': config.oss.secret_key,
-            'region': config.oss.region,
-            'bucket': config.oss.bucket,
-        }
+    oss_data = {
+        'secret_id': config.oss.secret_id,
+        'secret_key': config.oss.secret_key,
+        'region': config.oss.region,
+        'bucket': config.oss.bucket,
+    }
 
     return jsonify({
         'code': 200,

@@ -2726,6 +2726,10 @@ let scPollTimer = null;
 let scMergeRequestStore = {};
 let scClientConfigCache = null;
 
+// Image attachment state
+let scWelcomePendingImages = [];
+let scDetailPendingImages = [];
+
 const SC_CLIENT_CACHE_KEY = 'sc_last_client_id';
 
 // ── Init marked.js with highlight.js ──
@@ -3114,6 +3118,7 @@ function scRenderFeed() {
         const extra = scParseMsgExtra(msg.extra);
 
         // User row
+        const msgImages = extra.images || [];
         const userRow = `
         <div class="sc-msg-user-row">
             <div class="sc-msg-avatar user">你</div>
@@ -3123,6 +3128,7 @@ function scRenderFeed() {
                     <span class="sc-msg-time">${scFormatTime(msg.created_at)}</span>
                 </div>
                 <div class="sc-msg-text">${escapeHtml(msg.input)}</div>
+                ${scRenderMsgImages(msgImages)}
             </div>
         </div>`;
 
@@ -3244,6 +3250,130 @@ function scStopPolling() {
     if (scPollTimer) { clearInterval(scPollTimer); scPollTimer = null; }
 }
 
+// ── Image attachment helpers ──
+function scTriggerImageSelect(inputId) {
+    document.getElementById(inputId).click();
+}
+
+async function scHandleImageSelect(event, target) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? scWelcomePendingImages : scDetailPendingImages;
+
+    for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+            showToast('仅支持图片文件', 'error');
+            continue;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            showToast(`${file.name} 超过 10MB 限制`, 'error');
+            continue;
+        }
+        try {
+            const res = await chatAPI.uploadImage(file);
+            list.push(res.data);
+        } catch (e) {
+            showToast(e.message, 'error');
+        }
+    }
+    event.target.value = '';
+    scRenderPendingImages(target);
+}
+
+function scRemovePendingImage(index, target) {
+    const list = (target === 'welcome') ? scWelcomePendingImages : scDetailPendingImages;
+    list.splice(index, 1);
+    scRenderPendingImages(target);
+}
+
+function scRenderPendingImages(target) {
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? scWelcomePendingImages : scDetailPendingImages;
+    const containerId = isWelcome ? 'sc-welcome-pending-images' : 'sc-detail-pending-images';
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (list.length === 0) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    container.innerHTML = list.map((img, i) => `
+        <div class="sc-pending-image-item">
+            <span class="sc-pending-image-name" title="${escapeHtml(img.filename)}">
+                📎 ${escapeHtml(img.filename)}
+            </span>
+            <button class="sc-pending-image-remove" onclick="scRemovePendingImage(${i}, '${target}')" title="移除">×</button>
+        </div>
+    `).join('');
+}
+
+function scCollectAndClearImages(target) {
+    const isWelcome = (target === 'welcome');
+    const list = isWelcome ? scWelcomePendingImages : scDetailPendingImages;
+    const images = list.slice();
+    list.length = 0;
+    scRenderPendingImages(target);
+    return images;
+}
+
+function scRenderMsgImages(images) {
+    if (!images || !Array.isArray(images) || images.length === 0) return '';
+    const items = images.map(img => {
+        const ossPath = escapeHtml(img.oss_path || '');
+        const filename = escapeHtml(img.filename || 'image');
+        return `<span class="sc-msg-image-link" onclick="scViewChatImage('${ossPath}', '${filename}')" title="点击查看">📎 ${filename}</span>`;
+    }).join('');
+    return `<div class="sc-msg-image-list">${items}</div>`;
+}
+
+function scViewChatImage(ossPath, filename) {
+    const modal = document.getElementById('sc-image-preview-modal');
+    const img = document.getElementById('sc-image-preview-img');
+    const title = document.getElementById('sc-image-preview-title');
+
+    title.textContent = filename;
+    img.src = '';
+    img.alt = filename;
+
+    const url = chatAPI.getImageProxyUrl(ossPath);
+    const token = getToken();
+
+    fetch(url, {
+        headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Appid': 'ai_task',
+        }
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error('加载失败');
+        return resp.blob();
+    })
+    .then(blob => {
+        img.src = URL.createObjectURL(blob);
+    })
+    .catch(e => {
+        img.alt = '图片加载失败';
+        showToast('图片加载失败: ' + e.message, 'error');
+    });
+
+    modal.classList.add('show');
+}
+
+function scCloseImagePreviewModal() {
+    const modal = document.getElementById('sc-image-preview-modal');
+    const img = document.getElementById('sc-image-preview-img');
+    modal.classList.remove('show');
+    if (img.src && img.src.startsWith('blob:')) {
+        URL.revokeObjectURL(img.src);
+    }
+    img.src = '';
+}
+
 // ── Send message (active chat) ──
 async function scSendMessage() {
     if (!scSelectedChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
@@ -3252,10 +3382,13 @@ async function scSendMessage() {
     const text = input.value.trim();
     if (!text) return;
 
+    const images = scCollectAndClearImages('detail');
+    const extra = images.length > 0 ? { images } : {};
+
     const btn = document.getElementById('sc-detail-send-btn');
     btn.disabled = true;
     try {
-        await chatAPI.createMessage(0, scSelectedChatId, text);
+        await chatAPI.createMessage(0, scSelectedChatId, text, extra);
         input.value = '';
         scAutoResize(input);
         await scLoadMessages(scSelectedChatId);
@@ -3316,10 +3449,13 @@ async function scSendNewChat() {
         return;
     }
 
+    const images = scCollectAndClearImages('welcome');
+    const extra = images.length > 0 ? { images } : {};
+
     localStorage.setItem(SC_CLIENT_CACHE_KEY, String(clientId));
     sendBtn.disabled = true;
     try {
-        const res = await chatAPI.createStandaloneChatWithMessage(inputText, clientId);
+        const res = await chatAPI.createStandaloneChatWithMessage(inputText, clientId, extra);
         const newChatId = res.data.chat.id;
         scCurrentPage = 1;
         scChatList = [];
