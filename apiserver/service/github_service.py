@@ -209,6 +209,13 @@ def _create_installation_token(
             len(repository_ids) if repository_ids else 'all',
         )
 
+        if resp.status_code == 422 and permissions:
+            raise GitHubServiceError(
+                f"创建 Installation Token 失败（HTTP 422）：GitHub App 未授予所需权限。"
+                f"请在 GitHub App Settings > Permissions > Repository permissions 中"
+                f"启用以下权限并在组织 Installation 中接受更新：{list(permissions.keys())}"
+            )
+
         if resp.status_code not in (200, 201):
             raise GitHubServiceError(
                 f"创建 Installation Token 失败（HTTP {resp.status_code}）：{resp.text[:200]}"

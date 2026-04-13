@@ -695,6 +695,11 @@ def update_resource_api(resource_id: int):
             return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
         final_type = res_type or existing.type
         final_source = source or existing.source
+        # 合并 extra：前端编辑时可能省略敏感字段（如 private_key、access_key_secret），
+        # 需要保留原值而非覆盖为空
+        merged_extra = dict(existing.get_raw_extra())
+        merged_extra.update(extra)
+        extra = merged_extra
         err = _validate_resource_extra(res_type=final_type, source=final_source, extra=extra)
         if err:
             return jsonify({'code': 400, 'message': err, 'data': None}), 400

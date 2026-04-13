@@ -4417,7 +4417,7 @@ function showResourceModal(item) {
         document.getElementById('resource-extra-ak-secret').value = extra.access_key_secret || '';
         document.getElementById('resource-extra-organization').value = extra.organization || '';
         document.getElementById('resource-extra-app-id').value = extra.app_id || '';
-        document.getElementById('resource-extra-private-key').value = '';
+        document.getElementById('resource-extra-private-key').value = extra.private_key || '';
         toggleResourceExtraFields();
     } else {
         currentEditResourceId = null;
