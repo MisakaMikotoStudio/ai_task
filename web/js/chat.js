@@ -644,8 +644,8 @@ function pasteImageExt(mimeType) {
 
 function generateUniqueImageName(ext, existingNames) {
     let n = 1;
-    while (existingNames.has(`粘贴图片_${n}${ext}`)) n++;
-    const name = `粘贴图片_${n}${ext}`;
+    while (existingNames.has(`pasted_image_${n}${ext}`)) n++;
+    const name = `pasted_image_${n}${ext}`;
     existingNames.add(name);
     return name;
 }

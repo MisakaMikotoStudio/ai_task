@@ -21,6 +21,40 @@ from dao.client_dao import get_client_by_id
 
 chat_bp = Blueprint('chat', __name__)
 
+logger = logging.getLogger(__name__)
+
+
+def _validate_image_filenames(user_id, chat_id, task_id, extra):
+    """校验本次消息中的图片文件名不与当前 chat 历史中已有图片重名。
+    返回 None 表示通过，否则返回重复的文件名列表。
+    """
+    images = (extra or {}).get('images', [])
+    if not images:
+        return None
+
+    # 本次消息内部去重
+    new_names = [img.get('filename', '') for img in images if img.get('filename')]
+    if len(new_names) != len(set(new_names)):
+        seen = set()
+        duplicates = []
+        for name in new_names:
+            if name in seen:
+                duplicates.append(name)
+            seen.add(name)
+        return duplicates
+
+    # 与历史消息中的图片去重
+    existing_msgs = get_messages_by_chat(user_id=user_id, chat_id=chat_id, task_id=task_id)
+    existing_names = set()
+    for msg in existing_msgs:
+        msg_extra = msg.get('extra') or {}
+        for img in msg_extra.get('images', []):
+            if img.get('filename'):
+                existing_names.add(img['filename'])
+
+    conflicts = [name for name in new_names if name in existing_names]
+    return conflicts if conflicts else None
+
 
 # ===== 独立 Chat（task_id=0）接口 =====
 
@@ -61,6 +95,15 @@ def create_standalone_chat_and_message_api():
 
     title = input_text[:32]
     extra = data.get('extra', {})
+
+    # 新建 chat 无历史，仅校验本次消息内图片名是否自身重复
+    images = (extra or {}).get('images', [])
+    if images:
+        names = [img.get('filename', '') for img in images if img.get('filename')]
+        if len(names) != len(set(names)):
+            seen = set()
+            dups = [n for n in names if n in seen or seen.add(n)]
+            return jsonify({'code': 400, 'message': f'图片文件名重复: {", ".join(dups)}'}), 400
 
     chat = create_chat(
         user_id=request.user_info.user_id,
@@ -167,6 +210,15 @@ def create_chat_and_message_api(task_id):
     title = input_text[:32]
     extra = data.get('extra', {})
 
+    # 新建 chat 无历史，仅校验本次消息内图片名是否自身重复
+    images = (extra or {}).get('images', [])
+    if images:
+        names = [img.get('filename', '') for img in images if img.get('filename')]
+        if len(names) != len(set(names)):
+            seen = set()
+            dups = [n for n in names if n in seen or seen.add(n)]
+            return jsonify({'code': 400, 'message': f'图片文件名重复: {", ".join(dups)}'}), 400
+
     chat = create_chat(user_id=request.user_info.user_id, task_id=task_id, title=title)
     msg = create_chat_message(
         user_id=request.user_info.user_id,
@@ -214,6 +266,12 @@ def create_message_api(task_id, chat_id):
         return jsonify({'code': 400, 'message': '输入内容不能为空'}), 400
 
     extra = data.get('extra', {})
+
+    dup_names = _validate_image_filenames(
+        user_id=request.user_info.user_id, chat_id=chat_id, task_id=task_id, extra=extra,
+    )
+    if dup_names:
+        return jsonify({'code': 400, 'message': f'图片文件名重复: {", ".join(dup_names)}'}), 400
 
     msg = create_chat_message(
         user_id=request.user_info.user_id,
