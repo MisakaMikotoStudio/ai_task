@@ -174,7 +174,7 @@ class FlowChart {
                  style="${style}">
                 <div class="flow-node-content">
                     <span class="flow-node-status-icon">${this.getStatusIcon(node.status)}</span>
-                    <span class="flow-node-label">${this.escapeHtml(node.label || node.id)}</span>
+                    <span class="flow-node-label">${escapeHtml(node.label || node.id)}</span>
                 </div>
                 <div class="flow-node-status-badge">${this.getStatusText(node.status)}</div>
             </div>
@@ -348,15 +348,6 @@ class FlowChart {
         return texts[status] || '待处理';
     }
 
-    /**
-     * HTML 转义
-     */
-    escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 }
 
 // 导出到全局
@@ -438,8 +429,8 @@ class NodeDetailPanel {
                 <div class="node-panel-header">
                     <div class="node-panel-icon">${this.getStatusIcon(node.status)}</div>
                     <div class="node-panel-info">
-                        <h3 class="node-panel-title">${this.escapeHtml(node.label || node.id)}</h3>
-                        <span class="node-panel-id">ID: ${this.escapeHtml(node.id)}</span>
+                        <h3 class="node-panel-title">${escapeHtml(node.label || node.id)}</h3>
+                        <span class="node-panel-id">ID: ${escapeHtml(node.id)}</span>
                     </div>
                 </div>
                 
@@ -463,7 +454,7 @@ class NodeDetailPanel {
                 ${node.pre_node ? `
                     <div class="node-panel-section">
                         <label class="node-panel-label">前置节点</label>
-                        <div class="node-panel-value">${this.escapeHtml(node.pre_node)}</div>
+                        <div class="node-panel-value">${escapeHtml(node.pre_node)}</div>
                     </div>
                 ` : ''}
 
@@ -510,7 +501,7 @@ class NodeDetailPanel {
                     inputHtml = fieldEditable
                         ? `<input type="text" id="${fieldId}" class="node-field-input" 
                              data-field-key="${field.key}"
-                             value="${this.escapeHtml(field.value || '')}" 
+                             value="${escapeHtml(field.value || '')}" 
                              placeholder="请输入${field.label || field.key}">`
                         : `<div class="node-field-html">${this.parseMarkdown(field.value || '-')}</div>`;
                     break;
@@ -528,7 +519,7 @@ class NodeDetailPanel {
                     inputHtml = fieldEditable
                         ? `<textarea id="${fieldId}" class="node-field-textarea" 
                              data-field-key="${field.key}"
-                             placeholder="请输入${field.label || field.key}">${this.escapeHtml(field.value || '')}</textarea>`
+                             placeholder="请输入${field.label || field.key}">${escapeHtml(field.value || '')}</textarea>`
                         : `<div class="node-field-html">${this.parseMarkdown(field.value || '-')}</div>`;
                     break;
 
@@ -537,14 +528,14 @@ class NodeDetailPanel {
                         inputHtml = `<select id="${fieldId}" class="node-field-select" data-field-key="${field.key}">
                             <option value="">请选择</option>
                             ${field.choices.map(choice => `
-                                <option value="${this.escapeHtml(choice.value)}" ${field.value === choice.value ? 'selected' : ''}>
-                                    ${this.escapeHtml(choice.label)}
+                                <option value="${escapeHtml(choice.value)}" ${field.value === choice.value ? 'selected' : ''}>
+                                    ${escapeHtml(choice.label)}
                                 </option>
                             `).join('')}
                         </select>`;
                     } else {
                         const selectedChoice = field.choices?.find(c => c.value === field.value);
-                        inputHtml = `<span class="node-field-value">${this.escapeHtml(selectedChoice?.label || field.value || '-')}</span>`;
+                        inputHtml = `<span class="node-field-value">${escapeHtml(selectedChoice?.label || field.value || '-')}</span>`;
                     }
                     break;
 
@@ -559,13 +550,13 @@ class NodeDetailPanel {
                     if (fieldEditable) {
                         inputHtml = `<input type="url" id="${fieldId}" class="node-field-input" 
                              data-field-key="${field.key}"
-                             value="${this.escapeHtml(field.value || '')}" 
+                             value="${escapeHtml(field.value || '')}" 
                              placeholder="请输入链接地址">`;
                     } else {
                         const linkUrl = field.value || '';
                         if (linkUrl) {
-                            inputHtml = `<a href="${this.escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer" class="node-link-btn">
-                                🔗 ${this.escapeHtml(field.label || field.key)}
+                            inputHtml = `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer" class="node-link-btn">
+                                🔗 ${escapeHtml(field.label || field.key)}
                             </a>`;
                         } else {
                             inputHtml = `<span class="node-field-value">-</span>`;
@@ -591,7 +582,7 @@ class NodeDetailPanel {
 
             return `
                 <div class="node-field ${field.required ? 'node-field-required' : ''}">
-                    <label class="node-field-label">${this.escapeHtml(field.label || field.key)}</label>
+                    <label class="node-field-label">${escapeHtml(field.label || field.key)}</label>
                     ${inputHtml}
                 </div>
             `;
@@ -670,7 +661,7 @@ class NodeDetailPanel {
     parseMarkdown(text) {
         if (!text) return '';
         
-        let html = this.escapeHtml(text);
+        let html = escapeHtml(text);
         
         // 先提取链接，用占位符替换，避免URL中的特殊字符被后续规则处理
         // 使用不含下划线和星号的占位符
@@ -727,7 +718,7 @@ class NodeDetailPanel {
         const rows = tableData.rows;
         const fieldKey = field.key;
 
-        const headerHtml = headers.map(h => `<th class="node-table-th">${this.escapeHtml(String(h))}</th>`).join('');
+        const headerHtml = headers.map(h => `<th class="node-table-th">${escapeHtml(String(h))}</th>`).join('');
 
         const rowsHtml = rows.map((row, rowIndex) => {
             const cells = row.map((cell, colIndex) => {
@@ -739,7 +730,7 @@ class NodeDetailPanel {
                             data-table-field="${fieldKey}"
                             data-row="${rowIndex}"
                             data-col="${colIndex}"
-                            value="${this.escapeHtml(String(cell ?? ''))}"
+                            value="${escapeHtml(String(cell ?? ''))}"
                         />
                     </td>`;
                 } else {
@@ -846,15 +837,6 @@ class NodeDetailPanel {
         return texts[status] || '待处理';
     }
 
-    /**
-     * HTML 转义
-     */
-    escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 }
 
 // 导出到全局
