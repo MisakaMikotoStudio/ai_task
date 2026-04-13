@@ -261,14 +261,14 @@ def sync_execute_message_api():
     develop_doc = data.get('develop_doc', '') or ''
     merge_request = data.get('merge_request', [])
 
-    if not get_message_by_id(user_id=request.user_info.user_id, message_id=message_id, chat_id=chat_id, task_id=task_id):
+    msg = get_message_by_id(user_id=request.user_info.user_id, message_id=message_id, chat_id=chat_id, task_id=task_id)
+    if not msg:
         return jsonify({'code': 400, 'message': '消息不存在'}), 400
 
-
-    extra = {
-        'develop_doc': develop_doc,
-        'merge_request': merge_request
-    }
+    # 合并到现有 extra，保留已有字段（如 images）
+    extra = dict(msg.extra or {})
+    extra['develop_doc'] = develop_doc
+    extra['merge_request'] = merge_request
     update_message(
         user_id=request.user_info.user_id,
         task_id=int(task_id),
