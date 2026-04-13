@@ -413,14 +413,18 @@ def commit_and_push_all_repos(
         return
 
     for repo_dir in repo_dirs:
-        status = run_git_command_or_raise(
-            args=["status", "--porcelain"],
-            cwd=repo_dir,
-            trace_id=trace_id,
-        )
+        status = run_git_command_or_raise(args=["status", "--porcelain"], cwd=repo_dir, trace_id=trace_id)
         if status:
             logger.info(f"[trace_id={trace_id}] 检测到未提交修改，自动提交: {repo_dir}")
             run_git_command_or_raise(args=["add", "-A"], cwd=repo_dir, trace_id=trace_id)
             run_git_command_or_raise(args=["commit", "-m", commit_message], cwd=repo_dir, trace_id=trace_id)
         logger.info(f"[trace_id={trace_id}] 自动执行 git push: {repo_dir}")
-        run_git_command_or_raise(args=["push"], cwd=repo_dir, trace_id=trace_id)
+        push_result = _run_git_command(cmd=["git", "push"], cwd=repo_dir, trace_id=trace_id)
+        if not push_result.success:
+            # 远端分支不存在时，用 push -u origin <branch> 创建并关联
+            branch = get_current_branch(repo_dir=repo_dir, trace_id=trace_id)
+            if branch:
+                logger.info(f"[trace_id={trace_id}] git push 失败，尝试 push -u origin {branch}: {repo_dir}")
+                run_git_command_or_raise(args=["push", "-u", "origin", branch], cwd=repo_dir, trace_id=trace_id)
+            else:
+                raise Exception(f"[{repo_dir}] git push 失败且无法获取当前分支: {push_result.message}")
