@@ -133,6 +133,6 @@ def check(user_id: int, key: str, params: Optional[int] = None) -> CheckResult:
 
         return CheckResult(passed=True, check_type=check_type)
 
-    # 未知类型默认通过
+    # 未知类型默认拒绝（fail-closed），避免新增类型时遗漏校验逻辑
     logger.warning("未知的权限校验类型: %s, key=%s", check_type, key)
-    return CheckResult(passed=True)
+    return CheckResult(passed=False, message='权限校验配置异常，请联系管理员', check_type=check_type)

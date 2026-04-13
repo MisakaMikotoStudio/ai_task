@@ -150,8 +150,7 @@ function showMainPage() {
     // 初始化客户端搜索
     initClientSearch();
 
-    // 初始化商店和个人中心
-    initStore();
+    // 初始化个人中心
     initProfile();
     initUserPanel();
 
@@ -1240,10 +1239,6 @@ function cfgRemoveRepo(index) {
     cfgRenderReposWaterfall();
 }
 
-function wizardValidateRepos() {
-    return wizardValidateReposOnly();
-}
-
 // ---- Step 3: 云服务器 ----
 
 function wizardRenderServerStep(isView) {
@@ -1769,11 +1764,6 @@ async function showTaskEditModal(taskId = null, startInEditMode = false) {
     }
 }
 
-// 兼容旧的调用方式
-function showTaskDetailModal(taskId) {
-    showTaskEditModal(taskId, false);  // 查看模式
-}
-
 // 进入编辑模式
 async function enterTaskEditMode() {
     taskEditMode = true;
@@ -2071,191 +2061,20 @@ async function resetTask(id) {
     }
 }
 
-// 显示 client_error 错误详情弹窗
-function showClientErrorDetail(taskId) {
-    const task = window.tasksCache && window.tasksCache[taskId];
-    if (!task) {
-        showToast('无法获取任务信息', 'error');
-        return;
-    }
-    
-    const errorMsg = task.flow && task.flow.error ? task.flow.error : '未知错误';
-    
-    const content = `
-        <div class="error-detail-content">
-            <div class="error-detail-icon">⚠️</div>
-            <div class="error-detail-title">任务执行异常</div>
-            <div class="error-detail-message">
-                <pre class="error-pre">${escapeHtml(errorMsg)}</pre>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-secondary" onclick="closeModal()">关闭</button>
-            </div>
-        </div>
-    `;
-    
-    openModal('错误详情', content);
-}
-
-// 显示执行详情弹窗（显示最新节点信息）
-async function showFlowDetailModal(taskId) {
-    const task = window.tasksCache && window.tasksCache[taskId];
-    if (!task) {
-        showToast('无法获取任务信息', 'error');
-        return;
-    }
-    
-    // 检查是否有 flow 数据和节点
-    const hasNodes = task.flow && task.flow.nodes && task.flow.nodes.length > 0;
-    
-    if (!hasNodes) {
-        const content = `
-            <div class="flow-modal-content">
-                <div class="flow-modal-empty">
-                    <span class="empty-icon">📊</span>
-                    <p>该任务暂无执行记录</p>
-                </div>
-            </div>
-        `;
-        openModal('执行详情', content, 'modal-flow');
-        return;
-    }
-    
-    // 获取最新的节点（数组最后一个）
-    const latestNode = task.flow.nodes[task.flow.nodes.length - 1];
-    
-    // 渲染节点详情
-    const nodeDetailHtml = renderNodeDetailForModal(latestNode);
-    
-    const content = `
-        <div class="flow-modal-content">
-            <div class="flow-modal-header-info">
-                <span class="flow-modal-label">流程状态:</span>
-                <span class="flow-status-badge status-${task.flow_status || ''}">${getFlowStatusText(task.flow_status)}</span>
-                <span class="flow-modal-label" style="margin-left: 16px;">节点数量:</span>
-                <span>${task.flow.nodes.length}</span>
-            </div>
-            <div class="flow-modal-node-title">
-                <span class="node-status-icon">${getNodeStatusIcon(latestNode.status)}</span>
-                <span>最新节点: ${escapeHtml(latestNode.label || latestNode.id)}</span>
-                <span class="node-status-badge status-${latestNode.status}">${getNodeStatusText(latestNode.status)}</span>
-            </div>
-            <div class="flow-modal-node-detail">
-                ${nodeDetailHtml}
-            </div>
-        </div>
-    `;
-    
-    openModal('执行详情 - ' + escapeHtml(task.title), content, 'modal-flow');
-}
-
-// 渲染节点详情（用于弹窗）
-function renderNodeDetailForModal(node) {
-    if (!node.fields || node.fields.length === 0) {
-        return '<div class="node-panel-empty-fields">暂无字段信息</div>';
-    }
-    
-    // 对字段进行排序，link 类型排在最前面
-    const sortedFields = [...node.fields].sort((a, b) => {
-        const aIsLink = a.field_type === 'link' || a.fieldType === 'link' ? 0 : 1;
-        const bIsLink = b.field_type === 'link' || b.fieldType === 'link' ? 0 : 1;
-        return aIsLink - bIsLink;
-    });
-    
-    return sortedFields.map(field => {
-        const fieldType = field.field_type || field.fieldType || 'text';
-        const fieldLabel = field.label || field.key;
-        let valueHtml = '';
-        
-        switch (fieldType) {
-            case 'link':
-                // 链接类型
-                const linkUrl = field.value || '';
-                if (linkUrl) {
-                    valueHtml = `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer" class="node-link-btn">🔗 ${escapeHtml(fieldLabel)}</a>`;
-                } else {
-                    valueHtml = '<span class="text-muted">-</span>';
-                }
-                break;
-                
-            case 'link_list':
-                // 链接列表类型
-                if (Array.isArray(field.value) && field.value.length > 0) {
-                    valueHtml = `<div class="node-link-list">${field.value.map(link => {
-                        const linkLabel = link.label || link.title || '链接';
-                        const linkUrl = link.url || '';
-                        return linkUrl ? `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer" class="node-link-btn">🔗 ${escapeHtml(linkLabel)}</a>` : '';
-                    }).join('')}</div>`;
-                } else {
-                    valueHtml = '<span class="text-muted">-</span>';
-                }
-                break;
-                
-            case 'table':
-                // 表格类型
-                valueHtml = renderTableFieldForModal(field.value);
-                break;
-                
-            case 'textarea':
-            case 'markdown':
-                // 文本区域/Markdown
-                valueHtml = `<div class="node-field-html">${parseSimpleMarkdown(field.value || '-')}</div>`;
-                break;
-                
-            default:
-                // 默认文本
-                valueHtml = `<div class="node-field-html">${parseSimpleMarkdown(String(field.value || '-'))}</div>`;
-        }
-        
-        return `
-            <div class="node-field">
-                <label class="node-field-label">${escapeHtml(fieldLabel)}</label>
-                ${valueHtml}
-            </div>
-        `;
-    }).join('');
-}
-
-// 渲染表格字段（用于弹窗）
-function renderTableFieldForModal(tableData) {
-    if (!tableData || !tableData.headers || !tableData.rows) {
-        return '<span class="text-muted">-</span>';
-    }
-    
-    const headers = tableData.headers;
-    const rows = tableData.rows;
-    
-    const headerHtml = headers.map(h => `<th class="node-table-th">${escapeHtml(String(h))}</th>`).join('');
-    
-    const rowsHtml = rows.map(row => {
-        const cells = row.map(cell => {
-            return `<td class="node-table-td">${parseSimpleMarkdown(String(cell ?? ''))}</td>`;
-        }).join('');
-        return `<tr class="node-table-tr">${cells}</tr>`;
-    }).join('');
-    
-    return `
-        <div class="node-table-wrapper">
-            <table class="node-table">
-                <thead class="node-table-thead">
-                    <tr class="node-table-tr">${headerHtml}</tr>
-                </thead>
-                <tbody class="node-table-tbody">
-                    ${rowsHtml}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
 // 简单的 Markdown 解析
 function parseSimpleMarkdown(text) {
     if (!text) return '';
     
     let html = escapeHtml(text);
     
-    // 链接: [text](url)
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    // 链接: [text](url) - 仅允许 http/https/mailto 协议，防止 javascript: XSS
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, text, url) {
+        const decoded = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+        if (/^(https?:|mailto:)/i.test(decoded.trim())) {
+            return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+        }
+        return text;
+    });
     
     // 加粗: **text**
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -2268,58 +2087,6 @@ function parseSimpleMarkdown(text) {
     
     return html;
 }
-
-// 获取流程状态文本
-function getFlowStatusText(status) {
-    const texts = {
-        '': '无',
-        'init': '初始化',
-        'ready': '就绪',
-        'running': '执行中',
-        'paused': '暂停',
-        'completed': '已完成',
-        'error': '异常',
-        'client_error': '应用异常'
-    };
-    return texts[status] || status || '无';
-}
-
-// 获取节点状态图标
-function getNodeStatusIcon(status) {
-    const icons = {
-        pending: '⏳',
-        running: '🔄',
-        reviewing: '👀',
-        reviewed: '✅',
-        revising: '✍️',
-        done: '🎉',
-        completed: '✅',
-        in_progress: '🔄',
-        skipped: '⏭️',
-        failed: '❌',
-        error: '⚠️'
-    };
-    return icons[status] || '⏳';
-}
-
-// 获取节点状态文本
-function getNodeStatusText(status) {
-    const texts = {
-        pending: '待处理',
-        running: '进行中',
-        reviewing: '待审核',
-        reviewed: '已审核',
-        revising: '修订中',
-        done: '已完成',
-        completed: '已完成',
-        in_progress: '进行中',
-        skipped: '已跳过',
-        failed: '失败',
-        error: '异常'
-    };
-    return texts[status] || '待处理';
-}
-
 
 async function updateTaskStatus(taskId, status, selectElement) {
     try {
@@ -3202,9 +2969,6 @@ function openTaskChat(taskId) {
     window.open(`chat.html?task_id=${taskId}`, '_blank');
 }
 
-function openStandaloneChat(chatId, clientId) {
-    window.open(`chat.html?task_id=0&chat_id=${chatId}&client_id=${clientId}`, '_blank');
-}
 
 // ===== 独立 Chat（split-panel, inline rendering） =====
 
@@ -3290,7 +3054,10 @@ function scParseMsgExtra(extra) {
 function scRenderOutput(output) {
     if (!output) return '';
     if (typeof marked !== 'undefined') {
-        try { return marked.parse(output); } catch (_) {}
+        try {
+            const html = marked.parse(output);
+            return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+        } catch (_) {}
     }
     return `<p>${escapeHtml(output).replace(/\n/g, '<br>')}</p>`;
 }
@@ -4030,23 +3797,6 @@ async function scSendNewChat() {
     }
 }
 
-// ── Delete chat ──
-async function deleteStandaloneChat(chatId) {
-    if (!confirm('确定要删除这个 Chat 吗？')) return;
-    try {
-        await chatAPI.deleteChat(0, chatId);
-        showToast('删除成功', 'success');
-        if (scSelectedChatId === chatId) {
-            scShowWelcome();
-        }
-        scCurrentPage = 1;
-        scChatList = [];
-        loadStandaloneChatList();
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
-}
-
 // ── Merge actions ──
 function _scGetRepoName(url) {
     if (!url) return '';
@@ -4359,7 +4109,7 @@ function renderPermissionGroup(group) {
         }).replace(/"/g, '&quot;');
 
         return `<tr>
-            <td>${escapeHTML(p.product_key)}</td>
+            <td>${escapeHtml(p.product_key)}</td>
             <td>${group.type === 'count_limit' ? limitText : '<span class="perm-text-muted">不适用</span>'}</td>
             <td class="perm-actions-cell">
                 <button type="button" class="perm-edit-btn perm-action-btn" data-item="${itemData}" title="编辑">✏️</button>
@@ -4371,7 +4121,7 @@ function renderPermissionGroup(group) {
     return `<div class="perm-group-card">
         <div class="perm-group-header">
             <div class="perm-group-title">
-                <span class="perm-key-label">${escapeHTML(group.key)}</span>
+                <span class="perm-key-label">${escapeHtml(group.key)}</span>
                 ${typeBadge}
             </div>
             <span class="perm-type-desc">${typeLabel}</span>
@@ -4381,12 +4131,6 @@ function renderPermissionGroup(group) {
             <tbody>${productRows || '<tr><td colspan="3" class="perm-text-muted">暂无产品配置</td></tr>'}</tbody>
         </table>
     </div>`;
-}
-
-function escapeHTML(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
 }
 
 // ===== 资源管理（admin） =====
@@ -4752,11 +4496,11 @@ function renderResourceRow(resource) {
 
     return `<tr>
         <td>${resource.id}</td>
-        <td class="resource-url-cell" title="${escapeHTML(resource.name || '')}">${escapeHTML(resource.name || '-')}</td>
+        <td class="resource-url-cell" title="${escapeHtml(resource.name || '')}">${escapeHtml(resource.name || '-')}</td>
         <td>${typeLabels[resource.type] || resource.type}</td>
         <td>${sourceLabels[resource.source] || resource.source}</td>
         <td>${envsHtml}</td>
-        <td class="resource-url-cell" title="${escapeHTML(instanceInfo)}">${escapeHTML(instanceInfo)}</td>
+        <td class="resource-url-cell" title="${escapeHtml(instanceInfo)}">${escapeHtml(instanceInfo)}</td>
         <td><span class="resource-status-badge ${statusClass}">${statusText}</span></td>
         <td>${createdAt}</td>
         <td class="perm-actions-cell">
@@ -4767,10 +4511,6 @@ function renderResourceRow(resource) {
 }
 
 // ===== 商店 =====
-
-function initStore() {
-    // 商店视图首次切换时由 switchToView 触发 loadStoreProducts
-}
 
 async function loadStoreProducts() {
     const grid = document.getElementById('store-products-grid');
@@ -4808,7 +4548,7 @@ function renderStoreProductCard(product) {
   <div class="store-product-header">${iconHtml}</div>
   <div class="store-product-body">
     <div class="store-product-title">${escapeHtml(product.title)}</div>
-    <div class="store-product-desc">${product.desc || ''}</div>
+    <div class="store-product-desc">${escapeHtml(product.desc || '')}</div>
     <div class="store-product-meta">
       <span class="store-product-price">¥${product.price.toFixed(2)}</span>
       <span class="store-product-expire">${escapeHtml(expireText)}</span>
@@ -4843,14 +4583,6 @@ async function handleStoreBuy(e) {
         btn.disabled = false;
         btn.textContent = originalText;
     }
-}
-
-function escapeHtml(str) {
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
 }
 
 // ===== 我的（个人中心）=====
