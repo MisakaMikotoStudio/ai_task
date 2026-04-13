@@ -429,18 +429,6 @@ def get_client_config_api(client_id):
     # 获取环境变量（官方云部署/容器启动场景有效）
     env_vars = get_client_env_vars(client_id, request.user_info.user_id)
 
-    # OSS 配置：为当前用户生成 STS 临时凭证，限定只能访问 chat/images/{user_id}/ 目录
-    config = current_app.config['APP_CONFIG']
-    oss_data = None
-    try:
-        from service import oss_service
-        oss_data = oss_service.get_sts_temp_credentials(
-            config=config.oss,
-            user_id=request.user_info.user_id,
-        )
-    except Exception as e:
-        logger.warning("生成 STS 临时凭证失败: %s", e)
-
     return jsonify({
         'code': 200,
         'data': {
@@ -450,8 +438,35 @@ def get_client_config_api(client_id):
             'agent': client.agent,
             'repos': [repo.to_dict() for repo in repos],
             'env_vars': [ev.to_dict() for ev in env_vars],
-            'oss': oss_data,
         }
+    })
+
+
+@client_bp.route('/<int:client_id>/oss-sts', methods=['GET'])
+def get_client_oss_sts_api(client_id):
+    """
+    为客户端生成 OSS STS 临时凭证。
+    独立于 config 接口，客户端仅在凭证过期时调用，避免高频轮询 config 时重复生成 STS。
+    """
+    from service import oss_service
+
+    client = get_client_by_id(client_id=client_id, user_id=request.user_info.user_id)
+    if not client:
+        return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
+
+    config = current_app.config['APP_CONFIG']
+    try:
+        oss_data = oss_service.get_sts_temp_credentials(
+            config=config.oss,
+            user_id=request.user_info.user_id,
+        )
+    except Exception as e:
+        logger.warning("生成 STS 临时凭证失败: %s", e)
+        return jsonify({'code': 500, 'message': '生成 STS 临时凭证失败'}), 500
+
+    return jsonify({
+        'code': 200,
+        'data': oss_data,
     })
 
 

@@ -7,7 +7,7 @@ Chat相关路由
 import logging
 import os
 
-from flask import Blueprint, request, jsonify, Response, current_app
+from flask import Blueprint, request, jsonify, current_app
 
 from dao.models import Chat, ChatMessage
 from dao.chat_dao import (
@@ -419,45 +419,6 @@ def upload_chat_image_api():
         return jsonify({'code': 500, 'message': f'上传失败: {e}'}), 500
 
     return jsonify({'code': 200, 'message': '上传成功', 'data': result})
-
-
-@chat_bp.route('/image', methods=['GET'])
-def get_chat_image_api():
-    """
-    代理下载聊天图片（私有读写，前端无法直接访问 COS）。
-    校验：登录 + 路径归属当前用户。
-    """
-    from service import oss_service
-
-    user = request.user_info
-    config = current_app.config['APP_CONFIG']
-
-    oss_path = request.args.get('path', '').strip()
-    if not oss_path:
-        return jsonify({'code': 400, 'message': '缺少 path 参数'}), 400
-
-    # 防越权：路径必须包含当前用户的 user_id
-    expected_prefix = f'chat/images/{user.user_id}/'
-    if not oss_path.startswith(expected_prefix):
-        return jsonify({'code': 403, 'message': '无权访问该图片'}), 403
-
-    try:
-        file_content, content_type = oss_service.download_chat_image(
-            config=config.oss,
-            oss_path=oss_path,
-        )
-    except Exception as e:
-        logger.exception("聊天图片下载失败: path=%s", oss_path)
-        return jsonify({'code': 404, 'message': '图片不存在'}), 404
-
-    return Response(
-        file_content,
-        mimetype=content_type,
-        headers={
-            'Cache-Control': 'max-age=3600',
-            'Content-Length': str(len(file_content)),
-        },
-    )
 
 
 @chat_bp.route('/image/presign', methods=['GET'])

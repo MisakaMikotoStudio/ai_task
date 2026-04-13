@@ -392,7 +392,7 @@ class CodeDevelopWorker(BaseWorker):
             raise Exception(f"Agent 未能完成 rebase 冲突解决，已自动 abort")
 
     def _download_chat_images(self) -> list:
-        """检查最新消息的 extra.images，通过 OSS 直接下载或通过 apiserver 代理下载到工作目录。
+        """检查最新消息的 extra.images，通过 COS STS 凭证下载到工作目录。
         返回 [{'filename': str, 'local_path': str}]
         """
         chat_messages = self.task.get("chat_messages", [])
@@ -404,6 +404,9 @@ class CodeDevelopWorker(BaseWorker):
         images = extra.get("images", [])
         if not images:
             return []
+
+        # 刷新 OSS STS 凭证（仅在过期时请求）
+        self.client_config.refresh_oss_sts()
 
         # 创建图片保存目录
         images_dir = os.path.join(self.work_dir, "chat_images")
@@ -427,25 +430,14 @@ class CodeDevelopWorker(BaseWorker):
 
             try:
                 if oss_config and oss_config.secret_id and oss_config.bucket:
-                    # 通过 COS SDK 直接下载，失败时回退到 apiserver 代理
-                    try:
-                        self._download_image_from_oss(
-                            oss_config=oss_config,
-                            oss_path=oss_path,
-                            local_path=local_path,
-                        )
-                    except Exception as oss_err:
-                        logger.warning(f"[{self.trace_id}] COS SDK 下载失败，回退到 apiserver 代理: {oss_err}")
-                        self._download_image_from_apiserver(
-                            oss_path=oss_path,
-                            local_path=local_path,
-                        )
-                else:
-                    # 通过 apiserver 代理下载
-                    self._download_image_from_apiserver(
+                    self._download_image_from_oss(
+                        oss_config=oss_config,
                         oss_path=oss_path,
                         local_path=local_path,
                     )
+                else:
+                    logger.error(f"[{self.trace_id}] OSS STS 凭证不可用，无法下载图片: {oss_path}")
+                    continue
                 downloaded.append({
                     'filename': filename,
                     'local_path': local_path,
@@ -457,27 +449,9 @@ class CodeDevelopWorker(BaseWorker):
         return downloaded
 
     def _download_image_from_oss(self, oss_config, oss_path: str, local_path: str):
-        """通过 COS SDK 直接下载图片"""
+        """通过 COS SDK + STS 临时凭证直接下载图片"""
         from utils.oss_utils import download_image_to_file
         download_image_to_file(config=oss_config, oss_path=oss_path, local_path=local_path)
-
-    def _download_image_from_apiserver(self, oss_path: str, local_path: str):
-        """通过 apiserver 代理接口下载图片"""
-        import requests as http_requests
-        url = f"{self.client_config.apiserver_url.rstrip('/')}/api/chat/image"
-        headers = {
-            'X-Client-Secret': self.client_config.secret,
-            'X-Client-ID': str(self.client_config.client_id),
-        }
-        resp = http_requests.get(
-            url=url,
-            params={'path': oss_path},
-            headers=headers,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        with open(local_path, 'wb') as f:
-            f.write(resp.content)
 
     def _build_development_prompt(self) -> str:
         """构建跨多项目开发 prompt"""

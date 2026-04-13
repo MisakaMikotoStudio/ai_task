@@ -96,44 +96,6 @@ def upload_chat_image(config: OssConfig, file_storage, user_id: int) -> dict:
     }
 
 
-def download_chat_image(config: OssConfig, oss_path: str) -> tuple:
-    """
-    从腾讯云 COS 下载聊天图片，返回 (file_bytes, content_type)。
-    """
-    try:
-        from qcloud_cos import CosConfig, CosS3Client
-    except ImportError:
-        raise RuntimeError("请安装 cos-python-sdk-v5: pip install cos-python-sdk-v5")
-
-    cos_config = CosConfig(
-        Region=config.region,
-        SecretId=config.secret_id,
-        SecretKey=config.secret_key,
-    )
-    client = CosS3Client(cos_config)
-
-    response = client.get_object(
-        Bucket=config.bucket,
-        Key=oss_path,
-    )
-    file_content = response['Body'].get_raw_stream().read()
-
-    # 根据路径后缀推断 content_type
-    content_type = 'application/octet-stream'
-    lower_path = oss_path.lower()
-    if lower_path.endswith('.jpg') or lower_path.endswith('.jpeg'):
-        content_type = 'image/jpeg'
-    elif lower_path.endswith('.png'):
-        content_type = 'image/png'
-    elif lower_path.endswith('.gif'):
-        content_type = 'image/gif'
-    elif lower_path.endswith('.webp'):
-        content_type = 'image/webp'
-
-    logger.info("OSS 聊天图片下载成功: %s, size=%d bytes", oss_path, len(file_content))
-    return file_content, content_type
-
-
 def download_image_to_file(config: OssConfig, oss_path: str, local_path: str):
     """
     从腾讯云 COS 下载文件到本地路径。

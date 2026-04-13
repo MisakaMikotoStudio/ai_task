@@ -5,6 +5,7 @@ Client 客户端配置模型定义
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
@@ -160,25 +161,39 @@ class ClientConfig:
 
         self.login_user_name = remote_config.get('login_user_name', '')
 
-        # 解析 OSS 配置（STS 临时凭证，限定用户目录访问）
-        oss_data = remote_config.get('oss')
-        if oss_data and isinstance(oss_data, dict):
-            self.oss = OssConfig(
-                secret_id=oss_data.get('tmp_secret_id', ''),
-                secret_key=oss_data.get('tmp_secret_key', ''),
-                session_token=oss_data.get('session_token', ''),
-                expired_time=int(oss_data.get('expired_time', 0)),
-                region=oss_data.get('region', 'ap-guangzhou'),
-                bucket=oss_data.get('bucket', ''),
-                allow_prefix=oss_data.get('allow_prefix', ''),
-            )
-            logger.debug("OSS STS 临时凭证已加载, allow_prefix=%s", self.oss.allow_prefix)
-        else:
-            self.oss = None
-
         logger.debug(f"客户端配置同步完成")
         logger.debug(f"宿主机工作目录: {self.workspace}")
         logger.debug(f"代码仓库数量: {len(self.code_git)}")
+
+    def refresh_oss_sts(self):
+        """
+        刷新 OSS STS 临时凭证。
+        仅在凭证不存在或即将过期（提前 5 分钟）时向 apiserver 请求新凭证。
+        """
+        if self.oss and self.oss.expired_time > 0:
+            remaining = self.oss.expired_time - int(time.time())
+            if remaining > 300:
+                logger.debug("OSS STS 凭证仍有效, 剩余 %d 秒", remaining)
+                return
+
+        try:
+            oss_data = self.apiserver_rpc.get_oss_sts(client_id=self.client_id)
+            if oss_data and isinstance(oss_data, dict):
+                self.oss = OssConfig(
+                    secret_id=oss_data.get('tmp_secret_id', ''),
+                    secret_key=oss_data.get('tmp_secret_key', ''),
+                    session_token=oss_data.get('session_token', ''),
+                    expired_time=int(oss_data.get('expired_time', 0)),
+                    region=oss_data.get('region', 'ap-guangzhou'),
+                    bucket=oss_data.get('bucket', ''),
+                    allow_prefix=oss_data.get('allow_prefix', ''),
+                )
+                logger.info("OSS STS 临时凭证已刷新, allow_prefix=%s, expired_time=%d",
+                            self.oss.allow_prefix, self.oss.expired_time)
+            else:
+                logger.warning("获取 OSS STS 凭证返回为空")
+        except Exception as e:
+            logger.warning("刷新 OSS STS 临时凭证失败: %s", e)
 
     def check_config(self):
         """检查客户端配置"""

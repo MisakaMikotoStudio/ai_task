@@ -564,11 +564,6 @@ const chatAPI = {
         return uploadRequest('/chat/upload/image', fd);
     },
 
-    // 获取聊天图片代理下载 URL（客户端回退用）
-    getImageProxyUrl(ossPath) {
-        return `${API_BASE}/chat/image?path=${encodeURIComponent(ossPath)}`;
-    },
-
     // 获取聊天图片预签名下载 URL（前端直接从 COS 下载）
     async getPresignedImageUrl(ossPath) {
         return request(`/chat/image/presign?path=${encodeURIComponent(ossPath)}`);

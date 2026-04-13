@@ -292,6 +292,19 @@ class ApiServerRpc:
         result = self._request('GET', f'/api/client/{client_id}/config')
         return result.get('data', {})
 
+    def get_oss_sts(self, client_id: int) -> Dict[str, Any]:
+        """
+        获取 OSS STS 临时凭证
+
+        Args:
+            client_id: 客户端 ID
+
+        Returns:
+            STS 临时凭证信息（tmp_secret_id, tmp_secret_key, session_token, expired_time, region, bucket, allow_prefix）
+        """
+        result = self._request('GET', f'/api/client/{client_id}/oss-sts')
+        return result.get('data', {})
+
     def update_repo_default_branch(
         self, repo_id: int, default_branch: str
     ) -> bool:
