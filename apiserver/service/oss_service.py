@@ -158,6 +158,40 @@ def download_image_to_file(config: OssConfig, oss_path: str, local_path: str):
         f.write(file_content)
 
 
+def generate_presigned_url(config: OssConfig, oss_path: str, expired: int = 600) -> str:
+    """
+    生成 COS 对象的预签名下载 URL。
+
+    Args:
+        config: OSS 配置
+        oss_path: COS 上的对象 Key
+        expired: URL 有效期（秒），默认 600（10 分钟）
+
+    Returns:
+        预签名下载 URL
+    """
+    try:
+        from qcloud_cos import CosConfig, CosS3Client
+    except ImportError:
+        raise RuntimeError("请安装 cos-python-sdk-v5: pip install cos-python-sdk-v5")
+
+    cos_config = CosConfig(
+        Region=config.region,
+        SecretId=config.secret_id,
+        SecretKey=config.secret_key,
+    )
+    client = CosS3Client(cos_config)
+
+    url = client.get_presigned_url(
+        Method='GET',
+        Bucket=config.bucket,
+        Key=oss_path,
+        Expired=expired,
+    )
+    logger.info("生成预签名 URL: path=%s, expired=%ds", oss_path, expired)
+    return url
+
+
 def get_sts_temp_credentials(config: OssConfig, user_id: int, duration_seconds: int = 1800) -> dict:
     """
     为指定用户生成 STS 临时凭证，限定只能访问 chat/images/{user_id}/* 路径。

@@ -719,22 +719,13 @@ function viewChatImage(ossPath, filename) {
     img.src = '';
     img.alt = filename;
 
-    // 构造代理 URL（需要带 auth token）
-    const url = chatAPI.getImageProxyUrl(ossPath);
-    const token = getToken();
-
-    fetch(url, {
-        headers: {
-            'Authorization': token ? `Bearer ${token}` : '',
-            'Appid': 'ai_task',
+    // 通过预签名 URL 直接从 COS 下载，不经过 apiserver 代理
+    chatAPI.getPresignedImageUrl(ossPath)
+    .then(res => {
+        if (res.code !== 200 || !res.data || !res.data.url) {
+            throw new Error(res.message || '获取预签名 URL 失败');
         }
-    })
-    .then(resp => {
-        if (!resp.ok) throw new Error('加载失败');
-        return resp.blob();
-    })
-    .then(blob => {
-        img.src = URL.createObjectURL(blob);
+        img.src = res.data.url;
     })
     .catch(e => {
         img.alt = '图片加载失败';

@@ -459,3 +459,41 @@ def get_chat_image_api():
         },
     )
 
+
+@chat_bp.route('/image/presign', methods=['GET'])
+def get_chat_image_presign_api():
+    """
+    生成聊天图片的预签名下载 URL（前端直接从 COS 下载，不经过 apiserver 代理）。
+    校验：登录 + 路径归属当前用户。
+    """
+    from service import oss_service
+
+    user = request.user_info
+    config = current_app.config['APP_CONFIG']
+
+    oss_path = request.args.get('path', '').strip()
+    if not oss_path:
+        return jsonify({'code': 400, 'message': '缺少 path 参数'}), 400
+
+    # 防越权：路径必须包含当前用户的 user_id
+    expected_prefix = f'chat/images/{user.user_id}/'
+    if not oss_path.startswith(expected_prefix):
+        return jsonify({'code': 403, 'message': '无权访问该图片'}), 403
+
+    try:
+        presigned_url = oss_service.generate_presigned_url(
+            config=config.oss,
+            oss_path=oss_path,
+            expired=600,
+        )
+    except Exception as e:
+        logger.exception("生成预签名 URL 失败: path=%s", oss_path)
+        return jsonify({'code': 500, 'message': '生成预签名 URL 失败'}), 500
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'url': presigned_url,
+        },
+    })
+
