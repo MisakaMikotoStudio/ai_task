@@ -877,7 +877,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
        d. 绑定仓库到应用
     4. 对于 test、prod 两个环境：
        a. 查找可用的 MySQL Resource
-       b. 生成 db_name = {user_id}_{env}_{秒级时间戳}
+       b. 生成 db_name = u{user_id}_{env}_{秒级时间戳}（以字母开头，满足 Aliyun RDS 命名规则）
        c. 写入 ClientDatabase 记录
        d. 调用资源服务在云上创建数据库 + 专属账号
        e. 回写连接信息到 ClientDatabase
@@ -951,7 +951,7 @@ def create_client_from_template(user_id: int, app_types: list) -> int:
             continue
 
         resource = resources[0]
-        db_name = f"{user_id}_{env}_{int(time.time())}"
+        db_name = f"u{user_id}_{env}_{int(time.time())}"
 
         # 先写入 ClientDatabase 记录
         record_id = add_client_database(
@@ -1176,7 +1176,7 @@ def generate_default_database(user_id: int, config) -> dict:
     """
     在默认数据库实例上为用户创建一个新数据库。
 
-    数据库命名规则：{user_id}_app_{version}，version 从 1 开始递增，
+    数据库命名规则：u{user_id}_app_{version}，version 从 1 开始递增，
     直到找到一个不存在的数据库名称。
 
     Args:
@@ -1206,10 +1206,10 @@ def generate_default_database(user_id: int, config) -> dict:
         cursor.execute("SHOW DATABASES")
         existing_dbs = {row[0] for row in cursor.fetchall()}
 
-        # 生成数据库名称：{user_id}_app_{version}
+        # 生成数据库名称：u{user_id}_app_{version}，以字母开头（Aliyun RDS 要求）
         version = 1
         while True:
-            db_name = f"{user_id}_app_{version}"
+            db_name = f"u{user_id}_app_{version}"
             if db_name not in existing_dbs:
                 break
             version += 1
