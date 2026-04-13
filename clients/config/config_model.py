@@ -195,6 +195,38 @@ class ClientConfig:
         except Exception as e:
             logger.warning("刷新 OSS STS 临时凭证失败: %s", e)
 
+    def refresh_repo_token(self, repo_config: "GitRepoConfig") -> bool:
+        """
+        调用 apiserver 刷新仓库的 Installation Access Token，并更新本地配置。
+
+        apiserver 负责生成新 token 并持久化到数据库，
+        客户端仅触发刷新并将返回的新 token 更新到内存中的 repo_config。
+
+        Args:
+            repo_config: 需要刷新 token 的仓库配置
+
+        Returns:
+            是否刷新成功
+        """
+        if not repo_config.repo_id:
+            logger.warning("refresh_repo_token: repo_id 为空，无法刷新")
+            return False
+
+        new_token = self.apiserver_rpc.refresh_repo_token(repo_id=repo_config.repo_id)
+        if new_token:
+            repo_config.token = new_token
+            logger.info(
+                "refresh_repo_token: 刷新成功, repo_id=%s, url=%s",
+                repo_config.repo_id, repo_config.url,
+            )
+            return True
+
+        logger.warning(
+            "refresh_repo_token: 刷新失败, repo_id=%s, url=%s",
+            repo_config.repo_id, repo_config.url,
+        )
+        return False
+
     def check_config(self):
         """检查客户端配置"""
         self.checkers = [

@@ -19,6 +19,7 @@ from dao.client_dao import (
     get_client_repos,
     update_repo_default_branch, get_repo_by_id,
     get_client_env_vars,
+    update_client_repo_token,
 )
 from flask import current_app
 from service.client_service import (
@@ -552,6 +553,46 @@ def get_client_oss_sts_api(client_id):
     return jsonify({
         'code': 200,
         'data': oss_data,
+    })
+
+
+@client_bp.route('/<int:client_id>/repos/<int:repo_id>/refresh-token', methods=['POST'])
+def refresh_repo_token_api(client_id, repo_id):
+    """
+    刷新仓库的 Installation Access Token（GitHub App 临时 token 过期后调用）
+
+    URL Parameters:
+        client_id: int  # 客户端ID
+        repo_id: int    # 仓库配置ID
+
+    Response:
+        成功 (200):
+            {"code": 200, "message": "token刷新成功", "data": {"token": "..."}}
+        失败 (400/500):
+            {"code": 4xx/5xx, "message": "错误信息"}
+    """
+    from service.github_service import refresh_repo_token_by_url, GitHubServiceError
+
+    client = get_client_by_id(client_id=client_id, user_id=request.user_info.user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
+
+    repo = get_repo_by_id(repo_id=repo_id, client_id=client_id, user_id=request.user_info.user_id)
+    if not repo:
+        return jsonify({'code': 400, 'message': '仓库配置不存在'}), 400
+
+    try:
+        new_token = refresh_repo_token_by_url(repo_url=repo.url)
+    except GitHubServiceError as e:
+        return jsonify({'code': 500, 'message': f'token刷新失败: {e.message}'}), 500
+
+    if not update_client_repo_token(repo_id=repo_id, user_id=request.user_info.user_id, token=new_token):
+        return jsonify({'code': 500, 'message': 'token已刷新但更新数据库失败'}), 500
+
+    return jsonify({
+        'code': 200,
+        'message': 'token刷新成功',
+        'data': {'token': new_token},
     })
 
 

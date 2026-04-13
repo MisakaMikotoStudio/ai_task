@@ -305,6 +305,26 @@ class ApiServerRpc:
         result = self._request('GET', f'/api/client/{client_id}/oss-sts')
         return result.get('data', {})
 
+    def refresh_repo_token(self, repo_id: int) -> Optional[str]:
+        """
+        刷新仓库的 Installation Access Token
+
+        Args:
+            repo_id: 仓库配置 ID
+
+        Returns:
+            新的 token，失败返回 None
+        """
+        try:
+            result = self._request(
+                'POST',
+                f'/api/client/{self.client_id}/repos/{repo_id}/refresh-token',
+            )
+            return result.get('data', {}).get('token')
+        except ApiException as e:
+            logger.warning(f"刷新仓库 token 失败: repo_id={repo_id}, {e.message}")
+            return None
+
     def update_repo_default_branch(
         self, repo_id: int, default_branch: str
     ) -> bool:
