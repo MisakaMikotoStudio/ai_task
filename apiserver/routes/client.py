@@ -579,7 +579,7 @@ def refresh_repo_token_api(client_id, repo_id):
         失败 (400/500):
             {"code": 4xx/5xx, "message": "错误信息"}
     """
-    from service.github_service import refresh_repo_token_by_url, GitHubServiceError
+    from service.git_service import refresh_repo_token_by_url, GitHubServiceError
 
     client = get_client_by_id(client_id=client_id, user_id=request.user_info.user_id)
     if not client:
