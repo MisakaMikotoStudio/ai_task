@@ -399,11 +399,17 @@ class CodeDevelopWorker(BaseWorker):
         """
         chat_messages = self.task.get("chat_messages", [])
         if not chat_messages:
+            logger.info(f"[{self.trace_id}] 聊天图片下载: chat_messages 为空，跳过")
             return []
 
         latest_msg = chat_messages[-1]
         extra = latest_msg.get("extra") or {}
         images = extra.get("images", [])
+        logger.info(
+            f"[{self.trace_id}] 聊天图片下载: 最新消息 id={latest_msg.get('id')}, "
+            f"extra 类型={type(extra).__name__}, extra keys={list(extra.keys()) if isinstance(extra, dict) else 'N/A'}, "
+            f"images 数量={len(images)}"
+        )
         if not images:
             return []
 
@@ -421,6 +427,7 @@ class CodeDevelopWorker(BaseWorker):
             oss_path = img.get("oss_path", "")
             filename = img.get("filename", "image")
             if not oss_path:
+                logger.warning(f"[{self.trace_id}] 聊天图片下载: 图片缺少 oss_path，跳过 (filename={filename})")
                 continue
 
             # 使用 oss_path 的文件名部分作为本地文件名（保留原始扩展名）
@@ -432,6 +439,7 @@ class CodeDevelopWorker(BaseWorker):
 
             try:
                 if oss_config and oss_config.secret_id and oss_config.bucket:
+                    logger.info(f"[{self.trace_id}] 聊天图片下载中: oss_path={oss_path}, local_path={local_path}")
                     self._download_image_from_oss(
                         oss_config=oss_config,
                         oss_path=oss_path,
@@ -448,6 +456,7 @@ class CodeDevelopWorker(BaseWorker):
             except Exception as e:
                 logger.error(f"[{self.trace_id}] 聊天图片下载失败: {oss_path}, error={e}")
 
+        logger.info(f"[{self.trace_id}] 聊天图片下载完成: 共 {len(images)} 张, 成功 {len(downloaded)} 张")
         return downloaded
 
     def _download_image_from_oss(self, oss_config, oss_path: str, local_path: str):
