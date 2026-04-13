@@ -254,6 +254,11 @@ def _get_installation_token_for_org(resource: Resource) -> str:
     return _create_installation_token(
         jwt_token=jwt_token,
         installation_id=installation_id,
+        permissions={
+            'administration': 'write',
+            'contents': 'write',
+            'metadata': 'read',
+        },
     )
 
 
@@ -322,6 +327,13 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
                     )
             raise GitHubServiceError(
                 f"创建仓库失败（422）：{error_data.get('message', resp.text)}"
+            )
+
+        if resp.status_code == 403:
+            raise GitHubServiceError(
+                f"创建仓库失败（HTTP 403 权限不足）：{resp.text[:200]}。"
+                f"请检查 GitHub App 是否已授予 Repository permissions > Administration: Read and write 权限，"
+                f"且 App 已安装到组织 {organization}"
             )
 
         if resp.status_code not in (200, 201):
