@@ -213,20 +213,13 @@ function scRenderClientSelect() {
 // ── Chat list ──
 async function loadStandaloneChatList(append = false) {
     try {
-        const res = await chatAPI.listStandaloneChats({
-            status: scStatusFilter,
-            page: scCurrentPage,
-            pageNum: scPageSize,
-        });
+        const opts = { status: scStatusFilter, page: scCurrentPage, pageNum: scPageSize };
+        const res = await chatAPI.listStandaloneChats(opts);
         const pageData = res.data || {};
         const items = pageData.items || [];
         scTotal = pageData.total || 0;
 
-        if (append) {
-            scChatList = scChatList.concat(items);
-        } else {
-            scChatList = items;
-        }
+        scChatList = append ? scChatList.concat(items) : items;
 
         scRenderChatList();
     } catch (error) {
@@ -244,12 +237,7 @@ function scRenderChatList() {
         return;
     }
 
-    const statusLabels = {
-        pending: '等待',
-        running: '执行中',
-        completed: '完成',
-        terminated: '终止'
-    };
+    const statusLabels = { pending: '等待', running: '执行中', completed: '完成', terminated: '终止' };
 
     listEl.innerHTML = scChatList.map(chat => {
         const isActive = chat.id === scSelectedChatId ? ' active' : '';
@@ -522,14 +510,8 @@ async function scHandleImageSelect(event, target) {
     const list = isWelcome ? scWelcomePendingImages : scDetailPendingImages;
 
     for (const file of files) {
-        if (!file.type.startsWith('image/')) {
-            showToast('仅支持图片文件', 'error');
-            continue;
-        }
-        if (file.size > 10 * 1024 * 1024) {
-            showToast(`${file.name} 超过 10MB 限制`, 'error');
-            continue;
-        }
+        if (!file.type.startsWith('image/')) { showToast('仅支持图片文件', 'error'); continue; }
+        if (file.size > 10 * 1024 * 1024) { showToast(`${file.name} 超过 10MB 限制`, 'error'); continue; }
         try {
             const res = await chatAPI.uploadImage(file);
             list.push(res.data);
@@ -611,10 +593,7 @@ async function scHandlePasteImages(e, target) {
     const existingNames = scGetExistingImageNames();
 
     for (const file of imageFiles) {
-        if (file.size > 10 * 1024 * 1024) {
-            showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error');
-            continue;
-        }
+        if (file.size > 10 * 1024 * 1024) { showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error'); continue; }
         const ext = scPasteImageExt(file.type);
         const uniqueName = scGenerateUniqueImageName(ext, existingNames);
         const renamedFile = new File([file], uniqueName, { type: file.type });
@@ -712,14 +691,8 @@ async function scSendNewChat() {
     const clientId = sel ? parseInt(sel.value) : 0;
     const inputText = textarea ? textarea.value.trim() : '';
 
-    if (!clientId) {
-        showToast('请选择一个应用', 'error');
-        return;
-    }
-    if (!inputText) {
-        showToast('请输入内容', 'error');
-        return;
-    }
+    if (!clientId) { showToast('请选择一个应用', 'error'); return; }
+    if (!inputText) { showToast('请输入内容', 'error'); return; }
 
     const images = scCollectAndClearImages('welcome');
     const extra = images.length > 0 ? { images } : {};

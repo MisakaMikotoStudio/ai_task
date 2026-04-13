@@ -66,11 +66,7 @@ def login():
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
     
     result = login_user(data.get('name', ''), data.get('password_hash', ''))
-    return jsonify({
-        'code': 200,
-        'message': '登录成功',
-        'data': result.to_dict()
-    })
+    return jsonify({'code': 200, 'message': '登录成功', 'data': result.to_dict()})
 
 
 @user_bp.route('/me', methods=['GET'])
@@ -99,10 +95,7 @@ def get_current_user():
 def list_secrets():
     """获取当前用户秘钥列表"""
     secrets_list = get_user_secrets(user_id=request.user_info.user_id)
-    return jsonify({
-        'code': 200,
-        'data': [s.to_dict() for s in secrets_list]
-    })
+    return jsonify({'code': 200, 'data': [s.to_dict() for s in secrets_list]})
 
 
 @user_bp.route('/secrets', methods=['POST'])
@@ -118,11 +111,7 @@ def create_secret():
         return jsonify({'code': 400, 'message': '秘钥名称长度不能超过64个字符'}), 400
 
     user_secret = create_user_secret(user_id=request.user_info.user_id, name=name)
-    return jsonify({
-        'code': 201,
-        'message': '秘钥创建成功',
-        'data': user_secret.to_dict()
-    }), 201
+    return jsonify({'code': 201, 'message': '秘钥创建成功', 'data': user_secret.to_dict()}), 201
 
 
 @user_bp.route('/secrets/<int:secret_id>', methods=['DELETE'])

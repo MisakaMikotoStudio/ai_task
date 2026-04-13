@@ -134,10 +134,7 @@ class ApiServerRpc:
                     f"HTTP状态码: {response.status_code}, "
                     f"响应内容预览: {content_preview}"
                 )
-                raise ApiException(
-                    response.status_code,
-                    f"服务器返回非 JSON 响应: {json_err}"
-                )
+                raise ApiException(response.status_code, f"服务器返回非 JSON 响应: {json_err}")
             
             # 检查业务状态码
             if response.status_code >= 400:
@@ -148,10 +145,7 @@ class ApiServerRpc:
                     f"请求traceId={headers['traceId']}, "
                     f"响应: {data.get('message', '请求失败')}"
                 )
-                raise ApiException(
-                    response.status_code,
-                    data.get('message', '请求失败')
-                )
+                raise ApiException(response.status_code, data.get('message', '请求失败'))
             
             return data
             
@@ -165,10 +159,7 @@ class ApiServerRpc:
                     f"第 {next_retry}/{max_network_retries} 次重试..."
                 )
                 time.sleep(sleep_seconds)
-                return self._request(
-                    method, endpoint, json_data, params,
-                    network_retry_count=next_retry
-                )
+                return self._request(method, endpoint, json_data, params, network_retry_count=next_retry)
             
             logger.error(f"请求异常 [{method}] {endpoint}: {e}，已达到最大重试次数")
             raise ApiException(0, f"请求异常: {e}")
@@ -230,11 +221,7 @@ class ApiServerRpc:
             是否更新成功
         """
         try:
-            self._request(
-                'PUT',
-                f'/api/task/{task_id}/flow',
-                json_data={'flow_status': flow_status, 'flow': flow}
-            )
+            self._request('PUT', f'/api/task/{task_id}/flow', json_data={'flow_status': flow_status, 'flow': flow})
             logger.info(f"更新任务 flow 成功: task_id={task_id}, flow_status={flow_status}")
             return True
         except ApiException as e:
@@ -316,18 +303,13 @@ class ApiServerRpc:
             新的 token，失败返回 None
         """
         try:
-            result = self._request(
-                'POST',
-                f'/api/client/{self.client_id}/repos/{repo_id}/refresh-token',
-            )
+            result = self._request('POST', f'/api/client/{self.client_id}/repos/{repo_id}/refresh-token')
             return result.get('data', {}).get('token')
         except ApiException as e:
             logger.warning(f"刷新仓库 token 失败: repo_id={repo_id}, {e.message}")
             return None
 
-    def update_repo_default_branch(
-        self, repo_id: int, default_branch: str
-    ) -> bool:
+    def update_repo_default_branch(self, repo_id: int, default_branch: str) -> bool:
         """
         更新仓库的默认主分支
 
@@ -351,21 +333,12 @@ class ApiServerRpc:
             return False
 
     # ==================== 同步执行结果（给客户端写入数据库） ====================
-    def sync_task_execute(
-        self,
-        task_id: int,
-        develop_doc: str,
-        merge_request: List[Dict[str, Any]],
-    ):
+    def sync_task_execute(self, task_id: int, develop_doc: str, merge_request: List[Dict[str, Any]]):
         """
         /api/task/sync_execute
         将 task 分支差异与开发文档链接写入 ai_task_tasks.extra
         """
-        payload = {
-            "task_id": task_id,
-            "develop_doc": develop_doc,
-            "merge_request": merge_request
-        }
+        payload = {"task_id": task_id, "develop_doc": develop_doc, "merge_request": merge_request}
         self._request("POST", "/api/task/sync_execute", json_data=payload)
 
     def sync_chat_msg_sync_execute(
@@ -389,21 +362,12 @@ class ApiServerRpc:
         }
         self._request("POST", "/api/chat/msg/sync_execute", json_data=payload)
 
-    def update_chat_status(
-        self,
-        task_id: int,
-        chat_id: int,
-        status: str,
-    ) -> bool:
+    def update_chat_status(self, task_id: int, chat_id: int, status: str) -> bool:
         """
         /api/chat/update_chat_status
         更新 Chat 状态（running / completed / terminated）
         """
-        payload = {
-            "task_id": task_id,
-            "chat_id": chat_id,
-            "status": status,
-        }
+        payload = {"task_id": task_id, "chat_id": chat_id, "status": status}
         try:
             self._request("POST", "/api/chat/update_chat_status", json_data=payload)
             return True
@@ -411,24 +375,13 @@ class ApiServerRpc:
             logger.warning(f"更新 Chat 状态失败: {e.message}")
             return False
 
-    def update_message_status(
-        self,
-        task_id: int,
-        chat_id: int,
-        message_id: int,
-        status: str,
-    ) -> bool:
+    def update_message_status(self, task_id: int, chat_id: int, message_id: int, status: str) -> bool:
         """
         /api/chat/msg/update_message_status
         更新 Message 状态（running / completed / terminated）
         """
-        payload = {
-            "task_id": task_id,
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "status": status,
-        }
-        return self._request("POST",f"/api/chat/msg/update_message_status", json_data=payload)
+        payload = {"task_id": task_id, "chat_id": chat_id, "message_id": message_id, "status": status}
+        return self._request("POST", f"/api/chat/msg/update_message_status", json_data=payload)
 
     def agent_reply_chat_msg(
         self,

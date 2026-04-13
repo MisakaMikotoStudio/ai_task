@@ -117,10 +117,7 @@ def decrypt_response_content(config: AlipayConfig, encrypted_content: str) -> Di
         raise ValueError("app_encrypt_key 未配置，无法解密支付宝响应内容")
 
     try:
-        plaintext = aes_decrypt(
-            ciphertext_b64=encrypted_content,
-            key_b64=config.app_encrypt_key,
-        )
+        plaintext = aes_decrypt(ciphertext_b64=encrypted_content, key_b64=config.app_encrypt_key)
         logger.debug("支付宝响应内容解密成功，长度=%d", len(plaintext))
         return json.loads(plaintext)
     except Exception as e:

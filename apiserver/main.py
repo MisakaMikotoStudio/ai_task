@@ -37,14 +37,14 @@ from flask_cors import CORS
 
 from config_model import AppConfig
 from dao import init_database, remove_session
-from routes.user import user_bp
-from routes.client import client_bp
-from routes.task import task_bp
-from routes.okr import okr_bp
-from routes.todo import todo_bp
-from routes.chat import chat_bp
-from routes.commercial import commercial_bp
-from routes.admin import admin_bp
+from routes.client.client import client_bp
+from routes.admin.admin import admin_bp
+from routes.api.user import user_bp
+from routes.api.task import task_bp
+from routes.api.okr import okr_bp
+from routes.api.todo import todo_bp
+from routes.api.chat import chat_bp
+from routes.api.commercial import commercial_bp
 from routes.auth_plugin import register_global_auth, skip_auth
 
 
@@ -150,11 +150,7 @@ def main():
     
     # 启动服务器
     print(f"Starting API Server on http://{config.server.host}:{config.server.port}")
-    app.run(
-        host=config.server.host,
-        port=config.server.port,
-        debug=config.server.debug
-    )
+    app.run(host=config.server.host, port=config.server.port, debug=config.server.debug)
 
 
 if __name__ == '__main__':

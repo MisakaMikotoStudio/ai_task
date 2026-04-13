@@ -505,11 +505,7 @@ async function resetTask(id) {
 
     try {
         // 1. 创建新任务（使用原任务的标题、客户端和状态）
-        await taskAPI.create(
-            task.title,
-            task.client_id,
-            task.status || 'pending'
-        );
+        await taskAPI.create(task.title, task.client_id, task.status || 'pending');
         
         // 2. 删除旧任务
         await taskAPI.delete(id);

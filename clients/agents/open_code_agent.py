@@ -13,14 +13,7 @@ from typing import Optional
 class OpenCodeAgent(BaseAgent):
     """Open Code Agent（待实现）"""
     
-    def _execute_prompt(
-        self,
-        trace_id: str,
-        cwd: str,
-        prompt: str,
-        timeout: int,
-        session_id: Optional[str] = None,
-    ):
+    def _execute_prompt(self, trace_id: str, cwd: str, prompt: str, timeout: int, session_id: Optional[str] = None):
         """
         执行 prompt（待实现）
         

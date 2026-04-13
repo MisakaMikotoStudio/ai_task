@@ -26,10 +26,7 @@ def upload_image(config: OssConfig, file_storage) -> str:
     上传产品图标到 COS，返回公开访问 URL
     file_storage: Flask FileStorage 对象
     """
-    ext = get_extension(
-        filename=file_storage.filename or '',
-        content_type=file_storage.content_type,
-    )
+    ext = get_extension(filename=file_storage.filename or '', content_type=file_storage.content_type)
     object_key = f'product/icon/{uuid.uuid4().hex}{ext}'
 
     file_data = file_storage.read()
@@ -53,10 +50,7 @@ def upload_chat_image(config: OssConfig, file_storage, user_id: int) -> dict:
     user_id: 当前用户 ID（用于构建存储路径，防止越权）
     """
     original_filename = file_storage.filename or 'image'
-    ext = get_extension(
-        filename=original_filename,
-        content_type=file_storage.content_type,
-    )
+    ext = get_extension(filename=original_filename, content_type=file_storage.content_type)
     oss_path = f'chat/images/{user_id}/{uuid.uuid4().hex}{ext}'
 
     file_data = file_storage.read()
@@ -68,19 +62,12 @@ def upload_chat_image(config: OssConfig, file_storage, user_id: int) -> dict:
     )
 
     logger.info("OSS 聊天图片上传成功: %s (user_id=%s)", oss_path, user_id)
-    return {
-        'oss_path': oss_path,
-        'filename': original_filename,
-    }
+    return {'oss_path': oss_path, 'filename': original_filename}
 
 
 def download_image_to_file(config: OssConfig, oss_path: str, local_path: str):
     """从 COS 下载文件到本地路径。"""
-    download_object(
-        config=config,
-        object_key=oss_path,
-        local_path=local_path,
-    )
+    download_object(config=config, object_key=oss_path, local_path=local_path)
 
 
 def generate_presigned_url(config: OssConfig, oss_path: str, expired: int = 600) -> str:
@@ -95,11 +82,7 @@ def generate_presigned_url(config: OssConfig, oss_path: str, expired: int = 600)
     Returns:
         预签名下载 URL
     """
-    url = generate_presigned_url_raw(
-        config=config,
-        object_key=oss_path,
-        expired=expired,
-    )
+    url = generate_presigned_url_raw(config=config, object_key=oss_path, expired=expired)
     logger.info("生成预签名 URL: path=%s, expired=%ds", oss_path, expired)
     return url
 

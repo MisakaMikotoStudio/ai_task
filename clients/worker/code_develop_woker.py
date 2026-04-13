@@ -10,6 +10,7 @@ import traceback
 import threading
 from typing import Optional, List
 from utils import git_utils
+from utils import git_utils_advanced
 import shutil
 import time
 import re
@@ -202,8 +203,8 @@ class CodeDevelopWorker(BaseWorker):
             work_repo_dir = os.path.join(self.work_dir, git_repo.name)
             dev_branch = dev_branch_fn(git_repo)
             base_branch = base_branch_fn(git_repo)
-            actual_branch = git_utils.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or dev_branch
-            diff_result = git_utils.collect_remote_branch_diff_info(
+            actual_branch = git_utils_advanced.get_current_branch(repo_dir=work_repo_dir, trace_id=self.trace_id) or dev_branch
+            diff_result = git_utils_advanced.collect_remote_branch_diff_info(
                 repo_dir=work_repo_dir,
                 dev_branch=dev_branch,
                 main_branch=base_branch,
@@ -214,7 +215,7 @@ class CodeDevelopWorker(BaseWorker):
                 logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} collect_diff 认证失败，尝试刷新 token")
                 if self.client_config.refresh_repo_token(repo_config=git_repo):
                     git_utils.update_remote_auth_url(work_repo_dir, git_repo.auth_url, trace_id=self.trace_id)
-                    diff_result = git_utils.collect_remote_branch_diff_info(
+                    diff_result = git_utils_advanced.collect_remote_branch_diff_info(
                         repo_dir=work_repo_dir,
                         dev_branch=dev_branch,
                         main_branch=base_branch,
@@ -225,7 +226,7 @@ class CodeDevelopWorker(BaseWorker):
                 continue
             if diff_result.message == "no_diff":
                 continue
-            actual_pr_url = git_utils.create_github_pr_if_not_exists(
+            actual_pr_url = git_utils_advanced.create_github_pr_if_not_exists(
                 repo_url=git_repo.url,
                 token=git_repo.token,
                 head_branch=dev_branch,
@@ -321,11 +322,7 @@ class CodeDevelopWorker(BaseWorker):
             prompt += "\n".join(image_lines)
 
         session_id = self.task.get("session_id") or ""
-        reply, session_id = self.run_agent_prompt(
-            cwd=self.work_dir,
-            prompt=prompt,
-            session_id=session_id,
-        )
+        reply, session_id = self.run_agent_prompt(cwd=self.work_dir, prompt=prompt, session_id=session_id)
 
         # 将 agent 输出同步回数据库（output + chat.session_id）
         task_id = self.task.get("task_id")
@@ -357,12 +354,8 @@ class CodeDevelopWorker(BaseWorker):
         if not os.path.exists(work_repo_dir):
             src_repo_dir = os.path.join(self.git_repo_cache_dir, git_repo.name)
             shutil.copytree(src_repo_dir, work_repo_dir, dirs_exist_ok=True)
-        git_utils.update_remote_auth_url(
-            work_repo_dir,
-            git_repo.auth_url,
-            trace_id=self.trace_id,
-        )
-        git_result = git_utils.sync_and_rebase_branch(
+        git_utils.update_remote_auth_url(work_repo_dir, git_repo.auth_url, trace_id=self.trace_id)
+        git_result = git_utils_advanced.sync_and_rebase_branch(
             repo_dir=work_repo_dir,
             dev_branch=dev_branch,
             default_branch=default_branch,
@@ -372,12 +365,8 @@ class CodeDevelopWorker(BaseWorker):
         if not git_result.success and git_utils.git_error_is_auth_failure(git_result.message):
             logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} sync_and_rebase 认证失败，尝试刷新 token")
             if self.client_config.refresh_repo_token(repo_config=git_repo):
-                git_utils.update_remote_auth_url(
-                    work_repo_dir,
-                    git_repo.auth_url,
-                    trace_id=self.trace_id,
-                )
-                git_result = git_utils.sync_and_rebase_branch(
+                git_utils.update_remote_auth_url(work_repo_dir, git_repo.auth_url, trace_id=self.trace_id)
+                git_result = git_utils_advanced.sync_and_rebase_branch(
                     repo_dir=work_repo_dir,
                     dev_branch=dev_branch,
                     default_branch=default_branch,
@@ -416,15 +405,12 @@ class CodeDevelopWorker(BaseWorker):
 - 如果冲突无法解决，执行 `git rebase --abort` 回退
 - rebase --continue 时必须使用 `GIT_EDITOR=true` 前缀，避免打开交互式编辑器"""
 
-        _reply, _session_id = self.run_agent_prompt(
-            cwd=work_repo_dir,
-            prompt=prompt,
-        )
+        _reply, _session_id = self.run_agent_prompt(cwd=work_repo_dir, prompt=prompt)
         # 通过检查 rebase 状态判断成功与否，而非依赖 agent 的文本输出
         rebase_in_progress = os.path.exists(os.path.join(work_repo_dir, '.git', 'rebase-merge')) or \
                              os.path.exists(os.path.join(work_repo_dir, '.git', 'rebase-apply'))
         if rebase_in_progress:
-            git_utils.abort_rebase(repo_dir=work_repo_dir, trace_id=self.trace_id)
+            git_utils_advanced.abort_rebase(repo_dir=work_repo_dir, trace_id=self.trace_id)
             raise Exception(f"Agent 未能完成 rebase 冲突解决，已自动 abort")
 
     def _download_chat_images(self) -> list:
@@ -474,11 +460,7 @@ class CodeDevelopWorker(BaseWorker):
             try:
                 if oss_config and oss_config.secret_id and oss_config.bucket:
                     logger.info(f"[{self.trace_id}] 聊天图片下载中: oss_path={oss_path}, local_path={local_path}")
-                    self._download_image_from_oss(
-                        oss_config=oss_config,
-                        oss_path=oss_path,
-                        local_path=local_path,
-                    )
+                    self._download_image_from_oss(oss_config=oss_config, oss_path=oss_path, local_path=local_path)
                 else:
                     logger.error(f"[{self.trace_id}] OSS STS 凭证不可用，无法下载图片: {oss_path}")
                     continue
@@ -652,7 +634,7 @@ class CodeDevelopWorker(BaseWorker):
         current_commit_map = {}
         for git_repo in self.code_git:
             work_repo_dir = os.path.join(self.work_dir, git_repo.name)
-            result = git_utils.get_local_head_commit_id(
+            result = git_utils_advanced.get_local_head_commit_id(
                 repo_dir=work_repo_dir,
                 trace_id=self.trace_id,
             )
@@ -714,10 +696,6 @@ class CodeDevelopWorker(BaseWorker):
 
     def _commit_and_push_all_git_repos(self):
         """兜底处理：遍历工作目录下所有 git 仓库，自动提交并推送。"""
-        from utils.git_utils import commit_and_push_all_repos
-        commit_and_push_all_repos(
-            work_dir=self.work_dir,
-            commit_message="default-commit-msg",
-            trace_id=self.trace_id,
-        )
+        from utils.git_utils_advanced import commit_and_push_all_repos
+        commit_and_push_all_repos(work_dir=self.work_dir, commit_message="default-commit-msg", trace_id=self.trace_id)
 
