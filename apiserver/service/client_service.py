@@ -613,9 +613,22 @@ def check_ssh_connectivity(ip: str, username: str, password: str) -> Tuple[bool,
         client.close()
 
 
+def _is_valid_ip_address(value: str) -> bool:
+    """判断字符串是否为合法的 IP 地址（IPv4 或 IPv6）"""
+    import ipaddress
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
 def check_servers_ssh(servers_data: dict) -> Tuple[bool, str]:
     """
-    对 servers_data 中所有非空 ip 的服务器配置进行 SSH 连通性校验。
+    对 servers_data 中所有非空 ip 的服务器配置进行校验。
+
+    - 如果 ip 是合法的 IP 地址，执行 SSH 连通性检查
+    - 如果 ip 不是合法 IP，检查是否为有效的、上架中的云服务器资源名称
 
     Args:
         servers_data: {"test": {"name": ..., "password": ..., "ip": ...}, "prod": {...}}
@@ -623,6 +636,9 @@ def check_servers_ssh(servers_data: dict) -> Tuple[bool, str]:
     Returns:
         (all_passed: bool, error_message: str)
     """
+    from dao.resource_dao import get_online_resource_by_name
+    from dao.models import Resource
+
     env_labels = {'test': '测试环境', 'prod': '生产环境'}
     for env_key, cfg in servers_data.items():
         if not isinstance(cfg, dict):
@@ -630,12 +646,20 @@ def check_servers_ssh(servers_data: dict) -> Tuple[bool, str]:
         ip = (cfg.get('ip') or '').strip()
         if not ip:
             continue
-        name = (cfg.get('name') or '').strip()
-        password = (cfg.get('password') or '').strip()
         label = env_labels.get(env_key, env_key)
-        ok, err = check_ssh_connectivity(ip=ip, username=name, password=password)
-        if not ok:
-            return False, f"{label} SSH 校验失败：{err}"
+
+        if _is_valid_ip_address(ip):
+            # 是合法 IP 地址，执行 SSH 连通性校验
+            name = (cfg.get('name') or '').strip()
+            password = (cfg.get('password') or '').strip()
+            ok, err = check_ssh_connectivity(ip=ip, username=name, password=password)
+            if not ok:
+                return False, f"{label} SSH 校验失败：{err}"
+        else:
+            # 不是 IP 地址，检查是否为有效的云服务器资源名称
+            resource = get_online_resource_by_name(name=ip)
+            if not resource or resource.type != Resource.TYPE_CLOUD_SERVER:
+                return False, f"{label} 云服务器 \"{ip}\" 不是有效的IP地址，也不是有效的、上架中的云服务器资源名称"
     return True, ""
 
 
@@ -999,6 +1023,35 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
                 env, db_name, resource.id, e.message,
             )
             # 不阻断其他环境的创建，继续处理
+
+    # 为 test、prod 两个环境分别分配云服务器资源
+    from dao.client_dao import upsert_client_server
+    for env in VALID_ENVS:
+        cloud_server_resources = get_online_resources_by_type_source(
+            type='cloud_server',
+            source='tencent_cloud',
+            env=env,
+        )
+        if not cloud_server_resources:
+            logger.warning(
+                "create_client_from_template: no cloud_server resource for env=%s, user_id=%s, skipping",
+                env, user_id,
+            )
+            continue
+
+        selected = random.choice(cloud_server_resources)
+        upsert_client_server(
+            client_id=client_id,
+            user_id=user_id,
+            env=env,
+            name='',
+            password='',
+            ip=selected.name,
+        )
+        logger.info(
+            "create_client_from_template: cloud server assigned, env=%s, resource_name=%s, resource_id=%s",
+            env, selected.name, selected.id,
+        )
 
     return client_id
 
