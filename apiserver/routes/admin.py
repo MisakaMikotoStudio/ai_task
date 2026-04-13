@@ -695,6 +695,11 @@ def update_resource_api(resource_id: int):
             return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
         final_type = res_type or existing.type
         final_source = source or existing.source
+        # 合并 extra：前端编辑时可能省略敏感字段（如 private_key、access_key_secret），
+        # 需要保留原值而非覆盖为空
+        merged_extra = dict(existing.get_raw_extra())
+        merged_extra.update(extra)
+        extra = merged_extra
         err = _validate_resource_extra(res_type=final_type, source=final_source, extra=extra)
         if err:
             return jsonify({'code': 400, 'message': err, 'data': None}), 400
@@ -822,6 +827,18 @@ def _validate_resource_extra(res_type: str, source: str, extra: dict) -> str:
             return 'AccessKey ID 不能为空'
         if not access_key_secret:
             return 'AccessKey Secret 不能为空'
+        return None
+
+    if res_type == Resource.TYPE_CODE_REPO and source == Resource.SOURCE_GITHUB:
+        organization = (extra.get('organization') or '').strip()
+        app_id = (extra.get('app_id') or '').strip()
+        private_key = (extra.get('private_key') or '').strip()
+        if not organization:
+            return 'GitHub Organization 不能为空'
+        if not app_id:
+            return 'GitHub App ID 不能为空'
+        if not private_key:
+            return 'GitHub App Private Key 不能为空'
         return None
 
     return f'暂不支持 type={res_type} + source={source} 的组合'

@@ -403,6 +403,88 @@ def get_repo_by_id(repo_id: int, client_id: int, user_id: int) -> Optional[Clien
         return repo
 
 
+def get_repo_by_url(user_id: int, url: str) -> Optional[ClientRepo]:
+    """
+    根据 URL 查询用户的仓库配置记录（不限 client_id）
+
+    Args:
+        user_id: 用户 ID
+        url: 仓库 URL
+
+    Returns:
+        ClientRepo 对象或 None
+    """
+    with get_db_session() as session:
+        return session.query(ClientRepo).filter(
+            ClientRepo.user_id == user_id,
+            ClientRepo.url == url,
+            ClientRepo.deleted_at.is_(None),
+        ).first()
+
+
+def add_client_repo(
+    client_id: int,
+    user_id: int,
+    url: str,
+    desc: str = '',
+    token: Optional[str] = None,
+    default_branch: str = 'main',
+    branch_prefix: str = 'ai_',
+    docs_repo: bool = False,
+) -> int:
+    """
+    新增一条客户端仓库配置记录
+
+    Args:
+        client_id: 客户端 ID
+        user_id: 用户 ID
+        url: 仓库 URL
+        desc: 仓库简介
+        token: 访问 token
+        default_branch: 默认分支
+        branch_prefix: 分支前缀
+        docs_repo: 是否为文档仓库
+
+    Returns:
+        新创建的仓库配置记录 ID
+    """
+    with get_db_session() as session:
+        repo = ClientRepo(
+            client_id=client_id,
+            user_id=user_id,
+            url=url,
+            desc=desc,
+            token=token,
+            default_branch=default_branch,
+            branch_prefix=branch_prefix,
+            docs_repo=docs_repo,
+        )
+        session.add(repo)
+        session.flush()
+        return repo.id
+
+
+def update_client_repo_token(repo_id: int, user_id: int, token: str) -> bool:
+    """
+    更新仓库的访问 token
+
+    Args:
+        repo_id: 仓库配置 ID
+        user_id: 用户 ID
+        token: 新的访问 token
+
+    Returns:
+        是否更新成功
+    """
+    with get_db_session() as session:
+        affected = session.query(ClientRepo).filter(
+            ClientRepo.id == repo_id,
+            ClientRepo.user_id == user_id,
+            ClientRepo.deleted_at.is_(None),
+        ).update({ClientRepo.token: token})
+        return affected > 0
+
+
 def get_clients_for_startup(user_id:  Optional[int] = None) -> List[dict]:    
     if user_id is None:
         """
