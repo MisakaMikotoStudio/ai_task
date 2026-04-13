@@ -82,7 +82,8 @@ RUN pip3 config set global.index-url https://mirrors.cloud.tencent.com/pypi/simp
 # Install Python dependencies
 RUN pip3 install --break-system-packages \
   claude-agent-sdk \
-  requests
+  requests \
+  cos-python-sdk-v5
 
 # 初始化 Claude CLI 配置，避免每次启动都执行登录
 RUN mkdir -p /home/node/.claude && \

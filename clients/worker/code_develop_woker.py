@@ -427,12 +427,19 @@ class CodeDevelopWorker(BaseWorker):
 
             try:
                 if oss_config and oss_config.secret_id and oss_config.bucket:
-                    # 通过 COS SDK 直接下载
-                    self._download_image_from_oss(
-                        oss_config=oss_config,
-                        oss_path=oss_path,
-                        local_path=local_path,
-                    )
+                    # 通过 COS SDK 直接下载，失败时回退到 apiserver 代理
+                    try:
+                        self._download_image_from_oss(
+                            oss_config=oss_config,
+                            oss_path=oss_path,
+                            local_path=local_path,
+                        )
+                    except Exception as oss_err:
+                        logger.warning(f"[{self.trace_id}] COS SDK 下载失败，回退到 apiserver 代理: {oss_err}")
+                        self._download_image_from_apiserver(
+                            oss_path=oss_path,
+                            local_path=local_path,
+                        )
                 else:
                     # 通过 apiserver 代理下载
                     self._download_image_from_apiserver(
