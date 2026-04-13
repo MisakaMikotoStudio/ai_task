@@ -3323,6 +3323,36 @@ function scCollectAndClearImages(target) {
     return images;
 }
 
+function scGetExistingImageNames() {
+    const names = new Set();
+    for (const msg of scMessagesCache) {
+        const extra = scParseMsgExtra(msg.extra);
+        for (const img of (extra.images || [])) {
+            if (img.filename) names.add(img.filename);
+        }
+    }
+    for (const img of scDetailPendingImages) {
+        if (img.filename) names.add(img.filename);
+    }
+    for (const img of scWelcomePendingImages) {
+        if (img.filename) names.add(img.filename);
+    }
+    return names;
+}
+
+function scPasteImageExt(mimeType) {
+    const map = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp' };
+    return map[mimeType] || '.png';
+}
+
+function scGenerateUniqueImageName(ext, existingNames) {
+    let n = 1;
+    while (existingNames.has(`粘贴图片_${n}${ext}`)) n++;
+    const name = `粘贴图片_${n}${ext}`;
+    existingNames.add(name);
+    return name;
+}
+
 async function scHandlePasteImages(e, target) {
     const items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
@@ -3340,14 +3370,18 @@ async function scHandlePasteImages(e, target) {
 
     const isWelcome = (target === 'welcome');
     const list = isWelcome ? scWelcomePendingImages : scDetailPendingImages;
+    const existingNames = scGetExistingImageNames();
 
     for (const file of imageFiles) {
         if (file.size > 10 * 1024 * 1024) {
             showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error');
             continue;
         }
+        const ext = scPasteImageExt(file.type);
+        const uniqueName = scGenerateUniqueImageName(ext, existingNames);
+        const renamedFile = new File([file], uniqueName, { type: file.type });
         try {
-            const res = await chatAPI.uploadImage(file);
+            const res = await chatAPI.uploadImage(renamedFile);
             list.push(res.data);
         } catch (err) {
             showToast(err.message, 'error');
