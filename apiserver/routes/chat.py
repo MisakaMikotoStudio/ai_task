@@ -10,7 +10,6 @@ import os
 from flask import Blueprint, request, jsonify, Response, current_app
 
 from dao.models import Chat, ChatMessage
-from dao import order_dao
 from dao.chat_dao import (
     create_chat, get_chats_by_task, get_chat_by_id, update_chat_status, soft_delete_chat,
     create_chat_message, get_messages_by_chat, get_running_message,
@@ -385,17 +384,12 @@ ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
 def upload_chat_image_api():
     """
     上传聊天图片到 OSS（私有读写）。
-    需要登录校验（全局中间件）+ 订阅校验。
+    登录 + 订阅校验由全局 auth_plugin 中间件统一处理。
     """
-    from service import oss_service
+    from service import oss_utils
 
     user = request.user_info
     config = current_app.config['APP_CONFIG']
-
-    # 订阅校验：用户必须有至少一个生效中的付费服务
-    active_orders = order_dao.get_user_active_orders(user_id=user.id)
-    if not active_orders:
-        return jsonify({'code': 403, 'message': '需要订阅服务后才能上传图片'}), 403
 
     if not config.oss.enabled:
         return jsonify({'code': 500, 'message': 'OSS 服务未启用'}), 500
@@ -418,7 +412,7 @@ def upload_chat_image_api():
         return jsonify({'code': 400, 'message': '图片大小不能超过 10MB'}), 400
 
     try:
-        result = oss_service.upload_chat_image(
+        result = oss_utils.upload_chat_image(
             config=config.oss,
             file_storage=file,
             user_id=user.user_id,
@@ -436,7 +430,7 @@ def get_chat_image_api():
     代理下载聊天图片（私有读写，前端无法直接访问 COS）。
     校验：登录 + 路径归属当前用户。
     """
-    from service import oss_service
+    from service import oss_utils
 
     user = request.user_info
     config = current_app.config['APP_CONFIG']
@@ -454,7 +448,7 @@ def get_chat_image_api():
         return jsonify({'code': 500, 'message': 'OSS 服务未启用'}), 500
 
     try:
-        file_content, content_type = oss_service.download_chat_image(
+        file_content, content_type = oss_utils.download_chat_image(
             config=config.oss,
             oss_path=oss_path,
         )

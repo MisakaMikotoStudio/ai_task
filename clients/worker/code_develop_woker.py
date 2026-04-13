@@ -451,24 +451,8 @@ class CodeDevelopWorker(BaseWorker):
 
     def _download_image_from_oss(self, oss_config, oss_path: str, local_path: str):
         """通过 COS SDK 直接下载图片"""
-        try:
-            from qcloud_cos import CosConfig, CosS3Client
-        except ImportError:
-            raise RuntimeError("请安装 cos-python-sdk-v5: pip install cos-python-sdk-v5")
-
-        cos_config = CosConfig(
-            Region=oss_config.region,
-            SecretId=oss_config.secret_id,
-            SecretKey=oss_config.secret_key,
-        )
-        client = CosS3Client(cos_config)
-        response = client.get_object(
-            Bucket=oss_config.bucket,
-            Key=oss_path,
-        )
-        file_content = response['Body'].get_raw_stream().read()
-        with open(local_path, 'wb') as f:
-            f.write(file_content)
+        from utils.oss_utils import download_image_to_file
+        download_image_to_file(config=oss_config, oss_path=oss_path, local_path=local_path)
 
     def _download_image_from_apiserver(self, oss_path: str, local_path: str):
         """通过 apiserver 代理接口下载图片"""
