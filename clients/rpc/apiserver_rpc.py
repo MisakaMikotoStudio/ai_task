@@ -203,31 +203,6 @@ class ApiServerRpc:
             raise ApiException(404, "任务不存在")
         return Task.from_dict(data)
 
-    def update_task_flow(
-        self, 
-        task_id: int, 
-        flow_status: Optional[str] = None, 
-        flow: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """
-        更新任务的 flow 状态和 flow 数据（只更新非 None 的字段）
-        
-        Args:
-            task_id: 任务 ID
-            flow_status: flow 状态（可选）
-            flow: flow 数据（可选）
-            
-        Returns:
-            是否更新成功
-        """
-        try:
-            self._request('PUT', f'/api/task/{task_id}/flow', json_data={'flow_status': flow_status, 'flow': flow})
-            logger.info(f"更新任务 flow 成功: task_id={task_id}, flow_status={flow_status}")
-            return True
-        except ApiException as e:
-            logger.warning(f"更新任务 flow 失败: {e.message}")
-            return False
-
     # ==================== 客户端相关 API ====================
 
     def get_running_chat_message(self, client_id: int) -> List[Dict[str, Any]]:

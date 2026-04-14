@@ -7,7 +7,7 @@ OKR 相关路由
 from flask import Blueprint, request, jsonify
 
 from service.okr_service import (
-    create_objective, get_objectives, get_objective, update_objective, delete_objective,
+    create_objective, get_objectives, update_objective, delete_objective,
     create_key_result, update_key_result, delete_key_result,
     reorder_objectives, reorder_key_results
 )
@@ -52,14 +52,6 @@ def list_objectives():
     objectives = get_objectives(request.user_info.user_id, cycle_type, status, cycle_start, cycle_end)
 
     return jsonify({'code': 200, 'message': '获取目标列表成功', 'data': objectives})
-
-
-@okr_bp.route('/objectives/<int:objective_id>', methods=['GET'])
-def get_objective_api(objective_id):
-    """获取目标详情"""
-    objective = get_objective(objective_id, request.user_info.user_id)
-
-    return jsonify({'code': 200, 'message': '获取目标成功', 'data': objective})
 
 
 @okr_bp.route('/objectives/<int:objective_id>', methods=['PUT'])

@@ -611,30 +611,6 @@ function wizardRenderDatabaseStep(isView) {
             wizardRenderDatabaseList();
         };
     }
-    const genBtn = document.getElementById('gen-default-db-btn');
-    if (genBtn) {
-        genBtn.style.display = isView ? 'none' : '';
-        genBtn.onclick = async () => {
-            genBtn.disabled = true;
-            genBtn.textContent = '创建中...';
-            try {
-                const apiObj = (typeof adminClientAPI !== 'undefined' && window.location.hash.includes('admin')) ? adminClientAPI : clientAPI;
-                const res = await apiObj.generateDefaultDatabase();
-                if (res.code === 200 && res.data) {
-                    cfgDatabasesByEnv[cfgDatabaseCurrentEnv].push(res.data);
-                    wizardRenderDatabaseList();
-                    showToast('默认数据库创建成功：' + res.data.db_name, 'success');
-                } else {
-                    showToast(res.message || '创建失败', 'error');
-                }
-            } catch (e) {
-                showToast(e.message || '创建数据库失败', 'error');
-            } finally {
-                genBtn.disabled = false;
-                genBtn.textContent = '生成默认数据库';
-            }
-        };
-    }
     const tabs = document.querySelectorAll('#database-env-tabs .wizard-env-tab');
     tabs.forEach(tab => {
         tab.onclick = () => {
