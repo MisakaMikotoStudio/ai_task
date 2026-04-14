@@ -1,13 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-认证模块
-支持两种认证方式：
-1. Token认证（Bearer token）- 用于 Web 前端
-2. Secret认证（X-Client-Secret）- 用于客户端
+认证模块 —— 按路由分类统一鉴权
+
+三类路由各自的鉴权策略：
+  /api/admin/*  — Token 登录验证 → 必须是 admin 用户
+  /api/app/*    — Token 登录验证 → 写操作需订阅校验（@skip_subscribe 可跳过）
+  /api/open/*   — Secret 秘钥验证
+
+两个跳过注解：
+  @skip_auth       — 跳过身份验证（无需确认用户身份）
+  @skip_subscribe  — 跳过订阅验证（无需订阅商品即可写操作）
 """
 
 import json
+import logging
 
 from flask import request, jsonify, current_app
 
@@ -16,24 +23,27 @@ from dao.secret_dao import update_secret_last_used_at
 from dao.user_dao import update_last_access
 from service.user_service import get_user_by_secret
 from service import permission_service
-import logging
 
 logger = logging.getLogger(__name__)
 
+
+# ===================== 跳过注解 =====================
+
 def skip_auth(f):
-    """标记接口跳过全局鉴权"""
+    """标记接口跳过身份验证（无需确认用户身份）"""
     setattr(f, '_skip_auth', True)
     return f
 
 
 def skip_subscribe(f):
-    """标记接口跳过订阅校验（仍需身份鉴权）"""
+    """标记接口跳过订阅验证（仍需身份鉴权）"""
     setattr(f, '_skip_subscribe', True)
     return f
 
 
+# ===================== 内部工具 =====================
+
 def _is_skip_auth_endpoint() -> bool:
-    """当前请求对应的endpoint是否显式跳过鉴权"""
     endpoint = request.endpoint
     if not endpoint:
         return False
@@ -42,7 +52,6 @@ def _is_skip_auth_endpoint() -> bool:
 
 
 def _is_skip_subscribe_endpoint() -> bool:
-    """当前请求对应的endpoint是否显式跳过订阅校验"""
     endpoint = request.endpoint
     if not endpoint:
         return False
@@ -58,7 +67,6 @@ _SENSITIVE_LOG_KEYS = frozenset({
 
 
 def _redact_sensitive(obj):
-    """递归脱敏字典/列表中的敏感字段值。"""
     if isinstance(obj, dict):
         return {
             k: ('***' if k in _SENSITIVE_LOG_KEYS else _redact_sensitive(v))
@@ -70,7 +78,6 @@ def _redact_sensitive(obj):
 
 
 def _request_body_for_log():
-    """提取用于日志的请求体/参数摘要（不记录文件内容，自动脱敏敏感字段）。"""
     if request.method in ('GET', 'HEAD', 'OPTIONS', 'TRACE'):
         args = dict(request.args)
         return _redact_sensitive(args) if args else None
@@ -98,18 +105,101 @@ def _request_body_for_log():
         return text
 
 
-def _check_subscription_for_write(trace_id: str):
-    """对非 GET/HEAD/OPTIONS 请求做 subscribed 鉴权"""
+def _log_request(trace_id: str):
+    """记录请求日志"""
+    try:
+        body = _request_body_for_log()
+        body_repr = json.dumps(body, ensure_ascii=False, default=str) if body is not None else ''
+    except Exception as e:
+        body_repr = f'<body_log_error: {e}>'
+    if len(body_repr) > 8192:
+        body_repr = body_repr[:8192] + '...(truncated)'
+    logger.info(
+        '需要登录验证的请求 method=%s path=%s body=%s',
+        request.method,
+        request.path,
+        body_repr,
+        extra={'trace_id': trace_id},
+    )
+
+
+# ===================== Token 登录验证 =====================
+
+def _authenticate_by_token(trace_id: str):
+    """通过 Bearer Token 验证身份，成功后设置 request.user_info。
+    返回 None 表示成功，否则返回错误 response。
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return jsonify({"code": 401, "message": "缺少认证token"}), 401
+
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"code": 401, "message": "Token格式错误"}), 401
+
+    token = auth_header.split(' ')[1]
+    if not token:
+        return jsonify({"code": 401, "message": "缺少认证token"}), 401
+
+    try:
+        user_session = session_dao.get_session_by_token(token)
+        if not user_session:
+            return jsonify({"code": 401, "message": "无效的认证信息"}), 401
+
+        user_info = user_dao.get_user_by_id(user_session.user_id)
+        if not user_info:
+            return jsonify({"code": 401, "message": "无效的认证信息"}), 401
+    except Exception as e:
+        logger.error("Token验证异常: %s", e, extra={'trace_id': trace_id}, exc_info=True)
+        return jsonify({"code": 500, "message": "Token验证异常"}), 500
+
+    request.user_info = user_info
+
+    try:
+        update_last_access(user_info.id)
+    except Exception as e:
+        logger.error("更新用户最近访问时间失败: %s", e, extra={'trace_id': trace_id}, exc_info=True)
+
+    return None
+
+
+# ===================== Secret 秘钥验证 =====================
+
+def _authenticate_by_secret(trace_id: str):
+    """通过 X-Client-Secret 验证身份，成功后设置 request.user_info。
+    返回 None 表示成功，否则返回错误 response。
+    """
+    secret = request.headers.get('X-Client-Secret')
+    if not secret:
+        return jsonify({"code": 401, "message": "缺少认证秘钥"}), 401
+
+    try:
+        user_info = get_user_by_secret(secret)
+        if not user_info:
+            return jsonify({"code": 401, "message": "无效的秘钥"}), 401
+    except Exception as e:
+        logger.error("秘钥验证异常: %s", e, extra={'trace_id': trace_id}, exc_info=True)
+        return jsonify({"code": 500, "message": "秘钥验证异常"}), 500
+
+    request.user_info = user_info
+
+    try:
+        update_secret_last_used_at(secret)
+    except Exception as e:
+        logger.error("更新秘钥最近使用时间失败: %s", e, extra={'trace_id': trace_id}, exc_info=True)
+
+    return None
+
+
+# ===================== 订阅校验 =====================
+
+def _check_subscription(trace_id: str):
+    """对非 GET/HEAD/OPTIONS 请求做订阅校验。
+    返回 None 表示通过，否则返回 403 response。
+    """
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return None
 
-    # 标记了 @skip_subscribe 的接口只做身份鉴权，跳过订阅权限校验
     if _is_skip_subscribe_endpoint():
-        return None
-
-    # admin 接口只做身份鉴权，跳过订阅权限校验
-    endpoint = request.endpoint or ''
-    if endpoint.startswith('admin.'):
         return None
 
     user_info = getattr(request, 'user_info', None)
@@ -135,125 +225,84 @@ def _check_subscription_for_write(trace_id: str):
             extra={'trace_id': trace_id},
             exc_info=True,
         )
-        # 鉴权异常时不阻塞请求，记录日志后放行
     return None
 
 
-def _do_auth_check():
-    """执行鉴权逻辑（支持 Token 和 Secret 两种方式）"""
-    trace_id = get_trace_id()
-    request.trace_id = trace_id
+# ===================== 各类路由鉴权入口 =====================
 
-    try:
-        body = _request_body_for_log()
-        body_repr = json.dumps(body, ensure_ascii=False, default=str) if body is not None else ''
-    except Exception as e:
-        body_repr = f'<body_log_error: {e}>'
-    if len(body_repr) > 8192:
-        body_repr = body_repr[:8192] + '...(truncated)'
-    logger.info(
-        '需要登录验证的请求 method=%s path=%s body=%s',
-        request.method,
-        request.path,
-        body_repr,
-        extra={'trace_id': trace_id},
-    )
+def _auth_admin(trace_id: str):
+    """admin 路由：Token 登录 → 必须是 admin 用户"""
+    err = _authenticate_by_token(trace_id)
+    if err:
+        return err
 
-    # 优先检查 Secret 认证
-    secret = request.headers.get('X-Client-Secret')
-    if secret:
-        try:
-            user_info = get_user_by_secret(secret)
-            if user_info:
-                request.user_info = user_info
-                # 更新秘钥最近使用时间
-                try:
-                    update_secret_last_used_at(secret)
-                except Exception as e:
-                    logger.error(f"更新秘钥最近使用时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-                # 非 GET 请求统一做订阅鉴权
-                return _check_subscription_for_write(trace_id=trace_id)
-            else:
-                logger.error("无效的秘钥", extra={'trace_id': trace_id})
-                return jsonify({"code": 401, "message": "无效的秘钥"}), 401
-        except Exception as e:
-            logger.error(f"秘钥验证异常: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-            return jsonify({"code": 500, "message": "秘钥验证异常"}), 500
+    user = getattr(request, 'user_info', None)
+    if not user or getattr(user, 'name', None) != 'admin':
+        return jsonify({'code': 403, 'message': '需要管理员权限', 'data': None}), 403
 
-    # 回退到前后端通用 Token 认证
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        logger.error("请求缺少认证token", extra={'trace_id': trace_id})
-        return jsonify({"code": 401, "message": "缺少认证token"}), 401
+    return None
 
-    if not auth_header.startswith('Bearer '):
-        logger.error("Token格式错误", extra={'trace_id': trace_id})
-        return jsonify({"code": 401, "message": "Token格式错误"}), 401
 
-    token = auth_header.split(' ')[1]
-    if not token:
-        logger.error("认证token为空", extra={'trace_id': trace_id})
-        return jsonify({"code": 401, "message": "缺少认证token"}), 401
+def _auth_app(trace_id: str):
+    """app 路由：Token 登录 → 写操作订阅校验"""
+    err = _authenticate_by_token(trace_id)
+    if err:
+        return err
 
-    try:
-        user_session = session_dao.get_session_by_token(token)
-        if not user_session:
-            logger.error("Token无效或已过期", extra={'trace_id': trace_id})
-            return jsonify({"code": 401, "message": "无效的认证信息"}), 401
+    return _check_subscription(trace_id)
 
-        user_id = user_session.user_id
-        user_info = user_dao.get_user_by_id(user_id)
-        if not user_info:
-            logger.error("无效的Token: %s***", token[:8] if token else '', extra={'trace_id': trace_id})
-            return jsonify({"code": 401, "message": "无效的认证信息"}), 401
-    except Exception as e:
-        logger.error(f"Token验证异常: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
-        return jsonify({"code": 500, "message": "Token验证异常"}), 500
 
-    request.user_info = user_info
+def _auth_open(trace_id: str):
+    """open 路由：Secret 秘钥验证"""
+    return _authenticate_by_secret(trace_id)
 
-    # 更新用户最近访问时间
-    try:
-        update_last_access(user_info.id)
-    except Exception as e:
-        logger.error(f"更新用户最近访问时间失败: {str(e)}", extra={'trace_id': trace_id}, exc_info=True)
 
-    # 非 GET 请求统一做订阅鉴权
-    return _check_subscription_for_write(trace_id=trace_id)
-
+# ===================== 全局鉴权注册 =====================
 
 def register_global_auth(app, api_prefix: str = '/api'):
-    """注册全局鉴权：默认所有 API 接口需要登录，可通过 @skip_auth 放行。
-    """
+    """注册全局鉴权 before_request。"""
 
     @app.before_request
     def _global_auth_guard():
-        # CORS 预检请求放行
         if request.method == 'OPTIONS':
             return None
 
-        # 非 API 路径放行（例如静态资源）
         if not request.path.startswith(api_prefix):
             return None
 
-        # 标记了跳过鉴权的 endpoint 放行
         if _is_skip_auth_endpoint():
             return None
 
-        return _do_auth_check()
+        trace_id = _ensure_trace_id()
+        _log_request(trace_id)
 
-def get_trace_id():
-    # 检查trace_id是否已存在于请求上下文中
+        admin_prefix = f'{api_prefix}/admin'
+        app_prefix = f'{api_prefix}/app'
+        open_prefix = f'{api_prefix}/open'
+
+        path = request.path
+        if path.startswith(admin_prefix):
+            return _auth_admin(trace_id)
+        elif path.startswith(app_prefix):
+            return _auth_app(trace_id)
+        elif path.startswith(open_prefix):
+            return _auth_open(trace_id)
+        else:
+            # 未匹配的 /api 路径（如 /api/health 应通过 @skip_auth 放行）
+            logger.warning("未匹配的API路径: %s", path, extra={'trace_id': trace_id})
+            return jsonify({"code": 401, "message": "缺少认证信息"}), 401
+
+
+def _ensure_trace_id() -> str:
+    """获取或生成 traceId"""
     if hasattr(request, 'trace_id') and request.trace_id:
         return request.trace_id
 
-    # 尝试从请求头或URL参数中获取
     trace_id = request.headers.get('traceId')
     if not trace_id:
-        # 如果没有 traceId，生成一个默认的，而不是抛出异常
         import uuid
         trace_id = f"auto-{uuid.uuid4()}"
-        logger.warning(f"请求缺少 traceId，自动生成: {trace_id}")
-    # 将trace_id附加到请求对象，以便后续使用
+        logger.warning("请求缺少 traceId，自动生成: %s", trace_id)
+
     request.trace_id = trace_id
     return trace_id

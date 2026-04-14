@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-OKR 相关路由
+OKR 相关路由（Web 前端调用）
 """
 
 from flask import Blueprint, request, jsonify
@@ -12,7 +12,7 @@ from service.okr_service import (
     reorder_objectives, reorder_key_results
 )
 
-okr_bp = Blueprint('okr', __name__)
+okr_bp = Blueprint('app_okr', __name__)
 
 
 # ========== Objective Routes ==========
@@ -38,12 +38,7 @@ def create_objective_api():
 
 @okr_bp.route('/objectives', methods=['GET'])
 def list_objectives():
-    """获取目标列表
-
-    支持周期范围过滤（优化查询性能）：
-    - cycle_start: 周期开始日期 (YYYY-MM-DD)
-    - cycle_end: 周期结束日期 (YYYY-MM-DD)
-    """
+    """获取目标列表"""
     cycle_type = request.args.get('cycle_type')
     status = request.args.get('status')
     cycle_start = request.args.get('cycle_start')

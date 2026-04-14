@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-任务相关路由
+任务相关路由（Web 前端调用）
 """
 
 from flask import Blueprint, request, jsonify
 
 from service.task_service import (
     create_task, get_tasks, get_task, update_status, delete_task,
-    sync_execute, TaskValidationException
+    TaskValidationException
 )
-from dao.task_dao import get_task_by_id
 
-task_bp = Blueprint('task', __name__)
+task_bp = Blueprint('app_task', __name__)
 
 
 @task_bp.route('', methods=['POST'])
@@ -54,7 +53,7 @@ def list_tasks():
 def get_task_info(task_id):
     """获取任务详情"""
     task = get_task(task_id=task_id, user_id=request.user_info.user_id)
-    
+
     return jsonify({'code': 200, 'message': '获取任务成功', 'data': task})
 
 
@@ -62,12 +61,12 @@ def get_task_info(task_id):
 def update_task_status_api(task_id):
     """更新任务状态"""
     data = request.get_json()
-    
+
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
-    
+
     result = update_status(task_id=task_id, user_id=request.user_info.user_id, status=data.get('status', ''))
-    
+
     return jsonify({'code': 200, 'message': '状态更新成功', 'data': result})
 
 
@@ -77,28 +76,3 @@ def delete_task_api(task_id):
     result = delete_task(task_id=task_id, user_id=request.user_info.user_id)
 
     return jsonify({'code': 200, 'message': '任务删除成功', 'data': result})
-
-
-@task_bp.route('/sync_execute', methods=['POST'])
-def sync_execute_api():
-    """
-    同步执行信息到 ai_task_tasks.extra
-    """
-    data = request.get_json() or {}
-    task_id = data.get('task_id')
-    develop_doc = data.get('develop_doc', '')
-    merge_request = data.get('merge_request', [])
-
-    if not task_id:
-        return jsonify({'code': 400, 'message': 'task_id不能为空'}), 400
-    if merge_request is None or not isinstance(merge_request, list):
-        return jsonify({'code': 400, 'message': 'merge_request必须是数组'}), 400
-
-    result = sync_execute(
-        task_id=int(task_id),
-        user_id=request.user_info.user_id,
-        develop_doc=develop_doc,
-        merge_request=merge_request
-    )
-
-    return jsonify({'code': 200, 'message': '同步成功', 'data': result})

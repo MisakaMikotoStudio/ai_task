@@ -23,7 +23,7 @@ logging.basicConfig(
 class _QuietPollFilter(logging.Filter):
     """过滤高频轮询接口的 werkzeug 请求日志，避免刷屏"""
     _quiet_prefixes = (
-        '"GET /api/task ',
+        '"GET /api/app/task ',
         '"GET /api/health ',
     )
 
@@ -37,14 +37,25 @@ from flask_cors import CORS
 
 from config_model import AppConfig
 from dao import init_database, remove_session
-from routes.client.client import client_bp
+
+# App 前端路由
+from routes.app.user import user_bp as app_user_bp
+from routes.app.task import task_bp as app_task_bp
+from routes.app.chat import chat_bp as app_chat_bp
+from routes.app.okr import okr_bp as app_okr_bp
+from routes.app.todo import todo_bp as app_todo_bp
+from routes.app.commercial import commercial_bp as app_commercial_bp
+from routes.app.client import client_bp as app_client_bp
+
+# Admin 管理后台路由
 from routes.admin.admin import admin_bp
-from routes.api.user import user_bp
-from routes.api.task import task_bp
-from routes.api.okr import okr_bp
-from routes.api.todo import todo_bp
-from routes.api.chat import chat_bp
-from routes.api.commercial import commercial_bp
+
+# Open 第三方服务路由
+from routes.open.client import client_bp as open_client_bp
+from routes.open.task import task_bp as open_task_bp
+from routes.open.chat import chat_bp as open_chat_bp
+from routes.open.user import user_bp as open_user_bp
+
 from routes.auth_plugin import register_global_auth, skip_auth
 
 
@@ -66,15 +77,24 @@ def create_app(config: AppConfig) -> Flask:
     # 构建 URL 前缀（处理空前缀情况）
     prefix = config.server.url_prefix.rstrip('/') if config.server.url_prefix else ''
 
-    # 注册蓝图
-    app.register_blueprint(user_bp, url_prefix=f'{prefix}/api/user')
-    app.register_blueprint(client_bp, url_prefix=f'{prefix}/api/client')
-    app.register_blueprint(task_bp, url_prefix=f'{prefix}/api/task')
-    app.register_blueprint(okr_bp, url_prefix=f'{prefix}/api/okr')
-    app.register_blueprint(todo_bp, url_prefix=f'{prefix}/api/todo')
-    app.register_blueprint(chat_bp, url_prefix=f'{prefix}/api/chat')
-    app.register_blueprint(commercial_bp, url_prefix=f'{prefix}/api/commercial')
+    # 注册蓝图 —— App 前端
+    app.register_blueprint(app_user_bp, url_prefix=f'{prefix}/api/app/user')
+    app.register_blueprint(app_task_bp, url_prefix=f'{prefix}/api/app/task')
+    app.register_blueprint(app_chat_bp, url_prefix=f'{prefix}/api/app/chat')
+    app.register_blueprint(app_okr_bp, url_prefix=f'{prefix}/api/app/okr')
+    app.register_blueprint(app_todo_bp, url_prefix=f'{prefix}/api/app/todo')
+    app.register_blueprint(app_commercial_bp, url_prefix=f'{prefix}/api/app/commercial')
+    app.register_blueprint(app_client_bp, url_prefix=f'{prefix}/api/app/client')
+
+    # 注册蓝图 —— Admin 管理后台
     app.register_blueprint(admin_bp, url_prefix=f'{prefix}/api/admin')
+
+    # 注册蓝图 —— Open 第三方服务
+    app.register_blueprint(open_client_bp, url_prefix=f'{prefix}/api/open')
+    app.register_blueprint(open_task_bp, url_prefix=f'{prefix}/api/open/task')
+    app.register_blueprint(open_chat_bp, url_prefix=f'{prefix}/api/open/chat')
+    app.register_blueprint(open_user_bp, url_prefix=f'{prefix}/api/open/user')
+
     register_global_auth(app, api_prefix=f'{prefix}/api')
 
     api_prefix = f'{prefix}/api'
@@ -105,7 +125,7 @@ def create_app(config: AppConfig) -> Flask:
             'message': '服务器内部错误',
             'data': None
         }), 500
-    
+
     # 请求结束时清理session
     @app.teardown_appcontext
     def shutdown_session(exception=None):
@@ -134,20 +154,20 @@ def main():
     parser.add_argument('--config', '-c', type=str, default='config.toml',
                         help='Path to configuration file (TOML format)')
     args = parser.parse_args()
-    
+
     # 加载配置
     if not os.path.exists(args.config):
         print(f"Error: Config file not found: {args.config}")
         sys.exit(1)
-    
+
     config = AppConfig.from_toml(args.config)
-    
+
     # 初始化数据库（检查并创建表）
     init_database(config.database)
-    
+
     # 创建应用
     app = create_app(config)
-    
+
     # 启动服务器
     print(f"Starting API Server on http://{config.server.host}:{config.server.port}")
     app.run(host=config.server.host, port=config.server.port, debug=config.server.debug)

@@ -20,7 +20,6 @@ import logging
 import os
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from functools import wraps
 
 from flask import Blueprint, request, jsonify, current_app
 
@@ -47,21 +46,7 @@ MAX_PRODUCT_KEY_LEN = 64
 MAX_PRODUCT_ICON_BYTES = 10 * 1024 * 1024  # 与 Flask MAX_CONTENT_LENGTH、前端一致
 
 
-def require_admin(f):
-    """要求当前登录用户为管理员（name == 'admin'）。"""
-
-    @wraps(f)
-    def _wrapper(*args, **kwargs):
-        user = getattr(request, 'user_info', None)
-        if not user or getattr(user, 'name', None) != 'admin':
-            return jsonify({'code': 403, 'message': '需要管理员权限', 'data': None}), 403
-        return f(*args, **kwargs)
-
-    return _wrapper
-
-
 @admin_bp.route('/product', methods=['POST'])
-@require_admin
 def create_product():
     """新增商品"""
     data = request.get_json(silent=True) or {}
@@ -141,7 +126,6 @@ def create_product():
 
 
 @admin_bp.route('/products', methods=['GET'])
-@require_admin
 def list_products_admin():
     """管理端商品列表（含已下架）"""
     products = product_dao.list_all_products_admin()
@@ -154,7 +138,6 @@ def list_products_admin():
 
 
 @admin_bp.route('/product/<int:product_id>/offline', methods=['POST'])
-@require_admin
 def offline_product(product_id: int):
     """下架商品（软删除，前台不再展示）"""
     with get_db_session():
@@ -165,7 +148,6 @@ def offline_product(product_id: int):
 
 
 @admin_bp.route('/product/<int:product_id>/online', methods=['POST'])
-@require_admin
 def online_product(product_id: int):
     """上架商品（恢复已下架商品，前台重新展示）"""
     with get_db_session():
@@ -177,7 +159,6 @@ def online_product(product_id: int):
 
 
 @admin_bp.route('/orders', methods=['GET'])
-@require_admin
 def list_orders():
     """查询用户购买记录，支持分页和过滤"""
     page = int(request.args.get('page', 1))
@@ -207,7 +188,6 @@ def list_orders():
 
 
 @admin_bp.route('/orders/<int:order_id>/refund', methods=['POST'])
-@require_admin
 def refund_order(order_id: int):
     """管理员退款：调用支付宝退款接口，成功后更新本地订单状态"""
     order = order_dao.get_order_by_id(order_id=order_id)
@@ -241,7 +221,6 @@ def refund_order(order_id: int):
 
 
 @admin_bp.route('/upload/icon', methods=['POST'])
-@require_admin
 def upload_icon():
     """上传商品封面图到 OSS，返回公开访问链接"""
     config = current_app.config['APP_CONFIG']
@@ -276,14 +255,12 @@ def upload_icon():
 
 
 @admin_bp.route('/secrets', methods=['GET'])
-@require_admin
 def admin_list_secrets():
     secrets_list = get_user_secrets(user_id=request.user_info.user_id)
     return jsonify({'code': 200, 'data': [s.to_dict() for s in secrets_list]})
 
 
 @admin_bp.route('/secrets', methods=['POST'])
-@require_admin
 def admin_create_secret():
     data = request.get_json() or {}
     name = data.get('name', '').strip()
@@ -298,7 +275,6 @@ def admin_create_secret():
 
 
 @admin_bp.route('/secrets/<int:secret_id>', methods=['DELETE'])
-@require_admin
 def admin_delete_secret(secret_id: int):
     if not delete_user_secret(secret_id=secret_id, user_id=request.user_info.user_id):
         return jsonify({'code': 404, 'message': '秘钥不存在', 'data': None}), 404
@@ -310,13 +286,11 @@ def admin_delete_secret(secret_id: int):
 
 
 @admin_bp.route('/clients/agents', methods=['GET'])
-@require_admin
 def admin_get_available_agents():
     return jsonify({'code': 200, 'data': AVAILABLE_AGENTS})
 
 
 @admin_bp.route('/clients', methods=['GET'])
-@require_admin
 def admin_list_clients():
     result = get_clients_by_user(user_id=request.user_info.user_id)
 
@@ -331,7 +305,6 @@ def admin_list_clients():
 
 
 @admin_bp.route('/clients', methods=['POST'])
-@require_admin
 def admin_create_client():
     data = request.get_json(silent=True)
     if not data:
@@ -355,7 +328,6 @@ def admin_create_client():
 
 
 @admin_bp.route('/clients/<int:client_id>', methods=['GET'])
-@require_admin
 def admin_get_client_detail(client_id: int):
     payload = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not payload:
@@ -364,7 +336,6 @@ def admin_get_client_detail(client_id: int):
 
 
 @admin_bp.route('/clients/<int:client_id>', methods=['PUT'])
-@require_admin
 def admin_update_client(client_id: int):
     data = request.get_json(silent=True)
     if not data:
@@ -390,7 +361,6 @@ def admin_update_client(client_id: int):
 
 
 @admin_bp.route('/clients/<int:client_id>', methods=['DELETE'])
-@require_admin
 def admin_delete_client(client_id: int):
     if not delete_client(client_id, request.user_info.user_id):
         return jsonify({'code': 404, 'message': '客户端不存在', 'data': None}), 404
@@ -399,7 +369,6 @@ def admin_delete_client(client_id: int):
 
 
 @admin_bp.route('/clients/<int:client_id>/copy', methods=['POST'])
-@require_admin
 def admin_copy_client(client_id: int):
     """复制客户端（admin 专用）"""
     source_detail = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
@@ -436,7 +405,6 @@ MAX_PERMISSION_PRODUCT_KEY_LEN = 64
 
 
 @admin_bp.route('/permissions', methods=['GET'])
-@require_admin
 def list_permissions():
     """获取所有权限配置，按 key 分组返回三层结构"""
     configs = permission_dao.get_all_configs()
@@ -460,7 +428,6 @@ def list_permissions():
 
 
 @admin_bp.route('/permission', methods=['POST'])
-@require_admin
 def create_permission():
     """新增权限配置"""
     data = request.get_json(silent=True) or {}
@@ -510,7 +477,6 @@ def create_permission():
 
 
 @admin_bp.route('/permission/<int:config_id>', methods=['PUT'])
-@require_admin
 def update_permission(config_id: int):
     """更新权限配置"""
     data = request.get_json(silent=True) or {}
@@ -563,7 +529,6 @@ def update_permission(config_id: int):
 
 
 @admin_bp.route('/permission/<int:config_id>', methods=['DELETE'])
-@require_admin
 def delete_permission(config_id: int):
     """删除权限配置（软删除）"""
     with get_db_session():
@@ -577,7 +542,6 @@ def delete_permission(config_id: int):
 
 
 @admin_bp.route('/resources', methods=['GET'])
-@require_admin
 def list_resources_api():
     """获取资源列表（含已下架）"""
     resources = resource_dao.list_resources(include_offline=True)
@@ -585,7 +549,6 @@ def list_resources_api():
 
 
 @admin_bp.route('/resource', methods=['POST'])
-@require_admin
 def create_resource_api():
     """新增资源"""
     data = request.get_json(silent=True) or {}
@@ -640,7 +603,6 @@ def create_resource_api():
 
 
 @admin_bp.route('/resource/<int:resource_id>', methods=['PUT'])
-@require_admin
 def update_resource_api(resource_id: int):
     """更新资源"""
     data = request.get_json(silent=True) or {}
@@ -709,7 +671,6 @@ def update_resource_api(resource_id: int):
 
 
 @admin_bp.route('/resource/<int:resource_id>/offline', methods=['POST'])
-@require_admin
 def offline_resource_api(resource_id: int):
     """下架资源"""
     with get_db_session():
@@ -721,7 +682,6 @@ def offline_resource_api(resource_id: int):
 
 
 @admin_bp.route('/resource/<int:resource_id>/online', methods=['POST'])
-@require_admin
 def online_resource_api(resource_id: int):
     """上架资源"""
     with get_db_session():
@@ -733,7 +693,6 @@ def online_resource_api(resource_id: int):
 
 
 @admin_bp.route('/resource/<int:resource_id>', methods=['DELETE'])
-@require_admin
 def delete_resource_api(resource_id: int):
     """删除资源（硬删除）"""
     with get_db_session():
@@ -745,7 +704,6 @@ def delete_resource_api(resource_id: int):
 
 
 @admin_bp.route('/resource/<int:resource_id>/databases', methods=['GET'])
-@require_admin
 def list_resource_databases_api(resource_id: int):
     """查询资源上的用户数据库（通过 user_id 过滤）"""
     user_id_param = request.args.get('user_id')
@@ -771,7 +729,6 @@ def list_resource_databases_api(resource_id: int):
 
 
 @admin_bp.route('/resource/<int:resource_id>/create-database', methods=['POST'])
-@require_admin
 def create_resource_database_api(resource_id: int):
     """在指定资源上为用户创建数据库 + 账号"""
     data = request.get_json(silent=True) or {}
