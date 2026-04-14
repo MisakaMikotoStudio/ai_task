@@ -88,7 +88,8 @@ class ApiServerRpc:
         endpoint: str,
         json_data: Optional[Dict] = None,
         params: Optional[Dict] = None,
-        network_retry_count: int = 0
+        network_retry_count: int = 0,
+        timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         发送请求（内部方法）
@@ -99,6 +100,7 @@ class ApiServerRpc:
             json_data: JSON 请求体
             params: URL 查询参数
             network_retry_count: 网络异常重试次数（内部使用）
+            timeout: 请求超时秒数，不传时使用默认值 self._timeout
             
         Returns:
             响应数据
@@ -108,9 +110,11 @@ class ApiServerRpc:
         """
         url = f"{self.base_url}{endpoint}"
         max_network_retries = 10
+        effective_timeout = timeout if timeout is not None else self._timeout
         
         try:
             headers = self._get_headers()
+            trace_id = headers['traceId']
             logger.debug(f"请求: {method} {endpoint}, json_data={json_data}, params={params}")
             response = requests.request(
                 method=method,
@@ -118,7 +122,7 @@ class ApiServerRpc:
                 json=json_data,
                 params=params,
                 headers=headers,
-                timeout=self._timeout
+                timeout=effective_timeout
             )
             logger.debug(f"响应: {response.status_code}, {response.text}")
             
@@ -130,7 +134,7 @@ class ApiServerRpc:
                 content_preview = response.text[:500] if response.text else "(空响应)"
                 logger.error(
                     f"JSON 解析失败 [{method}] {endpoint}: {json_err}, "
-                    f"请求traceId={headers['traceId']}, "
+                    f"请求traceId={trace_id}, "
                     f"HTTP状态码: {response.status_code}, "
                     f"响应内容预览: {content_preview}"
                 )
@@ -142,7 +146,7 @@ class ApiServerRpc:
                     f"API调用失败 [{method}] {url}, "
                     f"params={params}, body={json_data}, "
                     f"HTTP状态码: {response.status_code}, "
-                    f"请求traceId={headers['traceId']}, "
+                    f"请求traceId={trace_id}, "
                     f"响应: {data.get('message', '请求失败')}"
                 )
                 raise ApiException(response.status_code, data.get('message', '请求失败'))
@@ -150,18 +154,19 @@ class ApiServerRpc:
             return data
             
         except requests.RequestException as e:
-            # 网络异常重试逻辑：最多重试3次，每次间隔10秒
+            # 网络异常重试逻辑：最多重试10次，每次间隔10秒
             if network_retry_count < max_network_retries:
                 next_retry = network_retry_count + 1
                 sleep_seconds = 10
                 logger.warning(
                     f"网络异常 [{method}] {endpoint}: {e}，"
+                    f"traceId={trace_id}，"
                     f"第 {next_retry}/{max_network_retries} 次重试..."
                 )
                 time.sleep(sleep_seconds)
-                return self._request(method, endpoint, json_data, params, network_retry_count=next_retry)
+                return self._request(method, endpoint, json_data, params, network_retry_count=next_retry, timeout=timeout)
             
-            logger.error(f"请求异常 [{method}] {endpoint}: {e}，已达到最大重试次数")
+            logger.error(f"请求异常 [{method}] {endpoint}: {e}，traceId={trace_id}，已达到最大重试次数")
             raise ApiException(0, f"请求异常: {e}")
 
     def check_health(self):
@@ -278,7 +283,7 @@ class ApiServerRpc:
             新的 token，失败返回 None
         """
         try:
-            result = self._request('POST', f'/api/open/{self.client_id}/repos/{repo_id}/refresh-token')
+            result = self._request('POST', f'/api/open/{self.client_id}/repos/{repo_id}/refresh-token', timeout=30)
             return result.get('data', {}).get('token')
         except ApiException as e:
             logger.warning(f"刷新仓库 token 失败: repo_id={repo_id}, {e.message}")

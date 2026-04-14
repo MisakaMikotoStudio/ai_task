@@ -120,7 +120,8 @@ def _log_request(trace_id: str):
     if len(body_repr) > 8192:
         body_repr = body_repr[:8192] + '...(truncated)'
     logger.info(
-        '需要登录验证的请求 method=%s path=%s body=%s',
+        '需要登录验证的请求 traceId=%s method=%s path=%s body=%s',
+        trace_id,
         request.method,
         request.path,
         body_repr,
