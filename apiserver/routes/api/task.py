@@ -30,11 +30,7 @@ def create_task_api():
         status=data.get('status')
     )
 
-    return jsonify({
-        'code': 201,
-        'message': '任务创建成功',
-        'data': task.to_dict()
-    }), 201
+    return jsonify({'code': 201, 'message': '任务创建成功', 'data': task.to_dict()}), 201
 
 
 @task_bp.route('', methods=['GET'])
@@ -51,11 +47,7 @@ def list_tasks():
         page=page,
         page_num=page_num
     )
-    return jsonify({
-        'code': 200,
-        'message': '获取任务列表成功',
-        'data': tasks
-    })
+    return jsonify({'code': 200, 'message': '获取任务列表成功', 'data': tasks})
 
 
 @task_bp.route('/<int:task_id>', methods=['GET'])
@@ -63,11 +55,7 @@ def get_task_info(task_id):
     """获取任务详情"""
     task = get_task(task_id=task_id, user_id=request.user_info.user_id)
     
-    return jsonify({
-        'code': 200,
-        'message': '获取任务成功',
-        'data': task  # get_task 已返回处理后的字典
-    })
+    return jsonify({'code': 200, 'message': '获取任务成功', 'data': task})
 
 
 @task_bp.route('/<int:task_id>/status', methods=['PATCH'])
@@ -78,32 +66,17 @@ def update_task_status_api(task_id):
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
     
-    result = update_status(
-        task_id=task_id,
-        user_id=request.user_info.user_id,
-        status=data.get('status', '')
-    )
+    result = update_status(task_id=task_id, user_id=request.user_info.user_id, status=data.get('status', ''))
     
-    return jsonify({
-        'code': 200,
-        'message': '状态更新成功',
-        'data': result
-    })
+    return jsonify({'code': 200, 'message': '状态更新成功', 'data': result})
 
 
 @task_bp.route('/<int:task_id>', methods=['DELETE'])
 def delete_task_api(task_id):
     """删除任务"""
-    result = delete_task(
-        task_id=task_id,
-        user_id=request.user_info.user_id
-    )
+    result = delete_task(task_id=task_id, user_id=request.user_info.user_id)
 
-    return jsonify({
-        'code': 200,
-        'message': '任务删除成功',
-        'data': result
-    })
+    return jsonify({'code': 200, 'message': '任务删除成功', 'data': result})
 
 
 @task_bp.route('/sync_execute', methods=['POST'])
@@ -128,8 +101,4 @@ def sync_execute_api():
         merge_request=merge_request
     )
 
-    return jsonify({
-        'code': 200,
-        'message': '同步成功',
-        'data': result
-    })
+    return jsonify({'code': 200, 'message': '同步成功', 'data': result})

@@ -451,8 +451,7 @@ class Product(Base):
     support_continue = Column(Boolean, nullable=False, default=False, comment='是否支持续费')
     icon = Column(String(512), nullable=True, comment='商品封面图 URL')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
-    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
-                        onupdate=func.utc_timestamp(), comment='更新时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
     deleted_at = Column(DateTime, nullable=True, comment='删除时间（软删除）')
 
     __table_args__ = (
@@ -489,8 +488,7 @@ class Order(Base):
     order_type = Column(String(16), nullable=False, default='purchase', comment='purchase/renew')
     expire_at = Column(DateTime, nullable=True, comment='权益到期时间')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
-    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
-                        onupdate=func.utc_timestamp(), comment='更新时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
 
     STATUS_PENDING = 'pending'
     STATUS_PAID = 'paid'
@@ -713,8 +711,7 @@ class PermissionConfig(Base):
     product_key = Column(String(64), nullable=False, comment='关联的产品 key')
     config_detail = Column(JSON, nullable=True, comment='具体权限配置（如 {"limit": 5}）')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
-    updated_at = Column(DateTime, server_default=func.utc_timestamp(),
-                        onupdate=func.utc_timestamp(), comment='更新时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
     deleted_at = Column(DateTime, nullable=True, comment='删除时间（软删除）')
 
     TYPE_COUNT_LIMIT = 'count_limit'

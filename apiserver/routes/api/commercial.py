@@ -123,11 +123,7 @@ def my_orders():
     except (ValueError, TypeError):
         return jsonify({'code': 400, 'message': '分页参数无效', 'data': None}), 400
 
-    orders, total = order_dao.list_orders(
-        user_id=user.id,
-        page=page,
-        page_size=page_size,
-    )
+    orders, total = order_dao.list_orders(user_id=user.id, page=page, page_size=page_size)
 
     # 批量查商品名称（按 key 去重避免重复查询）
     product_keys = list({o.product_key for o in orders})

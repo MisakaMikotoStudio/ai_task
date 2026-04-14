@@ -121,13 +121,7 @@ class BaseWorker(threading.Thread):
         logger.info(f"[{self.trace_id}] 节点 {self.worker_name} 收到停止请求")
         self._terminate_managed_processes()
 
-    def run_agent_prompt(
-        self,
-        prompt: str,
-        cwd: str,
-        session_id: Optional[str] = None,
-        timeout: Optional[int] = 36000,
-    ):
+    def run_agent_prompt(self, prompt: str, cwd: str, session_id: Optional[str] = None, timeout: Optional[int] = 36000):
         """通过统一托管入口调用 agent，确保底层子进程可被 stop() 终止。"""
         if self.stop_requested:
             raise RuntimeError(f"[{self.trace_id}] 节点 {self.worker_name} 已停止，拒绝继续调用 agent")
@@ -145,22 +139,13 @@ class BaseWorker(threading.Thread):
             raise RuntimeError(f"[{self.trace_id}] 节点 {self.worker_name} 已停止，丢弃 agent 输出")
         return result
 
-    def create_managed_popen(
-        self,
-        *args,
-        process_name: Optional[str] = None,
-        **kwargs,
-    ) -> subprocess.Popen:
+    def create_managed_popen(self, *args, process_name: Optional[str] = None, **kwargs) -> subprocess.Popen:
         """创建并登记子进程，便于 stop() 时统一回收。"""
         process = subprocess.Popen(*args, **kwargs)
         self.register_process(process, process_name=process_name)
         return process
 
-    def register_process(
-        self,
-        process: subprocess.Popen,
-        process_name: Optional[str] = None,
-    ) -> None:
+    def register_process(self, process: subprocess.Popen, process_name: Optional[str] = None) -> None:
         name = process_name or getattr(process, "args", None) or "subprocess"
         with self._process_lock:
             self._managed_processes[id(process)] = (process, str(name))

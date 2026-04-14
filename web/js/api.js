@@ -73,18 +73,13 @@ async function request(url, options = {}) {
 const userAPI = {
     // 注册
     async register(name, passwordHash) {
-        return request('/user/register', {
-            method: 'POST',
-            body: JSON.stringify({ name, password_hash: passwordHash })
-        });
+        const body = JSON.stringify({ name, password_hash: passwordHash });
+        return request('/user/register', { method: 'POST', body });
     },
-    
+
     // 登录
     async login(name, passwordHash) {
-        return request('/user/login', {
-            method: 'POST',
-            body: JSON.stringify({ name, password_hash: passwordHash })
-        });
+        return request('/user/login', { method: 'POST', body: JSON.stringify({ name, password_hash: passwordHash }) });
     },
     
     // 获取当前用户
@@ -118,10 +113,7 @@ const clientAPI = {
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
-        return request('/client', {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
+        return request('/client', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 更新（可选 repos、env_vars、infrastructure 全量同步）
@@ -132,17 +124,12 @@ const clientAPI = {
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
-        return request(`/client/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(body)
-        });
+        return request(`/client/${id}`, { method: 'PUT', body: JSON.stringify(body) });
     },
 
     // 删除
     async delete(id) {
-        return request(`/client/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/client/${id}`, { method: 'DELETE' });
     },
 
     // 获取客户端完整配置（repos、agent 等）
@@ -152,28 +139,19 @@ const clientAPI = {
 
     // 复制客户端
     async copy(id) {
-        return request(`/client/${id}/copy`, {
-            method: 'POST'
-        });
+        return request(`/client/${id}/copy`, { method: 'POST' });
     },
 
     // 生成默认数据库
     async generateDefaultDatabase() {
-        return request('/client/generate-default-database', {
-            method: 'POST'
-        });
+        return request('/client/generate-default-database', { method: 'POST' });
     },
 
     // 从模板生成默认应用
     async createFromTemplate(appTypes, appName) {
         const payload = { app_types: appTypes };
-        if (appName) {
-            payload.name = appName;
-        }
-        return request('/client/create-from-template', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
+        if (appName) payload.name = appName;
+        return request('/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
     }
 };
 
@@ -187,17 +165,12 @@ const secretAPI = {
 
     // 创建
     async create(name) {
-        return request('/user/secrets', {
-            method: 'POST',
-            body: JSON.stringify({ name })
-        });
+        return request('/user/secrets', { method: 'POST', body: JSON.stringify({ name }) });
     },
 
     // 删除
     async delete(id) {
-        return request(`/user/secrets/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/user/secrets/${id}`, { method: 'DELETE' });
     }
 };
 
@@ -207,15 +180,10 @@ const adminSecretAPI = {
         return request('/admin/secrets');
     },
     async create(name) {
-        return request('/admin/secrets', {
-            method: 'POST',
-            body: JSON.stringify({ name })
-        });
+        return request('/admin/secrets', { method: 'POST', body: JSON.stringify({ name }) });
     },
     async delete(id) {
-        return request(`/admin/secrets/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/admin/secrets/${id}`, { method: 'DELETE' });
     }
 };
 
@@ -236,10 +204,7 @@ const adminClientAPI = {
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
-        return request('/admin/clients', {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
+        return request('/admin/clients', { method: 'POST', body: JSON.stringify(body) });
     },
     async update(id, name, options = {}) {
         const body = { name };
@@ -248,39 +213,25 @@ const adminClientAPI = {
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
-        return request(`/admin/clients/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(body)
-        });
+        return request(`/admin/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
     },
     async delete(id) {
-        return request(`/admin/clients/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/admin/clients/${id}`, { method: 'DELETE' });
     },
     async copy(id) {
-        return request(`/admin/clients/${id}/copy`, {
-            method: 'POST'
-        });
+        return request(`/admin/clients/${id}/copy`, { method: 'POST' });
     },
 
     // 生成默认数据库（复用 /client 路由，管理员通过 token 鉴权）
     async generateDefaultDatabase() {
-        return request('/client/generate-default-database', {
-            method: 'POST'
-        });
+        return request('/client/generate-default-database', { method: 'POST' });
     },
 
     // 从模板生成默认应用（复用 /client 路由，管理员通过 token 鉴权）
     async createFromTemplate(appTypes, appName) {
         const payload = { app_types: appTypes };
-        if (appName) {
-            payload.name = appName;
-        }
-        return request('/client/create-from-template', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
+        if (appName) payload.name = appName;
+        return request('/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
     }
 };
 
@@ -315,25 +266,16 @@ const adminCommerceAPI = {
         return data;
     },
     async createProduct(productData) {
-        return request('/admin/product', {
-            method: 'POST',
-            body: JSON.stringify(productData)
-        });
+        return request('/admin/product', { method: 'POST', body: JSON.stringify(productData) });
     },
     async getAdminProducts() {
-        return request('/admin/products', {
-            method: 'GET'
-        });
+        return request('/admin/products', { method: 'GET' });
     },
     async offlineProduct(productId) {
-        return request(`/admin/product/${productId}/offline`, {
-            method: 'POST'
-        });
+        return request(`/admin/product/${productId}/offline`, { method: 'POST' });
     },
     async onlineProduct(productId) {
-        return request(`/admin/product/${productId}/online`, {
-            method: 'POST'
-        });
+        return request(`/admin/product/${productId}/online`, { method: 'POST' });
     },
     async getOrders(params = {}) {
         const query = new URLSearchParams();
@@ -345,9 +287,7 @@ const adminCommerceAPI = {
         return request(`/admin/orders${qs}`);
     },
     async refundOrder(orderId) {
-        return request(`/admin/orders/${orderId}/refund`, {
-            method: 'POST'
-        });
+        return request(`/admin/orders/${orderId}/refund`, { method: 'POST' });
     }
 };
 
@@ -356,21 +296,13 @@ const adminPermissionAPI = {
         return request('/admin/permissions');
     },
     async create(data) {
-        return request('/admin/permission', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
+        return request('/admin/permission', { method: 'POST', body: JSON.stringify(data) });
     },
     async update(id, data) {
-        return request(`/admin/permission/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        return request(`/admin/permission/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
     async remove(id) {
-        return request(`/admin/permission/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/admin/permission/${id}`, { method: 'DELETE' });
     }
 };
 
@@ -380,40 +312,26 @@ const adminResourceAPI = {
         return request('/admin/resources');
     },
     async create(data) {
-        return request('/admin/resource', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
+        return request('/admin/resource', { method: 'POST', body: JSON.stringify(data) });
     },
     async update(id, data) {
-        return request(`/admin/resource/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        return request(`/admin/resource/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
     async offline(id) {
-        return request(`/admin/resource/${id}/offline`, {
-            method: 'POST'
-        });
+        return request(`/admin/resource/${id}/offline`, { method: 'POST' });
     },
     async online(id) {
-        return request(`/admin/resource/${id}/online`, {
-            method: 'POST'
-        });
+        return request(`/admin/resource/${id}/online`, { method: 'POST' });
     },
     async remove(id) {
-        return request(`/admin/resource/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/admin/resource/${id}`, { method: 'DELETE' });
     },
     async listDatabases(resourceId, userId) {
         return request(`/admin/resource/${resourceId}/databases?user_id=${userId}`);
     },
     async createDatabase(resourceId, userId) {
-        return request(`/admin/resource/${resourceId}/create-database`, {
-            method: 'POST',
-            body: JSON.stringify({ user_id: userId })
-        });
+        const body = JSON.stringify({ user_id: userId });
+        return request(`/admin/resource/${resourceId}/create-database`, { method: 'POST', body });
     }
 };
 
@@ -456,25 +374,17 @@ const taskAPI = {
         if (status !== null) {
             body.status = status;
         }
-        return request('/task', {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
+        return request('/task', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 更新状态
     async updateStatus(id, status) {
-        return request(`/task/${id}/status`, {
-            method: 'PATCH',
-            body: JSON.stringify({ status })
-        });
+        return request(`/task/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
     },
 
     // 删除任务
     async delete(id) {
-        return request(`/task/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/task/${id}`, { method: 'DELETE' });
     },
 };
 
@@ -494,75 +404,48 @@ const okrAPI = {
 
     // 创建目标
     async createObjective(title, description = null, cycleType = 'quarter', cycleStart = null, cycleEnd = null) {
-        return request('/okr/objectives', {
-            method: 'POST',
-            body: JSON.stringify({
-                title,
-                description,
-                cycle_type: cycleType,
-                cycle_start: cycleStart,
-                cycle_end: cycleEnd
-            })
-        });
+        const body = { title, description, cycle_type: cycleType, cycle_start: cycleStart, cycle_end: cycleEnd };
+        return request('/okr/objectives', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 更新目标
     async updateObjective(id, data) {
-        return request(`/okr/objectives/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        return request(`/okr/objectives/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
 
     // 删除目标
     async deleteObjective(id) {
-        return request(`/okr/objectives/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/okr/objectives/${id}`, { method: 'DELETE' });
     },
 
     // ========== KeyResult ==========
     // 创建KR
     async createKeyResult(objectiveId, title, description = null) {
-        return request(`/okr/objectives/${objectiveId}/key-results`, {
-            method: 'POST',
-            body: JSON.stringify({
-                title,
-                description
-            })
-        });
+        const body = JSON.stringify({ title, description });
+        return request(`/okr/objectives/${objectiveId}/key-results`, { method: 'POST', body });
     },
 
     // 更新KR
     async updateKeyResult(id, data) {
-        return request(`/okr/key-results/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        return request(`/okr/key-results/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
 
     // 删除KR
     async deleteKeyResult(id) {
-        return request(`/okr/key-results/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/okr/key-results/${id}`, { method: 'DELETE' });
     },
 
     // ========== Reorder ==========
     // 重新排序目标
     async reorderObjectives(objectiveIds) {
-        return request('/okr/objectives/reorder', {
-            method: 'POST',
-            body: JSON.stringify({ objective_ids: objectiveIds })
-        });
+        const body = JSON.stringify({ objective_ids: objectiveIds });
+        return request('/okr/objectives/reorder', { method: 'POST', body });
     },
 
     // 重新排序KR
     async reorderKeyResults(objectiveId, krIds) {
-        return request(`/okr/objectives/${objectiveId}/key-results/reorder`, {
-            method: 'POST',
-            body: JSON.stringify({ kr_ids: krIds })
-        });
+        const body = JSON.stringify({ kr_ids: krIds });
+        return request(`/okr/objectives/${objectiveId}/key-results/reorder`, { method: 'POST', body });
     }
 };
 
@@ -599,10 +482,7 @@ const chatAPI = {
     async createChat(taskId, title, sessionid = null) {
         const body = { title };
         if (sessionid) body.sessionid = sessionid;
-        return request(`/chat/task/${taskId}/chats`, {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
+        return request(`/chat/task/${taskId}/chats`, { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 独立 Chat（task_id=0）
@@ -618,23 +498,17 @@ const chatAPI = {
     },
 
     async createStandaloneChatWithMessage(input, clientId, extra = {}) {
-        return request('/chat/standalone/messages', {
-            method: 'POST',
-            body: JSON.stringify({ input, client_id: clientId, extra })
-        });
+        const body = JSON.stringify({ input, client_id: clientId, extra });
+        return request('/chat/standalone/messages', { method: 'POST', body });
     },
 
     async updateChatStatus(taskId, chatId, status) {
-        return request(`/chat/task/${taskId}/chats/${chatId}/status`, {
-            method: 'PATCH',
-            body: JSON.stringify({ status })
-        });
+        const body = JSON.stringify({ status });
+        return request(`/chat/task/${taskId}/chats/${chatId}/status`, { method: 'PATCH', body });
     },
 
     async deleteChat(taskId, chatId) {
-        return request(`/chat/task/${taskId}/chats/${chatId}`, {
-            method: 'DELETE'
-        });
+        return request(`/chat/task/${taskId}/chats/${chatId}`, { method: 'DELETE' });
     },
 
     async listMessages(taskId, chatId) {
@@ -642,25 +516,18 @@ const chatAPI = {
     },
 
     async createMessage(taskId, chatId, input, extra = {}) {
-        return request(`/chat/task/${taskId}/chats/${chatId}/messages`, {
-            method: 'POST',
-            body: JSON.stringify({ input, extra })
-        });
+        const body = JSON.stringify({ input, extra });
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages`, { method: 'POST', body });
     },
 
     // 软删除消息（用户终止），返回 { input } 用于回填输入框
     async deleteMessage(taskId, chatId, messageId) {
-        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, {
-            method: 'DELETE'
-        });
+        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, { method: 'DELETE' });
     },
 
     // 自动创建Chat并发送消息（Chat标题取输入内容前32字符）
     async createChatWithMessage(taskId, input, extra = {}) {
-        return request(`/chat/task/${taskId}/messages`, {
-            method: 'POST',
-            body: JSON.stringify({ input, extra })
-        });
+        return request(`/chat/task/${taskId}/messages`, { method: 'POST', body: JSON.stringify({ input, extra }) });
     },
 
     // 上传聊天图片（私有存储），返回 { oss_path, filename }
@@ -690,10 +557,7 @@ const commercialAPI = {
     async buy(productId, orderType = 'purchase', device = null) {
         const body = { product_id: productId, order_type: orderType };
         if (device) body.device = device;
-        return request('/commercial/buy', {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
+        return request('/commercial/buy', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 获取当前用户的订单列表（分页）
@@ -716,10 +580,7 @@ const todoAPI = {
 
     // 创建
     async create(content) {
-        return request('/todo', {
-            method: 'POST',
-            body: JSON.stringify({ content })
-        });
+        return request('/todo', { method: 'POST', body: JSON.stringify({ content }) });
     },
 
     // 更新
@@ -727,17 +588,12 @@ const todoAPI = {
         const body = {};
         if (content !== null) body.content = content;
         if (completed !== null) body.completed = completed;
-        return request(`/todo/${id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(body)
-        });
+        return request(`/todo/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
     },
 
     // 删除
     async delete(id) {
-        return request(`/todo/${id}`, {
-            method: 'DELETE'
-        });
+        return request(`/todo/${id}`, { method: 'DELETE' });
     }
 };
 

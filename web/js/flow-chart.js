@@ -5,9 +5,7 @@
 
 class FlowChart {
     constructor(container, options = {}) {
-        this.container = typeof container === 'string' 
-            ? document.querySelector(container) 
-            : container;
+        this.container = typeof container === 'string' ? document.querySelector(container) : container;
         this.options = {
             readonly: false,
             nodeWidth: 220,
@@ -164,9 +162,7 @@ class FlowChart {
     renderNode(node) {
         const statusClass = `flow-node-${node.status || 'pending'}`;
         const selectedClass = this.selectedNodeId === node.id ? 'flow-node-selected' : '';
-        const style = node.position 
-            ? `left: ${node.position.x}px; top: ${node.position.y}px;` 
-            : '';
+        const style = node.position ? `left: ${node.position.x}px; top: ${node.position.y}px;` : '';
 
         return `
             <div class="flow-node ${statusClass} ${selectedClass}" 
@@ -359,9 +355,7 @@ window.FlowChart = FlowChart;
  */
 class NodeDetailPanel {
     constructor(container, options = {}) {
-        this.container = typeof container === 'string'
-            ? document.querySelector(container)
-            : container;
+        this.container = typeof container === 'string' ? document.querySelector(container) : container;
         this.options = {
             readonly: false,
             onFieldChange: null,
@@ -492,9 +486,8 @@ class NodeDetailPanel {
 
             // 特殊处理：feedback 字段只在编辑模式+revising状态下可编辑
             const isFeedbackField = field.key === 'feedback';
-            const fieldEditable = isFeedbackField 
-                ? (isEditable && nodeStatus === 'revising')  // feedback: 编辑模式 + revising 状态才可编辑
-                : isEditable;                                 // 其他字段遵循原有逻辑
+            // feedback: 编辑模式 + revising 状态才可编辑; 其他字段遵循原有逻辑
+            const fieldEditable = isFeedbackField ? (isEditable && nodeStatus === 'revising') : isEditable;
 
             switch (field.fieldType) {
                 case 'text':

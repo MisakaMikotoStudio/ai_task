@@ -26,9 +26,7 @@ function renderStoreProductCard(product) {
     const iconHtml = product.icon
         ? `<img src="${escapeHtml(product.icon)}" alt="${escapeHtml(product.title)}" class="store-product-icon">`
         : `<div class="store-product-icon-placeholder">🛍️</div>`;
-    const expireText = product.expire_time
-        ? `有效期 ${Math.round(product.expire_time / 86400)} 天`
-        : '永久有效';
+    const expireText = product.expire_time ? `有效期 ${Math.round(product.expire_time / 86400)} 天` : '永久有效';
     const renewBtn = product.support_continue
         ? `<button class="store-buy-btn btn-primary" data-id="${product.id}" data-type="renew">续费</button>`
         : '';
@@ -176,9 +174,7 @@ async function loadMyOrders(page) {
         tbody.innerHTML = orders.map((order) => {
             const statusMap = { pending: '待支付', paid: '已支付', failed: '失败', refunded: '已退款' };
             const typeMap = { purchase: '购买', renew: '续费' };
-            const expireText = order.expire_at
-                ? new Date(order.expire_at).toLocaleDateString('zh-CN')
-                : (order.status === 'paid' ? '永久' : '-');
+            const expireText = order.expire_at ? new Date(order.expire_at).toLocaleDateString('zh-CN') : (order.status === 'paid' ? '永久' : '-');
             const statusClass = order.status === 'paid' ? 'status-paid'
                 : order.status === 'refunded' ? 'status-refunded'
                 : order.status === 'failed' ? 'status-failed'

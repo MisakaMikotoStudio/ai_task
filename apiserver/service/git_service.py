@@ -87,14 +87,8 @@ def _get_installation_token_for_org(resource: Resource) -> str:
         GitHubServiceError: 获取失败
     """
     config = _get_resource_config(resource=resource)
-    jwt_token = generate_app_jwt(
-        app_id=config['app_id'],
-        private_key_pem=config['private_key'],
-    )
-    installation_id = get_installation_id(
-        jwt_token=jwt_token,
-        organization=config['organization'],
-    )
+    jwt_token = generate_app_jwt(app_id=config['app_id'], private_key_pem=config['private_key'])
+    installation_id = get_installation_id(jwt_token=jwt_token, organization=config['organization'])
     return create_installation_token(
         jwt_token=jwt_token,
         installation_id=installation_id,
@@ -310,10 +304,7 @@ def setup_repo_for_user(
         )
 
     # 2. 创建仅对该仓库有效的 scoped token
-    token = create_repo_scoped_token(
-        resource=resource,
-        repo_name=repo_name,
-    )
+    token = create_repo_scoped_token(resource=resource, repo_name=repo_name)
 
     logger.info(
         "setup_repo_for_user: completed, user_id=%s, repo=%s/%s",
@@ -349,10 +340,7 @@ def refresh_repo_token_by_url(repo_url: str) -> str:
     if not org or not repo_name:
         raise GitHubServiceError(f"无法从 URL 解析出组织和仓库名：{repo_url}")
 
-    resources = get_online_resources_by_type_source(
-        type='code_repo',
-        source='github',
-    )
+    resources = get_online_resources_by_type_source(type='code_repo', source='github')
     matched_resource = None
     for r in resources:
         extra = r.get_raw_extra()
@@ -365,10 +353,7 @@ def refresh_repo_token_by_url(repo_url: str) -> str:
             f"未找到组织 {org} 对应的代码仓库资源，无法刷新 token"
         )
 
-    new_token = create_repo_scoped_token(
-        resource=matched_resource,
-        repo_name=repo_name,
-    )
+    new_token = create_repo_scoped_token(resource=matched_resource, repo_name=repo_name)
 
     logger.info(
         "refresh_repo_token_by_url: org=%s, repo=%s, token refreshed",

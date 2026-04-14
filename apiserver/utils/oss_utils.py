@@ -35,11 +35,7 @@ def build_cos_client(config: OssConfig):
     except ImportError:
         raise RuntimeError("请安装 cos-python-sdk-v5: pip install cos-python-sdk-v5")
 
-    cos_config = CosConfig(
-        Region=config.region,
-        SecretId=config.secret_id,
-        SecretKey=config.secret_key,
-    )
+    cos_config = CosConfig(Region=config.region, SecretId=config.secret_id, SecretKey=config.secret_key)
     return CosS3Client(cos_config)
 
 
@@ -91,10 +87,7 @@ def download_object(config: OssConfig, object_key: str, local_path: str) -> None
         local_path: 本地保存路径
     """
     client = build_cos_client(config=config)
-    response = client.get_object(
-        Bucket=config.bucket,
-        Key=object_key,
-    )
+    response = client.get_object(Bucket=config.bucket, Key=object_key)
     file_content = response['Body'].get_raw_stream().read()
     with open(local_path, 'wb') as f:
         f.write(file_content)

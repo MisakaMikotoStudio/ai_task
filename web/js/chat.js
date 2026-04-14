@@ -27,17 +27,11 @@ let welcomePendingImages = [];
 document.addEventListener('DOMContentLoaded', async () => {
     await initAPIConfig();
 
-    if (!isLoggedIn()) {
-        window.location.href = 'index.html';
-        return;
-    }
+    if (!isLoggedIn()) { window.location.href = 'index.html'; return; }
 
     const params = new URLSearchParams(window.location.search);
     taskId = parseInt(params.get('task_id'));
-    if (isNaN(taskId) && !params.has('task_id')) {
-        showToast('缺少 task_id 参数', 'error');
-        return;
-    }
+    if (isNaN(taskId) && !params.has('task_id')) { showToast('缺少 task_id 参数', 'error'); return; }
 
     isStandaloneMode = (taskId === 0);
 
@@ -59,14 +53,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadStandaloneInfo();
         await loadClientConfig();
         await loadChats();
-        if (initialChatId) {
-            await selectChat(initialChatId);
-        }
+        if (initialChatId) await selectChat(initialChatId);
     } else {
-        if (!taskId) {
-            showToast('缺少 task_id 参数', 'error');
-            return;
-        }
+        if (!taskId) { showToast('缺少 task_id 参数', 'error'); return; }
         await loadTaskInfo();
         await loadClientConfig();
         await loadChats();
@@ -129,12 +118,7 @@ async function loadTaskInfo() {
 // ===== Load client config (repos info) =====
 async function loadClientConfig() {
     try {
-        let configClientId = null;
-        if (isStandaloneMode) {
-            configClientId = standaloneClientId;
-        } else {
-            configClientId = taskInfo?.client_id;
-        }
+        const configClientId = isStandaloneMode ? standaloneClientId : taskInfo?.client_id;
         if (!configClientId) return;
         const res = await clientAPI.getConfig(configClientId);
         clientConfigCache = res.data;
@@ -182,12 +166,7 @@ function renderSidebarExtra(info) {
 // ===== Chat list =====
 async function loadChats() {
     try {
-        let res;
-        if (isStandaloneMode) {
-            res = await chatAPI.listStandaloneChats();
-        } else {
-            res = await chatAPI.listChats(taskId);
-        }
+        const res = isStandaloneMode ? await chatAPI.listStandaloneChats() : await chatAPI.listChats(taskId);
         const raw = res.data || [];
         chatsCache = Array.isArray(raw) ? raw : (raw.items || []);
         renderChatList();
@@ -624,10 +603,7 @@ async function handlePasteImages(e, target) {
     const existingNames = getExistingImageNames();
 
     for (const file of imageFiles) {
-        if (file.size > 10 * 1024 * 1024) {
-            showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error');
-            continue;
-        }
+        if (file.size > 10 * 1024 * 1024) { showToast(`${file.name || '粘贴图片'} 超过 10MB 限制`, 'error'); continue; }
         const ext = pasteImageExt(file.type);
         const uniqueName = generateUniqueImageName(ext, existingNames);
         const renamedFile = new File([file], uniqueName, { type: file.type });
@@ -660,14 +636,8 @@ async function handleImageSelect(event, target) {
     const list = isWelcome ? welcomePendingImages : pendingImages;
 
     for (const file of files) {
-        if (!file.type.startsWith('image/')) {
-            showToast('仅支持图片文件', 'error');
-            continue;
-        }
-        if (file.size > 10 * 1024 * 1024) {
-            showToast(`${file.name} 超过 10MB 限制`, 'error');
-            continue;
-        }
+        if (!file.type.startsWith('image/')) { showToast('仅支持图片文件', 'error'); continue; }
+        if (file.size > 10 * 1024 * 1024) { showToast(`${file.name} 超过 10MB 限制`, 'error'); continue; }
         try {
             const res = await chatAPI.uploadImage(file);
             list.push(res.data);
@@ -762,10 +732,7 @@ async function sendNewChatMessage() {
     const text = input.value.trim();
     if (!text) return;
 
-    if (isStandaloneMode && !standaloneClientId) {
-        showToast('未指定应用，无法发送', 'error');
-        return;
-    }
+    if (isStandaloneMode && !standaloneClientId) { showToast('未指定应用，无法发送', 'error'); return; }
 
     const btn = document.getElementById('welcome-send-btn');
     btn.disabled = true;

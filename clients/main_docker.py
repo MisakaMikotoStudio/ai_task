@@ -61,10 +61,7 @@ def ensure_image(image_name: str, image_tag: str):
     确保本地 Docker 镜像存在，若不存在则根据 Dockerfile 构建。
     通过 --build-arg COMMIT_HASH 使 Docker 在 commit 变更时一定重建 COPY 层。
     """
-    result = subprocess.run(
-        ["docker", "images", "-q", image_name],
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["docker", "images", "-q", image_name], capture_output=True, text=True)
     if result.returncode != 0:
         logger.error(f"检查 Docker 镜像失败: {result.stderr.strip()}")
         sys.exit(1)
@@ -212,9 +209,7 @@ def fetch_client_configs(apiserver: str, secret: str, client_ids: list[int] | No
         payload = response.json()
     except ValueError:
         content_preview = response.text[:200] if response.text else "(空响应)"
-        raise RuntimeError(
-            f"响应解析失败: HTTP {response.status_code}, 内容: {content_preview}"
-        )
+        raise RuntimeError(f"响应解析失败: HTTP {response.status_code}, 内容: {content_preview}")
 
     if response.status_code != 200:
         raise RuntimeError(f"接口返回错误 [{response.status_code}]: {payload.get('message', '未知错误')}")
@@ -229,11 +224,7 @@ def get_existing_client_containers() -> dict[int, str]:
     Returns:
         { client_id: container_name, ... }
     """
-    res = subprocess.run(
-        ["docker", "ps", "-a", "--format", "{{.Names}}"],
-        capture_output=True,
-        text=True
-    )
+    res = subprocess.run(["docker", "ps", "-a", "--format", "{{.Names}}"], capture_output=True, text=True)
     if res.returncode != 0:
         logger.error(f"查询 Docker 容器失败: {(res.stderr or '').strip()}")
         return {}

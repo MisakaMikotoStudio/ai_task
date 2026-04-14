@@ -330,9 +330,7 @@ class ClaudeCodeCliAgent(BaseAgent):
             return name
 
         subagent_type = (
-            tool_input.get("subagent_type")
-            or tool_input.get("subagentType")
-            or tool_input.get("agent_type")
+            tool_input.get("subagent_type") or tool_input.get("subagentType") or tool_input.get("agent_type")
         )
         if subagent_type:
             return f"{name}/{subagent_type}"

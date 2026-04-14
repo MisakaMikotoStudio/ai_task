@@ -120,14 +120,7 @@ def create_standalone_chat_and_message_api():
     )
     update_chat_status(user_id=request.user_info.user_id, chat_id=chat.id, task_id=0, status='pending')
 
-    return jsonify({
-        'code': 201,
-        'message': '创建成功',
-        'data': {
-            'chat': chat.to_dict(),
-            'message': msg.to_dict()
-        }
-    }), 201
+    return jsonify({'code': 201, 'message': '创建成功', 'data': {'chat': chat.to_dict(), 'message': msg.to_dict()}}), 201
 
 
 # ===== 原有 Task Chat 接口 =====
@@ -229,14 +222,7 @@ def create_chat_and_message_api(task_id):
     )
     update_chat_status(user_id=request.user_info.user_id, chat_id=chat.id, task_id=task_id, status='pending')
 
-    return jsonify({
-        'code': 201,
-        'message': '创建成功',
-        'data': {
-            'chat': chat.to_dict(),
-            'message': msg.to_dict()
-        }
-    }), 201
+    return jsonify({'code': 201, 'message': '创建成功', 'data': {'chat': chat.to_dict(), 'message': msg.to_dict()}}), 201
 
 
 @chat_bp.route('/task/<int:task_id>/chats/<int:chat_id>/messages', methods=['GET'])
@@ -299,11 +285,7 @@ def delete_message_api(task_id, chat_id, message_id):
 
     update_chat_status(user_id=request.user_info.user_id, chat_id=chat_id, task_id=task_id, status='completed')
 
-    return jsonify({
-        'code': 200,
-        'message': '消息已撤销',
-        'data': {'input': input_text}
-    })
+    return jsonify({'code': 200, 'message': '消息已撤销', 'data': {'input': input_text}})
 
 
 @chat_bp.route('/msg/sync_execute', methods=['POST'])
@@ -509,10 +491,5 @@ def get_chat_image_presign_api():
         logger.exception("生成预签名 URL 失败: path=%s", oss_path)
         return jsonify({'code': 500, 'message': '生成预签名 URL 失败'}), 500
 
-    return jsonify({
-        'code': 200,
-        'data': {
-            'url': presigned_url,
-        },
-    })
+    return jsonify({'code': 200, 'data': {'url': presigned_url}})
 

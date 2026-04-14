@@ -29,12 +29,7 @@ def create_task(user_id: int, title: str, client_id: int,
         Task对象
     """
     with get_db_session() as session:
-        task = Task(
-            user_id=user_id,
-            title=title,
-            status=status,
-            client_id=client_id,
-        )
+        task = Task(user_id=user_id, title=title, status=status, client_id=client_id)
         session.add(task)
         session.flush()
         return task
@@ -94,10 +89,7 @@ def get_tasks_by_user(
             task_dict = task.to_dict()
             task_dict['client_name'] = client_name
             result.append(task_dict)
-        return {
-            'items': result,
-            'total': total
-        }
+        return {'items': result, 'total': total}
 
 
 def get_task_by_id(task_id: int, user_id: int) -> Optional[Task]:

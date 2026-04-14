@@ -214,11 +214,7 @@ def get_standalone_chats(
 
         total = query.count()
 
-        rows = query.order_by(
-            Chat.updated_at.desc()
-        ).offset(
-            (page - 1) * page_num
-        ).limit(page_num).all()
+        rows = query.order_by(Chat.updated_at.desc()).offset((page - 1) * page_num).limit(page_num).all()
 
         result = []
         for chat, client_name in rows:
