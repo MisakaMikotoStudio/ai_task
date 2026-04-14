@@ -1103,10 +1103,7 @@
                         <span class="nav-icon">🖥️</span>
                         <span>应用</span>
                     </a>
-                    <a href="#" class="nav-item" data-view="secrets">
-                        <span class="nav-icon">🔑</span>
-                        <span>秘钥</span>
-                    </a>
+                    <!-- 秘钥入口已移至 profile 页面 -->
                     <a href="#" class="nav-item" data-view="products" style="display:none;">
                         <span class="nav-icon">🛒</span>
                         <span>商品管理</span>
@@ -1947,6 +1944,26 @@
                             </div>
                         </div>
                     </div>
+                    <!-- 快捷操作 -->
+                    <div class="profile-quick-actions">
+                        <a href="#/secrets" class="profile-action-card" id="profile-secrets-entry">
+                            <div class="profile-action-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                                </svg>
+                            </div>
+                            <div class="profile-action-body">
+                                <div class="profile-action-title">秘钥管理</div>
+                                <div class="profile-action-desc">查看和管理您的 API 秘钥</div>
+                            </div>
+                            <div class="profile-action-arrow">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="9 18 15 12 9 6"/>
+                                </svg>
+                            </div>
+                        </a>
+                    </div>
+
                     <!-- 生效中的服务 -->
                     <div class="profile-section">
                         <div class="profile-section-title">生效中的服务</div>

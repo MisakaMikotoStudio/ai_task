@@ -5000,6 +5000,70 @@ textarea:focus {
     border-bottom: 1px solid var(--border-color);
 }
 
+.profile-quick-actions {
+    margin-bottom: 24px;
+}
+
+.profile-action-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    cursor: pointer;
+    transition: var(--transition);
+    text-decoration: none;
+    color: inherit;
+}
+
+.profile-action-card:hover {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-sm);
+    background: var(--bg-tertiary);
+}
+
+.profile-action-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.15), rgba(163, 113, 247, 0.12));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--accent-primary);
+}
+
+.profile-action-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-action-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.profile-action-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.profile-action-arrow {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: var(--transition);
+}
+
+.profile-action-card:hover .profile-action-arrow {
+    color: var(--accent-primary);
+    transform: translateX(2px);
+}
+
 .profile-services-list {
     display: flex;
     flex-direction: column;
