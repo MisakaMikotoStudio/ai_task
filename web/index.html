@@ -1103,7 +1103,7 @@
                         <span class="nav-icon">🖥️</span>
                         <span>应用</span>
                     </a>
-                    <a href="#" class="nav-item" data-view="secrets">
+                    <a href="#" class="nav-item" data-view="secrets" style="display:none;">
                         <span class="nav-icon">🔑</span>
                         <span>秘钥</span>
                     </a>
@@ -1949,6 +1949,19 @@
                                 <span class="profile-user-id-label">用户 ID</span>
                                 <code class="profile-user-id-value" id="profile-user-id">—</code>
                             </div>
+                        </div>
+                    </div>
+                    <!-- 快捷功能 -->
+                    <div class="profile-quick-actions">
+                        <div class="profile-action-card" onclick="switchToView('secrets'); window.location.hash = '/secrets';">
+                            <div class="profile-action-icon">
+                                <span>🔑</span>
+                            </div>
+                            <div class="profile-action-body">
+                                <div class="profile-action-title">秘钥管理</div>
+                                <div class="profile-action-desc">管理 API 秘钥，用于客户端接入认证</div>
+                            </div>
+                            <span class="profile-action-arrow">›</span>
                         </div>
                     </div>
                     <!-- 生效中的服务 -->
