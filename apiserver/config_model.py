@@ -18,6 +18,8 @@ class ServerConfig:
     port: int = 8105
     debug: bool = False
     url_prefix: str = ""  # URL 前缀，例如 "/v1"，为空则不添加前缀
+    workers: int = 4  # Gunicorn worker 进程数
+    timeout: int = 120  # Gunicorn worker 超时时间（秒）
 
 
 @dataclass

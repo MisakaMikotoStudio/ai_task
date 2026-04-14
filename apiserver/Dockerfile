@@ -28,5 +28,6 @@ RUN pip install  --retries 10 "alibabacloud_rds20140815"
 RUN pip install  --retries 10 "alibabacloud_tea_openapi"
 RUN pip install  --retries 10 "PyJWT[crypto]>=2.0.0"
 RUN pip install  --retries 10 "requests>=2.28.0"
+RUN pip install  --retries 10 "gunicorn>=21.2.0"
 
 COPY . /app

@@ -7,6 +7,10 @@ host = "0.0.0.0"
 port = 8080
 # 调试模式（生产环境请设为 false）
 debug = false
+# Gunicorn worker 进程数（建议设为 CPU 核数 * 2 + 1）
+workers = 4
+# Gunicorn worker 超时时间（秒）
+timeout = 120
 
 [database]
 # 数据库类型（目前仅支持 mysql）

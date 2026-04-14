@@ -151,6 +151,20 @@ def create_app(config: AppConfig) -> Flask:
     return app
 
 
+def create_app_for_gunicorn():
+    """Gunicorn 入口：启动前完成配置加载和数据库初始化。
+    配置路径通过环境变量 APP_CONFIG 指定，默认 /config/config.toml。
+    用法: gunicorn --chdir /app "main:create_app_for_gunicorn()"
+    """
+    config_path = os.environ.get('APP_CONFIG', '/config/config.toml')
+    if not os.path.exists(config_path):
+        print(f"Error: Config file not found: {config_path}")
+        sys.exit(1)
+    config = AppConfig.from_toml(config_path)
+    init_database(config.database)
+    return create_app(config)
+
+
 def main():
     parser = argparse.ArgumentParser(description='AI Task Management API Server')
     parser.add_argument('--config', '-c', type=str, default='config.toml',
