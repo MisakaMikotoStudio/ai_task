@@ -15,7 +15,7 @@ RUN mv /app/nginx.conf /etc/nginx/conf.d/default.conf && \
 
 # Inject BUILD_VERSION into HTML ?v= params for cache busting
 ARG BUILD_VERSION=dev
-RUN find /app -name '*.html' -exec sed -i "s/\?v=[0-9a-zA-Z_]*/?v=${BUILD_VERSION}/g" {} +
+RUN find /app -name '*.html' -exec sed -i "s/?v=[0-9a-zA-Z_]*/?v=${BUILD_VERSION}/g" {} +
 
 EXPOSE 8080
 
