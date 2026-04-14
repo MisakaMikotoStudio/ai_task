@@ -354,7 +354,6 @@ class ClientEnvVar(Base):
             'client_id': self.client_id,
             'key': self.key,
             'value': self.value or '',
-            'env': self.env or '',
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at)
         }

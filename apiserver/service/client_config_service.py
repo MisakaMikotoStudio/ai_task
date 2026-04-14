@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 from urllib.parse import urlparse
 
 from dao.client_dao import (
@@ -172,19 +172,11 @@ def _env_value_equal(existing: ClientEnvVar, incoming_value: str) -> bool:
     return (existing.value or "") == (incoming_value or "")
 
 
-def _env_var_env_equal(existing: ClientEnvVar, incoming_env) -> bool:
-    """比较 env 字段是否相等（None 和 '' 视为相同）"""
-    ex_env = existing.env or None
-    in_env = incoming_env or None
-    return ex_env == in_env
-
-
 def save_client_env_vars(client_id: int, env_items: List[dict], *, user_id: int) -> bool:
     """
-    以 (env, key) 组合为维度全量同步环境变量。
+    以 key 为维度全量同步环境变量（不区分环境）。
     - 请求体中不存在的已激活记录做软删除
-    - 不存在则新增；已存在且 value/env 有变化则更新
-    - 支持 env 字段（test/prod/None）
+    - 不存在则新增；已存在且 value 有变化则更新
 
     Returns:
         是否发生了任意持久化变更（用于决定是否 bump 客户端版本等）
@@ -192,9 +184,7 @@ def save_client_env_vars(client_id: int, env_items: List[dict], *, user_id: int)
     Raises:
         ClientEnvVarSaveError: 空 key、提交列表中 key 重复等
     """
-    # input: {(env, key): value}
-    input_env_vars: Dict[tuple, str] = {}
-    input_env_map: Dict[tuple, Optional[str]] = {}
+    input_env_vars: Dict[str, str] = {}
     for item in env_items:
         k = (item.get("key") or "").strip()
         if not k:
@@ -204,41 +194,35 @@ def save_client_env_vars(client_id: int, env_items: List[dict], *, user_id: int)
             v = ""
         else:
             v = str(v)
-        env_val = item.get("env") or None
-        dedup_key = (env_val, k)
-        if dedup_key in input_env_vars:
-            raise ClientEnvVarSaveError("提交的环境变量中存在重复的键（同环境）: " + k)
-        input_env_vars[dedup_key] = v
-        input_env_map[dedup_key] = env_val
+        if k in input_env_vars:
+            raise ClientEnvVarSaveError("提交的环境变量中存在重复的键: " + k)
+        input_env_vars[k] = v
 
     existing_list = get_client_env_vars(client_id, user_id)
-    exist_env_vars: Dict[tuple, ClientEnvVar] = {}
+    exist_env_vars: Dict[str, ClientEnvVar] = {}
     delete_ids: List[int] = []
     for ev in existing_list:
         k = (ev.key or "").strip()
         if not k:
             delete_ids.append(ev.id)
             continue
-        ev_env = ev.env or None
-        dedup_key = (ev_env, k)
-        if dedup_key in exist_env_vars:
+        if k in exist_env_vars:
             delete_ids.append(ev.id)
         else:
-            exist_env_vars[dedup_key] = ev
+            exist_env_vars[k] = ev
 
     inserts: List[dict] = []
     updates: List[dict] = []
 
-    for dedup_key, v in input_env_vars.items():
-        env_val, k = dedup_key
-        ex = exist_env_vars.get(dedup_key)
+    for k, v in input_env_vars.items():
+        ex = exist_env_vars.get(k)
         if ex is None:
-            inserts.append({"key": k, "value": v, "env": env_val})
-        elif not _env_value_equal(ex, v) or not _env_var_env_equal(ex, env_val):
-            updates.append({"id": ex.id, "key": k, "value": v, "env": env_val})
+            inserts.append({"key": k, "value": v})
+        elif not _env_value_equal(ex, v):
+            updates.append({"id": ex.id, "key": k, "value": v})
 
-    for dedup_key, ex in exist_env_vars.items():
-        if dedup_key not in input_env_vars:
+    for k, ex in exist_env_vars.items():
+        if k not in input_env_vars:
             delete_ids.append(ex.id)
 
     if not delete_ids and not updates and not inserts:

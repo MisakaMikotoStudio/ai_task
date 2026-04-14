@@ -159,19 +159,13 @@ def _normalize_client_payload(data: dict) -> Optional[str]:
                 value_s = _strip_str(val)
             if not key:
                 return f'环境变量#{idx + 1} 变量名不能为空'
-            env_val = _strip_str(item.get('env', '')) or None
-            if env_val and env_val not in ('test', 'prod'):
-                return f'环境变量#{idx + 1} env 值无效，只支持 test/prod'
-            # env + key 组合不重复
-            dedup_key = f'{env_val or ""}:{key}'
-            if dedup_key in seen_keys:
-                return f'环境变量中存在重复的键（同环境）: {key}'
+            if key in seen_keys:
+                return f'环境变量中存在重复的键: {key}'
             if not value_s:
                 return f'环境变量#{idx + 1} 变量值不能为空'
-            seen_keys.add(dedup_key)
+            seen_keys.add(key)
             item['key'] = key
             item['value'] = value_s
-            item['env'] = env_val
 
     return None
 

@@ -619,7 +619,6 @@ def apply_client_env_var_sync(
                 {
                     ClientEnvVar.key: row["key"],
                     ClientEnvVar.value: row.get("value", ""),
-                    ClientEnvVar.env: row.get("env") or None,
                 },
                 synchronize_session=False,
             )
@@ -630,7 +629,6 @@ def apply_client_env_var_sync(
                     user_id=user_id,
                     key=ins["key"],
                     value=ins.get("value", ""),
-                    env=ins.get("env") or None,
                 )
             )
 

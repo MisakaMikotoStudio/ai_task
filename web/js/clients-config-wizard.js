@@ -19,9 +19,8 @@ let cfgClientMode = 'add';   // 'add' | 'edit' | 'view'
 let cfgCurrentStep = 0;
 let cfgReposList = [];
 
-// 环境变量：按 env 分组 { test: [{key,value,...}], prod: [...] }
-let cfgEnvVarsByEnv = { test: [], prod: [] };
-let cfgEnvVarsCurrentEnv = 'test';
+// 环境变量：扁平数组 [{key, value}, ...]
+let cfgEnvVars = [];
 
 // 云服务器：按 env 存储 { test: {name,password,ip}, prod: {name,password,ip} }
 let cfgServersByEnv = { test: { name: '', password: '', ip: '' }, prod: { name: '', password: '', ip: '' } };
@@ -48,8 +47,7 @@ function cfgResetClientConfigState() {
     cfgClientMode = 'add';
     cfgCurrentStep = 0;
     cfgReposList = [];
-    cfgEnvVarsByEnv = { test: [], prod: [] };
-    cfgEnvVarsCurrentEnv = 'test';
+    cfgEnvVars = [];
     cfgServersByEnv = { test: { name: '', password: '', ip: '' }, prod: { name: '', password: '', ip: '' } };
     cfgServerCurrentEnv = 'test';
     cfgDomainsByEnv = { test: [], prod: [] };
@@ -112,14 +110,8 @@ async function openClientConfig(id, mode) {
             const clientData = clientResult.data;
             cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
 
-            // 按环境分组加载环境变量
-            const envVars = clientData.env_vars || [];
-            cfgEnvVarsByEnv = { test: [], prod: [] };
-            envVars.forEach(ev => {
-                const envKey = ev.env || 'test';
-                if (!cfgEnvVarsByEnv[envKey]) cfgEnvVarsByEnv[envKey] = [];
-                cfgEnvVarsByEnv[envKey].push({ ...ev });
-            });
+            // 加载环境变量（扁平列表，忽略 env 字段）
+            cfgEnvVars = (clientData.env_vars || []).map(ev => ({ key: ev.key || '', value: ev.value || '' }));
 
             document.getElementById('cfg-client-name').value = clientData.name;
             agentSelect.value = clientData.agent || 'claude sdk';
@@ -245,15 +237,7 @@ async function wizardSaveAll() {
     }));
 
     // 构建环境变量数据
-    const envVars = [];
-    for (const envKey of ['test', 'prod']) {
-        const items = cfgEnvVarsByEnv[envKey] || [];
-        for (const ev of items) {
-            const key = (ev.key || '').trim();
-            const value = (ev.value == null ? '' : String(ev.value));
-            envVars.push({ key, value, env: envKey });
-        }
-    }
+    const envVars = cfgEnvVars.map(ev => ({ key: (ev.key || '').trim(), value: (ev.value == null ? '' : String(ev.value)) }));
 
     // 构建基础设施配置
     const infrastructure = {
@@ -315,14 +299,11 @@ function wizardValidateReposOnly() {
 
 // 纯前端验证环境变量
 function wizardValidateEnvVars() {
-    for (const envKey of ['test', 'prod']) {
-        const items = cfgEnvVarsByEnv[envKey] || [];
-        for (const ev of items) {
-            const key = (ev.key || '').trim();
-            const value = (ev.value == null ? '' : String(ev.value));
-            if (!key) return `环境 ${envKey} 中存在空变量名`;
-            if (!value) return `环境 ${envKey} 变量 ${key} 的值不能为空`;
-        }
+    for (const ev of cfgEnvVars) {
+        const key = (ev.key || '').trim();
+        const value = (ev.value == null ? '' : String(ev.value));
+        if (!key) return '存在空变量名';
+        if (!value) return `变量 ${key} 的值不能为空`;
     }
     return null;
 }
@@ -344,24 +325,10 @@ function wizardRenderEnvVarsStep(isView) {
     if (addBtn) {
         addBtn.style.display = isView ? 'none' : '';
         addBtn.onclick = () => {
-            cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].push({ key: '', value: '', env: cfgEnvVarsCurrentEnv });
+            cfgEnvVars.push({ key: '', value: '' });
             wizardRenderEnvVarsList();
         };
     }
-    // 绑定环境切换 tab
-    const tabs = document.querySelectorAll('#env-var-env-tabs .wizard-env-tab');
-    tabs.forEach(tab => {
-        tab.onclick = () => {
-            // 保存当前 DOM 值到内存
-            wizardSyncEnvVarsFromDOM();
-            cfgEnvVarsCurrentEnv = tab.dataset.env;
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            wizardRenderEnvVarsList();
-        };
-    });
-    // 确保当前 tab 显示正确
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgEnvVarsCurrentEnv));
     wizardRenderEnvVarsList();
 }
 
@@ -369,11 +336,11 @@ function wizardSyncEnvVarsFromDOM() {
     const list = document.getElementById('env-vars-list');
     if (!list) return;
     const rows = list.querySelectorAll('.env-var-row');
-    cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv] = [];
+    cfgEnvVars = [];
     rows.forEach(row => {
         const key = row.querySelector('.env-var-key-input')?.value || '';
         const value = row.querySelector('.env-var-val-input')?.value || '';
-        cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].push({ key, value, env: cfgEnvVarsCurrentEnv });
+        cfgEnvVars.push({ key, value });
     });
 }
 
@@ -382,7 +349,7 @@ function wizardRenderEnvVarsList() {
     const empty = document.getElementById('env-vars-empty');
     if (!list) return;
     const isView = (cfgClientMode === 'view');
-    const items = cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv] || [];
+    const items = cfgEnvVars;
 
     if (items.length === 0) {
         list.innerHTML = '';
@@ -406,7 +373,7 @@ function wizardRenderEnvVarsList() {
 }
 
 function cfgDeleteEnvVar(idx) {
-    cfgEnvVarsByEnv[cfgEnvVarsCurrentEnv].splice(idx, 1);
+    cfgEnvVars.splice(idx, 1);
     wizardRenderEnvVarsList();
 }
 
