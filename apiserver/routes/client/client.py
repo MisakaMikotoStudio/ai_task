@@ -27,7 +27,6 @@ from service.client_service import (
     save_client,
     ClientSaveError,
     update_client_heartbeat,
-    generate_default_database,
     create_client_from_template,
 )
 from dao.heartbeat_dao import get_heartbeats_by_user
@@ -99,40 +98,6 @@ def create_client_api():
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
 
     return jsonify({'code': 201, 'message': '客户端创建成功', 'data': response_data}), 201
-
-
-@client_bp.route('/generate-default-database', methods=['POST'])
-def generate_default_database_api():
-    """
-    生成默认数据库：在配置的数据库实例上创建 {user_id}_app_{version} 数据库，
-    返回数据库连接配置供前端自动填充。
-
-    Response:
-        成功 (200):
-            {
-                "code": 200,
-                "message": "数据库创建成功",
-                "data": {
-                    "db_type": "mysql",
-                    "host": "...",
-                    "port": 3306,
-                    "username": "...",
-                    "password": "...",
-                    "db_name": "{user_id}_app_{version}"
-                }
-            }
-        失败 (400):
-            {"code": 400, "message": "错误信息"}
-    """
-    try:
-        config = current_app.config['APP_CONFIG'].default_database
-        db_info = generate_default_database(
-            user_id=request.user_info.user_id,
-            config=config,
-        )
-        return jsonify({'code': 200, 'message': '数据库创建成功', 'data': db_info})
-    except ClientSaveError as e:
-        return jsonify({'code': 400, 'message': e.message}), 400
 
 
 @client_bp.route('/create-from-template', methods=['POST'])
