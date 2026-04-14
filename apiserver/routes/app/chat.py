@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Chat相关路由
+Chat相关路由（Web 前端调用）
 """
 
 import logging
@@ -13,13 +13,13 @@ from dao.models import Chat, ChatMessage
 from dao.chat_dao import (
     create_chat, get_chats_by_task, get_chat_by_id, update_chat_status, soft_delete_chat,
     create_chat_message, get_messages_by_chat, get_running_message,
-    soft_delete_message, update_message, update_chat_sessionid, get_message_by_id,
+    soft_delete_message, get_message_by_id,
     get_standalone_chats
 )
 from dao.task_dao import get_task_by_id
 from dao.client_dao import get_client_by_id
 
-chat_bp = Blueprint('chat', __name__)
+chat_bp = Blueprint('app_chat', __name__)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ def _validate_image_filenames(user_id, chat_id, task_id, extra):
     if not images:
         return None
 
-    # 本次消息内部去重
     new_names = [img.get('filename', '') for img in images if img.get('filename')]
     if len(new_names) != len(set(new_names)):
         seen = set()
@@ -43,7 +42,6 @@ def _validate_image_filenames(user_id, chat_id, task_id, extra):
             seen.add(name)
         return duplicates
 
-    # 与历史消息中的图片去重
     existing_msgs = get_messages_by_chat(user_id=user_id, chat_id=chat_id, task_id=task_id)
     existing_names = set()
     for msg in existing_msgs:
@@ -96,7 +94,6 @@ def create_standalone_chat_and_message_api():
     title = input_text[:32]
     extra = data.get('extra', {})
 
-    # 新建 chat 无历史，仅校验本次消息内图片名是否自身重复
     images = (extra or {}).get('images', [])
     if images:
         names = [img.get('filename', '') for img in images if img.get('filename')]
@@ -123,7 +120,7 @@ def create_standalone_chat_and_message_api():
     return jsonify({'code': 201, 'message': '创建成功', 'data': {'chat': chat.to_dict(), 'message': msg.to_dict()}}), 201
 
 
-# ===== 原有 Task Chat 接口 =====
+# ===== Task Chat 接口 =====
 
 @chat_bp.route('/task/<int:task_id>/chats', methods=['GET'])
 def list_chats(task_id):
@@ -203,7 +200,6 @@ def create_chat_and_message_api(task_id):
     title = input_text[:32]
     extra = data.get('extra', {})
 
-    # 新建 chat 无历史，仅校验本次消息内图片名是否自身重复
     images = (extra or {}).get('images', [])
     if images:
         names = [img.get('filename', '') for img in images if img.get('filename')]
@@ -262,7 +258,7 @@ def create_message_api(task_id, chat_id):
     msg = create_chat_message(
         user_id=request.user_info.user_id,
         task_id=task_id,
-        chat_id=chat_id,
+        chat_id=chat.id,
         input_text=input_text,
         extra=extra,
     )
@@ -288,133 +284,7 @@ def delete_message_api(task_id, chat_id, message_id):
     return jsonify({'code': 200, 'message': '消息已撤销', 'data': {'input': input_text}})
 
 
-@chat_bp.route('/msg/sync_execute', methods=['POST'])
-def sync_execute_message_api():
-    """
-    同步执行结果到 ChatMessage：
-    - develop_doc/merge_request 写入 extra
-    """
-    data = request.get_json() or {}
-    task_id = data.get('task_id')
-    chat_id = data.get('chat_id')
-    message_id = data.get('message_id')
-    develop_doc = data.get('develop_doc', '') or ''
-    merge_request = data.get('merge_request', [])
-
-    msg = get_message_by_id(user_id=request.user_info.user_id, message_id=message_id, chat_id=chat_id, task_id=task_id)
-    if not msg:
-        return jsonify({'code': 400, 'message': '消息不存在'}), 400
-
-    # 合并到现有 extra，保留已有字段（如 images）
-    extra = dict(msg.extra or {})
-    extra['develop_doc'] = develop_doc
-    extra['merge_request'] = merge_request
-    update_message(
-        user_id=request.user_info.user_id,
-        task_id=int(task_id),
-        chat_id=int(chat_id),
-        message_id=int(message_id),
-        extra=extra,
-        status=ChatMessage.STATUS_COMPLETED,
-    )
-    update_chat_status(
-        user_id=request.user_info.user_id,
-        chat_id=int(chat_id),
-        task_id=int(task_id),
-        status=Chat.STATUS_COMPLETED,
-    )
-
-    return jsonify({'code': 200, 'message': '同步成功'})
-
-
-@chat_bp.route('/update_chat_status', methods=['POST'])
-def update_chat_status_by_client_api():
-    """
-    客户端更新 Chat 状态（running / completed / terminated）
-    """
-    data = request.get_json() or {}
-    task_id = data.get('task_id')
-    chat_id = data.get('chat_id')
-    status = data.get('status', '')
-    if not get_chat_by_id(user_id=request.user_info.user_id, chat_id=chat_id, task_id=task_id):
-        return jsonify({'code': 400, 'message': 'Chat不存在'}), 400
-
-    if status not in Chat.STATUS_TEXT:
-        return jsonify({'code': 400, 'message': '无效的状态值'}), 400
-
-    update_chat_status(user_id=request.user_info.user_id, chat_id=int(chat_id), task_id=int(task_id), status=status)
-    return jsonify({'code': 200, 'message': '状态更新成功'})
-
-
-@chat_bp.route('/msg/update_message_status', methods=['POST'])
-def update_message_status_by_client_api():
-    """
-    客户端更新 Message 状态（running / completed / terminated）
-    """
-    data = request.get_json() or {}
-    task_id = data.get('task_id')
-    chat_id = data.get('chat_id')
-    message_id = data.get('message_id')
-    status = data.get('status', '')
-    if not get_message_by_id(user_id=request.user_info.user_id, message_id=message_id, chat_id=chat_id, task_id=task_id):
-        return jsonify({'code': 400, 'message': '消息不存在'}), 400
-    update_message(user_id=request.user_info.user_id, task_id=task_id, chat_id=chat_id, message_id=message_id, status=status)
-    update_chat_status(user_id=request.user_info.user_id, chat_id=chat_id, task_id=task_id, status=status)
-    return jsonify({'code': 200, 'message': '状态更新成功'})
-
-
-@chat_bp.route('/msg/agent_reply', methods=['POST'])
-def agent_reply_message_api():
-    """
-    同步 agent 执行结果到数据库：
-    - 写入 ai_task_chat_message.output = agent reply
-    - 写入 ai_task_chat.sessionid = agent sessionId
-    - 将 ai_task_chat_message.status 设为 completed，并将 Chat 设为 completed（避免客户端仍从 running 列表拉取）
-    """
-    data = request.get_json() or {}
-    task_id = data.get('task_id')
-    chat_id = data.get('chat_id')
-    message_id = data.get('message_id')
-    reply = data.get('reply', '')
-    session_id = data.get('session_id', None)
-    if not get_message_by_id(user_id=request.user_info.user_id, message_id=message_id, chat_id=chat_id, task_id=task_id):
-        return jsonify({'code': 400, 'message': '消息不存在'}), 400
-
-    if not isinstance(reply, str):
-        reply = str(reply)
-    if session_id is not None and not isinstance(session_id, str):
-        session_id = str(session_id)
-    if session_id is not None and len(session_id) > 64:
-        return jsonify({'code': 400, 'message': 'sessionId最多64个字符'}), 400
-
-    ok_msg = update_message(
-        user_id=request.user_info.user_id,
-        task_id=task_id,
-        chat_id=chat_id,
-        message_id=message_id,
-        output=reply,
-        status=ChatMessage.STATUS_COMPLETED,
-    )
-    if not ok_msg:
-        return jsonify({'code': 400, 'message': '消息不存在或已删除'}), 400
-
-    update_chat_status(
-        user_id=request.user_info.user_id,
-        chat_id=int(chat_id),
-        task_id=int(task_id),
-        status=Chat.STATUS_COMPLETED,
-    )
-
-    if session_id:
-        ok_session = update_chat_sessionid(user_id=request.user_info.user_id, task_id=task_id, chat_id=chat_id, sessionid=session_id)
-        if not ok_session:
-            return jsonify({'code': 400, 'message': 'Chat不存在或已删除'}), 400
-    return jsonify({'code': 200, 'message': '同步成功'})
-
-
 # ===== 图片上传/下载接口 =====
-
-logger = logging.getLogger(__name__)
 
 MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
 ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
@@ -422,10 +292,7 @@ ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
 
 @chat_bp.route('/upload/image', methods=['POST'])
 def upload_chat_image_api():
-    """
-    上传聊天图片到 OSS（私有读写）。
-    登录 + 订阅校验由全局 auth_plugin 中间件统一处理。
-    """
+    """上传聊天图片到 OSS（私有读写）。"""
     from service import oss_service
 
     user = request.user_info
@@ -438,7 +305,6 @@ def upload_chat_image_api():
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         return jsonify({'code': 400, 'message': '仅支持 jpg/png/gif/webp 格式'}), 400
 
-    # 检查文件大小
     try:
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
@@ -463,10 +329,7 @@ def upload_chat_image_api():
 
 @chat_bp.route('/image/presign', methods=['GET'])
 def get_chat_image_presign_api():
-    """
-    生成聊天图片的预签名下载 URL（前端直接从 COS 下载，不经过 apiserver 代理）。
-    校验：登录 + 路径归属当前用户。
-    """
+    """生成聊天图片的预签名下载 URL。"""
     from service import oss_service
 
     user = request.user_info
@@ -476,7 +339,6 @@ def get_chat_image_presign_api():
     if not oss_path:
         return jsonify({'code': 400, 'message': '缺少 path 参数'}), 400
 
-    # 防越权：路径必须包含当前用户的 user_id
     expected_prefix = f'chat/images/{user.user_id}/'
     if not oss_path.startswith(expected_prefix):
         return jsonify({'code': 403, 'message': '无权访问该图片'}), 403
@@ -492,4 +354,3 @@ def get_chat_image_presign_api():
         return jsonify({'code': 500, 'message': '生成预签名 URL 失败'}), 500
 
     return jsonify({'code': 200, 'data': {'url': presigned_url}})
-
