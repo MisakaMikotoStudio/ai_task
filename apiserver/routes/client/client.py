@@ -8,7 +8,7 @@ import logging
 import secrets
 import string
 
-from flask import Blueprint, request, jsonify, g, current_app
+from flask import Blueprint, request, jsonify, current_app
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,6 @@ from service.client_service import (
     save_client,
     ClientSaveError,
     update_client_heartbeat,
-    generate_default_database,
-    create_client_from_template,
 )
 from dao.heartbeat_dao import get_heartbeats_by_user
 from dao.chat_dao import get_running_chat_messages_by_client
@@ -99,83 +97,6 @@ def create_client_api():
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
 
     return jsonify({'code': 201, 'message': '客户端创建成功', 'data': response_data}), 201
-
-
-@client_bp.route('/generate-default-database', methods=['POST'])
-def generate_default_database_api():
-    """
-    生成默认数据库：在配置的数据库实例上创建 {user_id}_app_{version} 数据库，
-    返回数据库连接配置供前端自动填充。
-
-    Response:
-        成功 (200):
-            {
-                "code": 200,
-                "message": "数据库创建成功",
-                "data": {
-                    "db_type": "mysql",
-                    "host": "...",
-                    "port": 3306,
-                    "username": "...",
-                    "password": "...",
-                    "db_name": "{user_id}_app_{version}"
-                }
-            }
-        失败 (400):
-            {"code": 400, "message": "错误信息"}
-    """
-    try:
-        config = current_app.config['APP_CONFIG'].default_database
-        db_info = generate_default_database(
-            user_id=request.user_info.user_id,
-            config=config,
-        )
-        return jsonify({'code': 200, 'message': '数据库创建成功', 'data': db_info})
-    except ClientSaveError as e:
-        return jsonify({'code': 400, 'message': e.message}), 400
-
-
-@client_bp.route('/create-from-template', methods=['POST'])
-def create_from_template_api():
-    """
-    从模板生成默认应用
-
-    Request Body:
-        {
-            "app_types": ["web"],  # 应用形态列表，必填，目前仅支持 "web"
-            "name": "我的应用"     # 应用名称，可选，留空则自动生成
-        }
-
-    Response:
-        成功 (201):
-            {
-                "code": 201,
-                "message": "应用创建成功",
-                "data": { ... }  # 客户端详情
-            }
-        失败 (400):
-            {"code": 400, "message": "错误信息"}
-    """
-    data = request.get_json()
-    if not data:
-        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
-
-    app_types = data.get('app_types', [])
-    app_name = data.get('name', '').strip() if data.get('name') else ''
-
-    try:
-        client_id = create_client_from_template(
-            user_id=request.user_info.user_id,
-            app_types=app_types,
-            app_name=app_name,
-        )
-        response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
-        if not response_data:
-            return jsonify({'code': 500, 'message': '应用创建成功但读取详情失败'}), 500
-
-        return jsonify({'code': 201, 'message': '应用创建成功', 'data': response_data}), 201
-    except ClientSaveError as e:
-        return jsonify({'code': 400, 'message': e.message}), 400
 
 
 @client_bp.route('', methods=['GET'])

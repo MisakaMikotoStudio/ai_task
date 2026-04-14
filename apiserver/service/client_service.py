@@ -340,10 +340,6 @@ from service.client_infra_service import (  # noqa: E402, F401
     save_all_infrastructure,
     save_client_infrastructure,
 )
-from service.client_template_service import (  # noqa: E402, F401
-    create_client_from_template,
-    generate_default_database,
-)
 from service.client_config_service import (  # noqa: E402, F401
     parse_repo_name_from_url,
     save_client_env_vars,

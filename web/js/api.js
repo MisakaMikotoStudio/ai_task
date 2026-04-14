@@ -140,18 +140,6 @@ const clientAPI = {
     // 复制客户端
     async copy(id) {
         return request(`/client/${id}/copy`, { method: 'POST' });
-    },
-
-    // 生成默认数据库
-    async generateDefaultDatabase() {
-        return request('/client/generate-default-database', { method: 'POST' });
-    },
-
-    // 从模板生成默认应用
-    async createFromTemplate(appTypes, appName) {
-        const payload = { app_types: appTypes };
-        if (appName) payload.name = appName;
-        return request('/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
     }
 };
 
@@ -220,18 +208,6 @@ const adminClientAPI = {
     },
     async copy(id) {
         return request(`/admin/clients/${id}/copy`, { method: 'POST' });
-    },
-
-    // 生成默认数据库（复用 /client 路由，管理员通过 token 鉴权）
-    async generateDefaultDatabase() {
-        return request('/client/generate-default-database', { method: 'POST' });
-    },
-
-    // 从模板生成默认应用（复用 /client 路由，管理员通过 token 鉴权）
-    async createFromTemplate(appTypes, appName) {
-        const payload = { app_types: appTypes };
-        if (appName) payload.name = appName;
-        return request('/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
     }
 };
 

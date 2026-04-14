@@ -181,88 +181,9 @@ async function copyClient(id) {
     }
 }
 
-// 显示添加应用选择弹窗
+// 添加应用：直接打开配置向导
 function showAddClientModal() {
-    const content = `
-        <div class="add-client-choice">
-            <div class="choice-group">
-                <label class="choice-option">
-                    <input type="radio" name="add-client-method" value="manual" checked>
-                    <span class="choice-label">手动填写应用配置</span>
-                    <span class="choice-desc">自定义配置应用的所有信息</span>
-                </label>
-                <label class="choice-option">
-                    <input type="radio" name="add-client-method" value="template">
-                    <span class="choice-label">从模板生成默认应用</span>
-                    <span class="choice-desc">快速创建包含默认数据库配置的应用</span>
-                </label>
-            </div>
-            <div id="template-config-section" style="display:none; margin-top: 16px;">
-                <div class="form-group">
-                    <label class="form-label">应用名称</label>
-                    <input type="text" id="template-app-name" class="form-input" placeholder="留空则自动生成" maxlength="16">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">应用形态（多选）</label>
-                    <div class="checkbox-group">
-                        <label class="checkbox-option">
-                            <input type="checkbox" name="app-type" value="web" checked>
-                            <span>web - 网站</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-actions" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
-                <button class="btn-secondary" id="add-client-modal-cancel">取消</button>
-                <button class="btn-primary" id="add-client-modal-confirm">确认</button>
-            </div>
-        </div>
-    `;
-    openModal('添加应用', content);
-
-    // 切换模板/手动时显示/隐藏模板配置区
-    const radios = document.querySelectorAll('input[name="add-client-method"]');
-    const templateSection = document.getElementById('template-config-section');
-    const confirmBtn = document.getElementById('add-client-modal-confirm');
-    radios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            const isTemplate = document.querySelector('input[name="add-client-method"]:checked').value === 'template';
-            templateSection.style.display = isTemplate ? 'block' : 'none';
-            confirmBtn.textContent = isTemplate ? '创建' : '确认';
-        });
-    });
-
-    // 取消按钮
-    document.getElementById('add-client-modal-cancel').addEventListener('click', () => {
-        closeModal();
-    });
-
-    // 确认/创建按钮
-    confirmBtn.addEventListener('click', async () => {
-        const method = document.querySelector('input[name="add-client-method"]:checked').value;
-        if (method === 'manual') {
-            closeModal();
-            openClientConfig(null, 'add');
-        } else {
-            // 模板创建
-            const appTypeCheckboxes = document.querySelectorAll('input[name="app-type"]:checked');
-            const appTypes = Array.from(appTypeCheckboxes).map(cb => cb.value);
-            if (appTypes.length === 0) { showToast('请选择至少一种应用形态', 'error'); return; }
-            const appName = (document.getElementById('template-app-name').value || '').trim();
-            confirmBtn.disabled = true;
-            confirmBtn.textContent = '创建中...';
-            try {
-                await activeClientAPI.createFromTemplate(appTypes, appName);
-                closeModal();
-                showToast('应用创建成功', 'success');
-                loadClients();
-            } catch (error) {
-                showToast(error.message || '创建失败', 'error');
-                confirmBtn.disabled = false;
-                confirmBtn.textContent = '创建';
-            }
-        }
-    });
+    openClientConfig(null, 'add');
 }
 
 // 兼容旧代码的 showAddTaskModal 别名
