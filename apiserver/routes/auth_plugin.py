@@ -8,6 +8,8 @@
   /api/app/*    — Token 登录验证 → 写操作需订阅校验（@skip_subscribe 可跳过）
   /api/open/*   — Secret 秘钥验证
 
+非 API 命名空间（见 register_global_auth 的 api_prefix）路径不再默认放行：须挂 @skip_auth 才能通过鉴权。
+
 两个跳过注解：
   @skip_auth       — 跳过身份验证（无需确认用户身份）
   @skip_subscribe  — 跳过订阅验证（无需订阅商品即可写操作）
@@ -59,17 +61,20 @@ def _is_skip_subscribe_endpoint() -> bool:
     return bool(view_func and getattr(view_func, '_skip_subscribe', False))
 
 
-_SENSITIVE_LOG_KEYS = frozenset({
-    'password', 'token', 'secret', 'private_key', 'app_private_key',
-    'alipay_public_key', 'app_encrypt_key', 'access_key_secret',
-    'secret_key', 'secret_id', 'admin_password', 'app_password',
-})
+_SENSITIVE_LOG_KEYWORDS = (
+    'password', 'token', 'secret', 'private_key', 'encrypt_key', 'access_key',
+)
+
+
+def _is_sensitive_key(k: str) -> bool:
+    lower = k.lower()
+    return any(kw in lower for kw in _SENSITIVE_LOG_KEYWORDS)
 
 
 def _redact_sensitive(obj):
     if isinstance(obj, dict):
         return {
-            k: ('***' if k in _SENSITIVE_LOG_KEYS else _redact_sensitive(v))
+            k: ('***' if _is_sensitive_key(k) else _redact_sensitive(v))
             for k, v in obj.items()
         }
     if isinstance(obj, list):
@@ -150,7 +155,7 @@ def _authenticate_by_token(trace_id: str):
             return jsonify({"code": 401, "message": "无效的认证信息"}), 401
     except Exception as e:
         logger.error("Token验证异常: %s", e, extra={'trace_id': trace_id}, exc_info=True)
-        return jsonify({"code": 500, "message": "Token验证异常"}), 500
+        return jsonify({"code": 500, "message": "认证服务异常"}), 500
 
     request.user_info = user_info
 
@@ -178,7 +183,7 @@ def _authenticate_by_secret(trace_id: str):
             return jsonify({"code": 401, "message": "无效的秘钥"}), 401
     except Exception as e:
         logger.error("秘钥验证异常: %s", e, extra={'trace_id': trace_id}, exc_info=True)
-        return jsonify({"code": 500, "message": "秘钥验证异常"}), 500
+        return jsonify({"code": 500, "message": "认证服务异常"}), 500
 
     request.user_info = user_info
 
@@ -267,20 +272,21 @@ def register_global_auth(app, api_prefix: str = '/api'):
         if request.method == 'OPTIONS':
             return None
 
-        if not request.path.startswith(api_prefix):
-            return None
-
+        trace_id = _ensure_trace_id()
         if _is_skip_auth_endpoint():
             return None
 
-        trace_id = _ensure_trace_id()
+        path = request.path
+        if not path.startswith(api_prefix):
+            logger.warning("访问未注册路径: %s", path, extra={'trace_id': trace_id})
+            return jsonify({"code": 404, "message": "接口不存在"}), 404
+
         _log_request(trace_id)
 
         admin_prefix = f'{api_prefix}/admin'
         app_prefix = f'{api_prefix}/app'
         open_prefix = f'{api_prefix}/open'
 
-        path = request.path
         if path.startswith(admin_prefix):
             return _auth_admin(trace_id)
         elif path.startswith(app_prefix):
@@ -289,8 +295,8 @@ def register_global_auth(app, api_prefix: str = '/api'):
             return _auth_open(trace_id)
         else:
             # 未匹配的 /api 路径（如 /api/health 应通过 @skip_auth 放行）
-            logger.warning("未匹配的API路径: %s", path, extra={'trace_id': trace_id})
-            return jsonify({"code": 401, "message": "缺少认证信息"}), 401
+            logger.warning("访问未注册API路径: %s", path, extra={'trace_id': trace_id})
+            return jsonify({"code": 404, "message": "接口不存在"}), 404
 
 
 def _ensure_trace_id() -> str:
