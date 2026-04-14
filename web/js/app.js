@@ -639,6 +639,7 @@ function cfgResetClientConfigState() {
     cfgClientMode = 'add';
     cfgReposList = [];
     cfgEnvVarsData = [];
+    cfgDeploysList = [];
 }
 
 function backToClients() {
@@ -712,6 +713,7 @@ async function openClientConfig(id, mode) {
             const clientData = clientResult.data;
             cfgReposList = (clientData.repos || []).map(r => ({ ...r }));
             cfgEnvVarsData = (clientData.env_vars || []).map(ev => ({ ...ev }));
+            cfgDeploysList = (clientData.deploys || []).map(d => ({ ...d }));
 
             document.getElementById('cfg-client-name').value = clientData.name;
             agentSelect.value = clientData.agent || 'claude sdk';
@@ -731,6 +733,7 @@ async function openClientConfig(id, mode) {
 
     cfgRenderEnvVarsTab();
     cfgRenderReposTab();
+    cfgRenderDeployTab();
 }
 
 function cfgApplyBasicFormMode() {
@@ -834,6 +837,7 @@ async function cfgUnifiedSaveClient() {
 
     const repos = cfgBuildReposPayload();
     const env_vars = cfgBuildEnvVarsPayload();
+    const deploys = cfgBuildDeploysPayload();
 
     try {
         if (cfgClientId === null) {
@@ -841,7 +845,8 @@ async function cfgUnifiedSaveClient() {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
-                env_vars
+                env_vars,
+                deploys
             });
             showToast('应用创建成功', 'success');
         } else {
@@ -849,7 +854,8 @@ async function cfgUnifiedSaveClient() {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
                 repos,
-                env_vars
+                env_vars,
+                deploys
             });
             showToast('保存成功', 'success');
         }
@@ -1021,6 +1027,176 @@ function cfgRenderReposWaterfall() {
 function cfgRemoveRepo(index) {
     cfgReposList.splice(index, 1);
     cfgRenderReposWaterfall();
+}
+
+// ---- Deploy 部署配置管理 ----
+
+let cfgDeploysList = [];
+let cfgDeployOptions = []; // [{key, label}]
+
+async function cfgLoadDeployOptions() {
+    if (cfgDeployOptions.length > 0) return;
+    try {
+        const r = await activeClientAPI.getDeployOptions();
+        if (r.data && r.data.official_configs) cfgDeployOptions = r.data.official_configs;
+    } catch (e) { console.warn('获取deploy可选项失败', e); }
+}
+
+function cfgRenderDeployTab() {
+    const addBtn = document.getElementById('cfg-add-deploy-btn');
+    const templateBtn = document.getElementById('cfg-load-template-btn');
+    const isView = (cfgClientMode === 'view');
+
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = cfgAddDeploy;
+    }
+    if (templateBtn) {
+        templateBtn.style.display = isView ? 'none' : '';
+        templateBtn.onclick = () => { document.getElementById('deploy-template-overlay').style.display = 'flex'; };
+    }
+
+    cfgLoadDeployOptions().then(() => cfgRenderDeployCards());
+}
+
+function cfgRenderDeployCards() {
+    const container = document.getElementById('cfg-deploy-cards');
+    const empty = document.getElementById('deploy-empty');
+    if (!container) return;
+    const isView = (cfgClientMode === 'view');
+
+    if (cfgDeploysList.length === 0) {
+        container.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    container.innerHTML = cfgDeploysList.map((deploy, idx) => {
+        const disabledAttr = isView ? 'disabled' : '';
+        const deleteBtn = isView ? '' : `<button type="button" class="btn-small btn-delete" onclick="cfgRemoveDeploy(${idx})">删除</button>`;
+        const previewBtn = (deploy.id && cfgClientId) ? `<button type="button" class="btn-small btn-secondary" onclick="cfgPreviewDeploy(${idx})">预览配置</button>` : '';
+        const deployBtn = (deploy.id && cfgClientId && !isView) ? `<button type="button" class="btn-small btn-primary" onclick="cfgExecuteDeploy(${idx})">执行部署</button>` : '';
+
+        const officialCheckboxes = cfgDeployOptions.map(opt => {
+            const checked = (deploy.official_configs || []).includes(opt.key) ? 'checked' : '';
+            return `<label class="deploy-official-check"><input type="checkbox" value="${escapeHtml(opt.key)}" ${checked} ${disabledAttr} onchange="cfgToggleDeployOfficialConfig(${idx}, '${escapeHtml(opt.key)}', this.checked)"> ${escapeHtml(opt.label)}</label>`;
+        }).join('');
+
+        const uuidDisplay = deploy.uuid ? `<span class="deploy-uuid">UUID: ${escapeHtml(deploy.uuid)}</span>` : '<span class="deploy-uuid deploy-uuid-new">新建（保存后生成UUID）</span>';
+
+        return `
+        <div class="deploy-card" data-index="${idx}">
+            <div class="deploy-card-header">
+                <span class="deploy-card-index">#${idx + 1}</span>
+                ${uuidDisplay}
+                <div class="deploy-card-actions">${previewBtn} ${deployBtn} ${deleteBtn}</div>
+            </div>
+            <div class="deploy-card-body">
+                <div class="form-group">
+                    <label>启动命令</label>
+                    <input type="text" class="deploy-startup-cmd" value="${escapeHtml(deploy.startup_command || '')}" ${disabledAttr} placeholder="如: gunicorn ... 或 python main.py --config config.toml" oninput="cfgUpdateDeployField(${idx}, 'startup_command', this.value)">
+                </div>
+                <div class="form-group">
+                    <label>官方配置</label>
+                    <div class="deploy-official-configs">${officialCheckboxes}</div>
+                </div>
+                <div class="form-group">
+                    <label>自定义配置 <span class="deploy-toml-hint">(TOML格式)</span></label>
+                    <textarea class="deploy-custom-config" rows="5" ${disabledAttr} placeholder="[custom]&#10;key = &quot;value&quot;" oninput="cfgUpdateDeployField(${idx}, 'custom_config', this.value)">${escapeHtml(deploy.custom_config || '')}</textarea>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function cfgAddDeploy() {
+    cfgDeploysList.push({ id: null, uuid: '', startup_command: '', official_configs: [], custom_config: '' });
+    cfgRenderDeployCards();
+}
+
+function cfgRemoveDeploy(idx) {
+    cfgDeploysList.splice(idx, 1);
+    cfgRenderDeployCards();
+}
+
+function cfgUpdateDeployField(idx, field, value) {
+    if (!cfgDeploysList[idx]) return;
+    cfgDeploysList[idx][field] = value;
+}
+
+function cfgToggleDeployOfficialConfig(idx, key, checked) {
+    if (!cfgDeploysList[idx]) return;
+    const configs = cfgDeploysList[idx].official_configs || [];
+    if (checked && !configs.includes(key)) {
+        configs.push(key);
+    } else if (!checked) {
+        const i = configs.indexOf(key);
+        if (i >= 0) configs.splice(i, 1);
+    }
+    cfgDeploysList[idx].official_configs = configs;
+}
+
+function cfgBuildDeploysPayload() {
+    return cfgDeploysList.map(d => ({
+        id: d.id || undefined,
+        startup_command: (d.startup_command || '').trim(),
+        official_configs: d.official_configs || [],
+        custom_config: (d.custom_config || '').trim(),
+    }));
+}
+
+async function cfgPreviewDeploy(idx) {
+    const deploy = cfgDeploysList[idx];
+    if (!deploy || !deploy.id || !cfgClientId) {
+        showToast('请先保存配置后再预览', 'error');
+        return;
+    }
+    try {
+        const r = await activeClientAPI.previewDeploy(cfgClientId, deploy.id);
+        const content = r.data && r.data.toml_content || '';
+        document.getElementById('deploy-preview-content').textContent = content || '（空配置）';
+        document.getElementById('deploy-preview-overlay').style.display = 'flex';
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function closeDeployPreview() {
+    document.getElementById('deploy-preview-overlay').style.display = 'none';
+}
+
+async function cfgExecuteDeploy(idx) {
+    const deploy = cfgDeploysList[idx];
+    if (!deploy || !deploy.id || !cfgClientId) {
+        showToast('请先保存配置后再部署', 'error');
+        return;
+    }
+    if (!confirm('确定要执行部署吗？这将通过SSH向远程服务器写入配置文件。')) return;
+    try {
+        const r = await activeClientAPI.executeDeploy(cfgClientId, deploy.id);
+        showToast(r.message || '部署成功', 'success');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function loadDeployTemplate(type) {
+    closeDeployTemplate();
+    try {
+        const r = await activeClientAPI.getDeployTemplates(type);
+        if (r.data && r.data.deploys) {
+            cfgDeploysList = r.data.deploys.map(d => ({ id: null, uuid: '', startup_command: d.startup_command || '', official_configs: d.official_configs || [], custom_config: d.custom_config || '' }));
+            cfgRenderDeployCards();
+            showToast('模板配置已加载', 'success');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function closeDeployTemplate() {
+    document.getElementById('deploy-template-overlay').style.display = 'none';
 }
 
 // ===== 任务管理 =====

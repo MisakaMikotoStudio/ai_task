@@ -31,6 +31,7 @@ from dao.heartbeat_dao import get_heartbeats_by_user
 
 from service import oss_service, order_service
 from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_client, ClientSaveError
+from service.deploy_service import AVAILABLE_OFFICIAL_CONFIGS, OFFICIAL_CONFIG_LABELS, generate_config_toml, execute_deploy, get_website_template_deploys
 
 logger = logging.getLogger(__name__)
 admin_bp = Blueprint('admin', __name__)
@@ -440,3 +441,59 @@ def admin_copy_client(client_id: int):
         'message': '客户端复制成功',
         'data': payload,
     }), 201
+
+
+@admin_bp.route('/clients/deploy-options', methods=['GET'])
+@require_admin
+def admin_get_deploy_options():
+    """获取 deploy 配置可选项"""
+    options = [{'key': k, 'label': OFFICIAL_CONFIG_LABELS.get(k, k)} for k in AVAILABLE_OFFICIAL_CONFIGS]
+    return jsonify({'code': 200, 'data': {'official_configs': options}})
+
+
+@admin_bp.route('/clients/deploy-templates', methods=['GET'])
+@require_admin
+def admin_get_deploy_templates():
+    """获取 deploy 模板配置"""
+    template_type = request.args.get('type', '').strip()
+    if template_type == 'website':
+        deploys = get_website_template_deploys()
+    else:
+        deploys = []
+    return jsonify({'code': 200, 'data': {'deploys': deploys}})
+
+
+@admin_bp.route('/clients/<int:client_id>/deploys/<int:deploy_id>/preview', methods=['GET'])
+@require_admin
+def admin_preview_deploy_config(client_id, deploy_id):
+    """预览 deploy 最终生成的 TOML 配置内容（admin）"""
+    from dao.client_dao import get_client_by_id
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id=client_id, user_id=user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在或无权限', 'data': None}), 400
+
+    success, content = generate_config_toml(deploy_id=deploy_id, user_id=user_id)
+    if not success:
+        return jsonify({'code': 400, 'message': content, 'data': None}), 400
+
+    return jsonify({'code': 200, 'data': {'toml_content': content}})
+
+
+@admin_bp.route('/clients/<int:client_id>/deploys/<int:deploy_id>/execute', methods=['POST'])
+@require_admin
+def admin_execute_deploy(client_id, deploy_id):
+    """执行部署（admin）"""
+    from flask import current_app
+    from dao.client_dao import get_client_by_id
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id=client_id, user_id=user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在或无权限', 'data': None}), 400
+
+    deploy_cfg = current_app.config.get('APP_CONFIG').deploy
+    success, message = execute_deploy(deploy_id=deploy_id, user_id=user_id, deploy_config=deploy_cfg)
+    if not success:
+        return jsonify({'code': 500, 'message': message, 'data': None}), 500
+
+    return jsonify({'code': 200, 'message': message})

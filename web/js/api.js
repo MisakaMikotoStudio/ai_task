@@ -110,26 +110,28 @@ const clientAPI = {
         return request('/client/agents');
     },
 
-    // 创建（可选一次性提交 repos、env_vars，与编辑页 PUT 对齐）
+    // 创建（可选一次性提交 repos、env_vars、deploys，与编辑页 PUT 对齐）
     async create(name, options = {}) {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.deploys !== undefined) body.deploys = options.deploys;
         return request('/client', {
             method: 'POST',
             body: JSON.stringify(body)
         });
     },
 
-    // 更新（可选 repos、env_vars 全量同步）
+    // 更新（可选 repos、env_vars、deploys 全量同步）
     async update(id, name, options = {}) {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.deploys !== undefined) body.deploys = options.deploys;
         return request(`/client/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -143,12 +145,27 @@ const clientAPI = {
         });
     },
 
-    // 心跳
     // 复制客户端
     async copy(id) {
         return request(`/client/${id}/copy`, {
             method: 'POST'
         });
+    },
+    // 获取 deploy 配置可选项
+    async getDeployOptions() {
+        return request('/client/deploy-options');
+    },
+    // 获取 deploy 模板配置
+    async getDeployTemplates(type) {
+        return request(`/client/deploy-templates?type=${encodeURIComponent(type)}`);
+    },
+    // 预览 deploy 配置
+    async previewDeploy(clientId, deployId) {
+        return request(`/client/${clientId}/deploys/${deployId}/preview`);
+    },
+    // 执行部署
+    async executeDeploy(clientId, deployId) {
+        return request(`/client/${clientId}/deploys/${deployId}/execute`, { method: 'POST' });
     }
 };
 
@@ -209,6 +226,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.deploys !== undefined) body.deploys = options.deploys;
         return request('/admin/clients', {
             method: 'POST',
             body: JSON.stringify(body)
@@ -220,6 +238,7 @@ const adminClientAPI = {
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
+        if (options.deploys !== undefined) body.deploys = options.deploys;
         return request(`/admin/clients/${id}`, {
             method: 'PUT',
             body: JSON.stringify(body)
@@ -234,6 +253,18 @@ const adminClientAPI = {
         return request(`/admin/clients/${id}/copy`, {
             method: 'POST'
         });
+    },
+    async getDeployOptions() {
+        return request('/admin/clients/deploy-options');
+    },
+    async getDeployTemplates(type) {
+        return request(`/admin/clients/deploy-templates?type=${encodeURIComponent(type)}`);
+    },
+    async previewDeploy(clientId, deployId) {
+        return request(`/admin/clients/${clientId}/deploys/${deployId}/preview`);
+    },
+    async executeDeploy(clientId, deployId) {
+        return request(`/admin/clients/${clientId}/deploys/${deployId}/execute`, { method: 'POST' });
     }
 };
 

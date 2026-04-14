@@ -20,8 +20,10 @@ from dao.client_dao import (
     increment_client_version,
     update_client,
 )
+from dao.deploy_dao import get_deploys_by_client
 from dao.heartbeat_dao import get_heartbeat, get_heartbeats_by_user, add_heartbeat, update_heartbeat
 from dao.models import ClientEnvVar, ClientRepo
+from service.deploy_service import normalize_deploy_payload, save_deploy_configs, DeploySaveError
 
 # Agent 可选项（与路由 /agents 一致）
 AVAILABLE_AGENTS = ['claude sdk', 'claude cli']
@@ -163,6 +165,12 @@ def _normalize_client_payload(data: dict) -> Optional[str]:
             item['key'] = key
             item['value'] = value_s
 
+    if 'deploys' in data:
+        deploys = data.get('deploys')
+        err = normalize_deploy_payload(deploys)
+        if err:
+            return err
+
     return None
 
 
@@ -182,6 +190,7 @@ def get_client_detail(client_id: int, user_id: int) -> Optional[dict]:
         payload['last_sync_at'] = heartbeats[0].get('last_sync_at')
     payload['repos'] = [repo.to_dict() for repo in get_client_repos(client_id, user_id)]
     payload['env_vars'] = [ev.to_dict() for ev in get_client_env_vars(client_id, user_id)]
+    payload['deploys'] = [d.to_dict() for d in get_deploys_by_client(client_id, user_id)]
     return payload
 
 
@@ -289,6 +298,12 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
     if env_vars_changed:
         # 目前只有环境变量出现变更的时候，才有可能影响到客户端的执行版本号，所以这里直接调用 increment_client_version
         increment_client_version(cid, user_id)
+
+    if 'deploys' in data:
+        try:
+            save_deploy_configs(cid, data.get('deploys', []), user_id=user_id)
+        except Exception as e:
+            raise ClientSaveError(f'保存部署配置失败: {e}')
 
     return cid
 

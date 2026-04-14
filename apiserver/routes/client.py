@@ -7,7 +7,7 @@
 import secrets
 import string
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 
 from dao.client_dao import (
     create_client, get_clients_by_user, get_client_by_id,
@@ -23,6 +23,13 @@ from service.client_service import (
     save_client,
     ClientSaveError,
     update_client_heartbeat,
+)
+from service.deploy_service import (
+    AVAILABLE_OFFICIAL_CONFIGS,
+    OFFICIAL_CONFIG_LABELS,
+    generate_config_toml,
+    execute_deploy,
+    get_website_template_deploys,
 )
 from dao.heartbeat_dao import get_heartbeats_by_user
 from dao.chat_dao import get_running_chat_messages_by_client
@@ -519,3 +526,96 @@ def get_client_startup_config():
         'configs': result,
         'invalid_ids': invalid_ids,
     })
+
+
+@client_bp.route('/deploy-options', methods=['GET'])
+def get_deploy_options():
+    """
+    获取 deploy 配置可选项（官方配置列表）
+
+    Response:
+        成功 (200):
+            {
+                "code": 200,
+                "data": {
+                    "official_configs": [
+                        {"key": "app_name", "label": "应用名"},
+                        {"key": "domain", "label": "域名"},
+                        ...
+                    ]
+                }
+            }
+    """
+    options = [{'key': k, 'label': OFFICIAL_CONFIG_LABELS.get(k, k)} for k in AVAILABLE_OFFICIAL_CONFIGS]
+    return jsonify({'code': 200, 'data': {'official_configs': options}})
+
+
+@client_bp.route('/deploy-templates', methods=['GET'])
+def get_deploy_templates():
+    """
+    获取 deploy 模板配置（用于"从模板创建"功能）
+
+    Query Parameters:
+        type: str  # 模板类型，目前支持 "website"
+
+    Response:
+        成功 (200):
+            {
+                "code": 200,
+                "data": { "deploys": [...] }
+            }
+    """
+    template_type = request.args.get('type', '').strip()
+    if template_type == 'website':
+        deploys = get_website_template_deploys()
+    else:
+        deploys = []
+    return jsonify({'code': 200, 'data': {'deploys': deploys}})
+
+
+@client_bp.route('/<int:client_id>/deploys/<int:deploy_id>/preview', methods=['GET'])
+def preview_deploy_config(client_id, deploy_id):
+    """
+    预览 deploy 最终生成的 TOML 配置内容
+
+    Response:
+        成功 (200):
+            {
+                "code": 200,
+                "data": { "toml_content": "..." }
+            }
+    """
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id=client_id, user_id=user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
+
+    success, content = generate_config_toml(deploy_id=deploy_id, user_id=user_id)
+    if not success:
+        return jsonify({'code': 400, 'message': content}), 400
+
+    return jsonify({'code': 200, 'data': {'toml_content': content}})
+
+
+@client_bp.route('/<int:client_id>/deploys/<int:deploy_id>/execute', methods=['POST'])
+def execute_deploy_api(client_id, deploy_id):
+    """
+    执行部署（SSH 远程写入配置文件）
+
+    Response:
+        成功 (200):
+            {"code": 200, "message": "部署成功，配置已写入 ..."}
+        失败 (400/500):
+            {"code": 400/500, "message": "错误信息"}
+    """
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id=client_id, user_id=user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
+
+    deploy_config = current_app.config.get('APP_CONFIG').deploy
+    success, message = execute_deploy(deploy_id=deploy_id, user_id=user_id, deploy_config=deploy_config)
+    if not success:
+        return jsonify({'code': 500, 'message': message}), 500
+
+    return jsonify({'code': 200, 'message': message})

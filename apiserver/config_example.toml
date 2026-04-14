@@ -55,3 +55,15 @@ region = "ap-guangzhou"
 bucket = "your-bucket-1234567890"
 # 公开访问域名前缀
 base_url = "https://your-bucket-1234567890.cos.ap-guangzhou.myqcloud.com"
+
+[deploy]
+# SSH 远程部署目标服务器
+ssh_host = ""
+ssh_port = 22
+ssh_username = "root"
+# SSH 密码（与 ssh_key_path 二选一）
+ssh_password = ""
+# SSH 私钥文件路径（与 ssh_password 二选一）
+ssh_key_path = ""
+# 远程服务器配置文件基础路径
+config_base_path = "/config"

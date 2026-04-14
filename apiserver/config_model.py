@@ -66,6 +66,17 @@ class OssConfig:
 
 
 @dataclass
+class DeployConfig:
+    """部署配置（SSH 远程部署服务器信息）"""
+    ssh_host: str = ""
+    ssh_port: int = 22
+    ssh_username: str = ""
+    ssh_password: str = ""
+    ssh_key_path: str = ""             # SSH 私钥文件路径（与 password 二选一）
+    config_base_path: str = "/config"  # 远程服务器配置文件基础路径
+
+
+@dataclass
 class AppConfig:
     """应用总配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -73,6 +84,7 @@ class AppConfig:
     heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
     alipay: AlipayConfig = field(default_factory=AlipayConfig)
     oss: OssConfig = field(default_factory=OssConfig)
+    deploy: DeployConfig = field(default_factory=DeployConfig)
 
     @classmethod
     def from_toml(cls, path: str) -> "AppConfig":
@@ -86,6 +98,7 @@ class AppConfig:
             heartbeat=HeartbeatConfig(**data.get("heartbeat", {})),
             alipay=AlipayConfig(**data.get("alipay", {})),
             oss=OssConfig(**data.get("oss", {})),
+            deploy=DeployConfig(**data.get("deploy", {})),
         )
 
 

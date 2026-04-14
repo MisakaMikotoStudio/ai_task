@@ -295,6 +295,7 @@
                         <button class="config-tab-btn active" data-config-tab="basic">基本信息</button>
                         <button class="config-tab-btn" data-config-tab="env-vars" id="tab-btn-env-vars">环境变量</button>
                         <button class="config-tab-btn" data-config-tab="repos" id="tab-btn-repos">代码仓库</button>
+                        <button class="config-tab-btn" data-config-tab="deploy" id="tab-btn-deploy">Deploy</button>
                     </div>
                     <div class="config-tab-panels">
                         <!-- 基本信息 -->
@@ -352,6 +353,25 @@
                                 </div>
                                 <div class="config-section-tip tip-info" id="repos-tip">须指定唯一文档仓库。</div>
                                 <div class="repos-waterfall" id="cfg-repos-waterfall"></div>
+                            </div>
+                        </div>
+                        <!-- Deploy 部署配置 -->
+                        <div id="client-tab-deploy" class="config-tab-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">部署配置</div>
+                                        <div class="config-section-subtitle">配置修改会在点击右上角保存后统一提交。</div>
+                                    </div>
+                                    <div class="deploy-toolbar-actions">
+                                        <button class="btn-secondary config-add-btn" id="cfg-load-template-btn" type="button">从模板加载</button>
+                                        <button class="btn-secondary config-add-btn" id="cfg-add-deploy-btn" type="button">+ 新增配置</button>
+                                    </div>
+                                </div>
+                                <div class="deploy-cards" id="cfg-deploy-cards"></div>
+                                <div id="deploy-empty" class="empty-state" style="display:none;">
+                                    <p>暂无部署配置</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -477,6 +497,36 @@
         </div>
     </div>
     
+    <!-- Deploy 配置预览弹窗 -->
+    <div id="deploy-preview-overlay" class="modal-overlay" style="display:none;">
+        <div class="modal deploy-preview-modal">
+            <div class="modal-header">
+                <h3>配置预览</h3>
+                <button class="modal-close" onclick="closeDeployPreview()">&times;</button>
+            </div>
+            <div class="modal-content">
+                <pre id="deploy-preview-content" class="deploy-preview-code"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deploy 模板选择弹窗 -->
+    <div id="deploy-template-overlay" class="modal-overlay" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>从模板加载</h3>
+                <button class="modal-close" onclick="closeDeployTemplate()">&times;</button>
+            </div>
+            <div class="modal-content">
+                <p class="deploy-template-tip">选择模板类型以加载默认部署配置：</p>
+                <div class="deploy-template-options">
+                    <button class="btn-primary" onclick="loadDeployTemplate('website')">网站应用</button>
+                </div>
+                <p class="deploy-template-warn">注意：加载模板将替换当前所有部署配置。</p>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast通知 -->
     <div id="toast-container" class="toast-container"></div>
     

@@ -4793,3 +4793,211 @@ textarea:focus {
         grid-template-columns: 1fr;
     }
 }
+
+/* ===== Deploy 部署配置 ===== */
+
+.deploy-toolbar-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.deploy-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.deploy-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.deploy-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    gap: 12px;
+}
+
+.deploy-card-index {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--accent-primary);
+    flex: 0 0 auto;
+}
+
+.deploy-uuid {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.deploy-uuid-new {
+    color: var(--text-tertiary);
+    font-style: italic;
+    font-family: inherit;
+}
+
+.deploy-card-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+.deploy-card-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.deploy-card-body .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.deploy-card-body .form-group label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.deploy-startup-cmd {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+    transition: var(--transition);
+}
+
+.deploy-startup-cmd:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+.deploy-official-configs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.deploy-official-check {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    transition: var(--transition);
+}
+
+.deploy-official-check:hover {
+    border-color: var(--accent-primary);
+}
+
+.deploy-official-check input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
+.deploy-custom-config {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+    resize: vertical;
+    min-height: 80px;
+    transition: var(--transition);
+}
+
+.deploy-custom-config:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+.deploy-toml-hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+}
+
+/* Deploy 预览弹窗 */
+.deploy-preview-modal {
+    max-width: 720px;
+    width: 90vw;
+}
+
+.deploy-preview-code {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 16px;
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 60vh;
+    overflow: auto;
+    margin: 0;
+}
+
+/* Deploy 模板选择弹窗 */
+.deploy-template-tip {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.deploy-template-options {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.deploy-template-warn {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: 8px;
+}
+
+@media (max-width: 768px) {
+    .deploy-toolbar-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .deploy-card-header {
+        flex-wrap: wrap;
+    }
+    .deploy-card-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
