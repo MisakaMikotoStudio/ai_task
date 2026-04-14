@@ -137,12 +137,14 @@ def create_app(config: AppConfig) -> Flask:
     def health():
         return {'code': 200, 'message': 'ok', 'data': {'status': 'healthy'}}
 
-    # 静态文件路由
+    # 静态文件路由（显式跳过鉴权，避免依赖「非 /api 默认放行」）
     @app.route('/')
+    @skip_auth
     def index():
         return send_from_directory(app.static_folder, 'index.html')
 
     @app.route('/<path:path>')
+    @skip_auth
     def static_files(path):
         return send_from_directory(app.static_folder, path)
 
