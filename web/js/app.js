@@ -443,11 +443,9 @@ function openModal(title, content, modalClass = '') {
     // 移除之前可能添加的自定义类
     const modal = document.querySelector('.modal');
     modal.classList.remove('modal-lg', 'modal-flow', 'modal-task-detail', 'modal-commerce-product');
-    
+
     // 添加新的自定义类
-    if (modalClass) {
-        modal.classList.add(modalClass);
-    }
+    if (modalClass) modal.classList.add(modalClass);
     
     document.getElementById('modal-overlay').classList.add('active');
 }

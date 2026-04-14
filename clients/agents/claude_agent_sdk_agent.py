@@ -61,11 +61,7 @@ class ClaudeAgentSdkAgent(BaseAgent):
             stderr_lines.append(line)
             logger.debug(f"[{trace_id}] [CLI stderr] {line}")
 
-        options = ClaudeAgentOptions(
-            cwd=cwd,
-            permission_mode="bypassPermissions",
-            stderr=_stderr_callback,
-        )
+        options = ClaudeAgentOptions(cwd=cwd, permission_mode="bypassPermissions", stderr=_stderr_callback)
         if session_id:
             options.resume = session_id
 
@@ -76,9 +72,7 @@ class ClaudeAgentSdkAgent(BaseAgent):
                 f"{json.dumps({'prompt': prompt, 'options': self._safe_options_for_log(options)}, ensure_ascii=False, default=str)}"
             )
             try:
-                session_id = await self._consume_query(
-                    trace_id, prompt, options, output_parts, session_id,
-                )
+                session_id = await self._consume_query(trace_id, prompt, options, output_parts, session_id)
             except Exception as exc:
                 if session_id and options.resume:
                     logger.warning(
@@ -87,9 +81,7 @@ class ClaudeAgentSdkAgent(BaseAgent):
                     )
                     stderr_lines.clear()
                     options.resume = None
-                    session_id = await self._consume_query(
-                        trace_id, prompt, options, output_parts, session_id=None,
-                    )
+                    session_id = await self._consume_query(trace_id, prompt, options, output_parts, session_id=None)
                 else:
                     logger.error(
                         f"[{trace_id}] query failed: {exc}, stderr={''.join(stderr_lines)!r}"
@@ -202,9 +194,7 @@ class ClaudeAgentSdkAgent(BaseAgent):
             return tool_name
 
         subagent_type = (
-            tool_input.get("subagent_type")
-            or tool_input.get("subagentType")
-            or tool_input.get("agent_type")
+            tool_input.get("subagent_type") or tool_input.get("subagentType") or tool_input.get("agent_type")
         )
         if subagent_type:
             return f"{tool_name}/{subagent_type}"

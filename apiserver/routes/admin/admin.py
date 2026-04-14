@@ -279,10 +279,7 @@ def upload_icon():
 @require_admin
 def admin_list_secrets():
     secrets_list = get_user_secrets(user_id=request.user_info.user_id)
-    return jsonify({
-        'code': 200,
-        'data': [s.to_dict() for s in secrets_list]
-    })
+    return jsonify({'code': 200, 'data': [s.to_dict() for s in secrets_list]})
 
 
 @admin_bp.route('/secrets', methods=['POST'])
@@ -297,11 +294,7 @@ def admin_create_secret():
         return jsonify({'code': 400, 'message': '秘钥名称长度不能超过64个字符', 'data': None}), 400
 
     user_secret = create_user_secret(user_id=request.user_info.user_id, name=name)
-    return jsonify({
-        'code': 201,
-        'message': '秘钥创建成功',
-        'data': user_secret.to_dict()
-    }), 201
+    return jsonify({'code': 201, 'message': '秘钥创建成功', 'data': user_secret.to_dict()}), 201
 
 
 @admin_bp.route('/secrets/<int:secret_id>', methods=['DELETE'])
@@ -319,10 +312,7 @@ def admin_delete_secret(secret_id: int):
 @admin_bp.route('/clients/agents', methods=['GET'])
 @require_admin
 def admin_get_available_agents():
-    return jsonify({
-        'code': 200,
-        'data': AVAILABLE_AGENTS
-    })
+    return jsonify({'code': 200, 'data': AVAILABLE_AGENTS})
 
 
 @admin_bp.route('/clients', methods=['GET'])
@@ -337,11 +327,7 @@ def admin_list_clients():
         if client.get('id') in heartbeat_map:
             client['last_sync_at'] = heartbeat_map[client.get('id')]
 
-    return jsonify({
-        'code': 200,
-        'message': '获取客户端列表成功',
-        'data': result
-    })
+    return jsonify({'code': 200, 'message': '获取客户端列表成功', 'data': result})
 
 
 @admin_bp.route('/clients', methods=['POST'])
@@ -360,11 +346,7 @@ def admin_create_client():
         response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
         if not response_data:
             return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败', 'data': None}), 500
-        return jsonify({
-            'code': 201,
-            'message': '客户端创建成功',
-            'data': response_data,
-        }), 201
+        return jsonify({'code': 201, 'message': '客户端创建成功', 'data': response_data}), 201
     except ClientSaveError as e:
         return jsonify({'code': 400, 'message': e.message, 'data': None}), 400
     except Exception as e:
@@ -378,11 +360,7 @@ def admin_get_client_detail(client_id: int):
     payload = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not payload:
         return jsonify({'code': 400, 'message': '客户端不存在', 'data': None}), 400
-    return jsonify({
-        'code': 200,
-        'message': '获取客户端详情成功',
-        'data': payload
-    })
+    return jsonify({'code': 200, 'message': '获取客户端详情成功', 'data': payload})
 
 
 @admin_bp.route('/clients/<int:client_id>', methods=['PUT'])
@@ -408,11 +386,7 @@ def admin_update_client(client_id: int):
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端更新成功但读取详情失败', 'data': None}), 500
 
-    return jsonify({
-        'code': 200,
-        'message': '客户端更新成功',
-        'data': response_data,
-    })
+    return jsonify({'code': 200, 'message': '客户端更新成功', 'data': response_data})
 
 
 @admin_bp.route('/clients/<int:client_id>', methods=['DELETE'])
@@ -452,11 +426,7 @@ def admin_copy_client(client_id: int):
     cid = save_client(user_id=request.user_info.user_id, data=source_detail, client_id=None)
     payload = get_client_detail(client_id=cid, user_id=request.user_info.user_id)
 
-    return jsonify({
-        'code': 201,
-        'message': '客户端复制成功',
-        'data': payload,
-    }), 201
+    return jsonify({'code': 201, 'message': '客户端复制成功', 'data': payload}), 201
 
 
 # ========== 权限配置管理（admin 专用） ==========
@@ -611,11 +581,7 @@ def delete_permission(config_id: int):
 def list_resources_api():
     """获取资源列表（含已下架）"""
     resources = resource_dao.list_resources(include_offline=True)
-    return jsonify({
-        'code': 200,
-        'message': 'ok',
-        'data': [r.to_dict() for r in resources],
-    })
+    return jsonify({'code': 200, 'message': 'ok', 'data': [r.to_dict() for r in resources]})
 
 
 @admin_bp.route('/resource', methods=['POST'])

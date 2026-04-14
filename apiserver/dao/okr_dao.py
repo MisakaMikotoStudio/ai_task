@@ -152,12 +152,7 @@ def create_key_result(objective_id: int, user_id: int, title: str,
                        description: Optional[str] = None) -> KeyResult:
     """创建关键结果"""
     with get_db_session() as session:
-        kr = KeyResult(
-            objective_id=objective_id,
-            user_id=user_id,
-            title=title,
-            description=description
-        )
+        kr = KeyResult(objective_id=objective_id, user_id=user_id, title=title, description=description)
         session.add(kr)
         session.flush()
         return kr

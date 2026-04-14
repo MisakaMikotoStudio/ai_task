@@ -52,10 +52,7 @@ def _build_rds_client(resource: Resource):
     if not url:
         raise ResourceMySQLError("资源缺少数据库实例地址 (url)")
 
-    client = create_rds_client(
-        access_key_id=access_key_id,
-        access_key_secret=access_key_secret,
-    )
+    client = create_rds_client(access_key_id=access_key_id, access_key_secret=access_key_secret)
 
     instance_id = resolve_instance_id(client=client, connection_url=url)
 
@@ -84,10 +81,7 @@ def list_databases(resource: Resource, user_id: int) -> List[Dict]:
         user_dbs = []
         for db in databases:
             if db.dbname and db.dbname.startswith(prefix):
-                user_dbs.append({
-                    'db_name': db.dbname,
-                    'db_status': db.dbstatus,
-                })
+                user_dbs.append({'db_name': db.dbname, 'db_status': db.dbstatus})
 
         logger.info(
             "list_databases: resource_id=%s, user_id=%s, total_dbs=%d, user_dbs=%d",

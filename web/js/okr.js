@@ -77,12 +77,7 @@ async function loadObjectives() {
     try {
         const { start, end } = getCycleDates(currentCycleType, currentCycleOffset);
         // 传递周期范围给后端，由后端过滤和拼接数据，避免N+1查询
-        const response = await okrAPI.listObjectives(
-            currentCycleType,
-            null,
-            formatDate(start),
-            formatDate(end)
-        );
+        const response = await okrAPI.listObjectives(currentCycleType, null, formatDate(start), formatDate(end));
 
         // 后端已过滤，直接使用返回数据
         currentObjectives = response.data || [];
@@ -232,16 +227,10 @@ function renderKeyResultBlock(kr, krIndex, objectiveId, totalKrs) {
 function getCycleOptions(cycleType, count = 12) {
     const options = [];
     // 先添加下一周期选项
-    options.push({
-        offset: 1,
-        text: getCyclePeriodText(cycleType, 1)
-    });
+    options.push({ offset: 1, text: getCyclePeriodText(cycleType, 1) });
     // 再添加当前及过去周期
     for (let i = 0; i >= -count + 1; i--) {
-        options.push({
-            offset: i,
-            text: getCyclePeriodText(cycleType, i)
-        });
+        options.push({ offset: i, text: getCyclePeriodText(cycleType, i) });
     }
     return options;
 }
@@ -292,13 +281,7 @@ async function createNewObjective(afterId = null) {
         const { start, end } = getCycleDates(currentCycleType, currentCycleOffset);
         console.log('[OKR] Creating objective with cycle:', currentCycleType, formatDate(start), formatDate(end));
 
-        const result = await okrAPI.createObjective(
-            '',  // 空标题，用户直接编辑
-            null,
-            currentCycleType,
-            formatDate(start),
-            formatDate(end)
-        );
+        const result = await okrAPI.createObjective('', null, currentCycleType, formatDate(start), formatDate(end));
         console.log('[OKR] Objective created:', result);
         loadObjectives();
     } catch (error) {

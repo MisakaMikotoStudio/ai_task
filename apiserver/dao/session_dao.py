@@ -37,11 +37,7 @@ def create_session(user_id: int, expire_days: int = 7) -> UserSession:
     expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
 
     with get_db_session() as session:
-        user_session = UserSession(
-            user_id=user_id,
-            token=token,
-            expires_at=expires_at
-        )
+        user_session = UserSession(user_id=user_id, token=token, expires_at=expires_at)
         session.add(user_session)
     
     return get_session_by_token(token)

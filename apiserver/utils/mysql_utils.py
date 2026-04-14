@@ -97,10 +97,7 @@ def resolve_instance_id(client, connection_url: str) -> str:
 
     for region in regions:
         try:
-            req = rds_models.DescribeDBInstancesRequest(
-                region_id=region,
-                page_size=100,
-            )
+            req = rds_models.DescribeDBInstancesRequest(region_id=region, page_size=100)
             resp = client.describe_dbinstances(req)
             instances = resp.body.items.dbinstance or []
             for inst in instances:
@@ -141,9 +138,7 @@ def describe_databases(client, instance_id: str) -> List:
     """
     from alibabacloud_rds20140815 import models as rds_models
 
-    request = rds_models.DescribeDatabasesRequest(
-        dbinstance_id=instance_id,
-    )
+    request = rds_models.DescribeDatabasesRequest(dbinstance_id=instance_id)
     resp = client.describe_databases(request)
     return resp.body.databases.database or []
 

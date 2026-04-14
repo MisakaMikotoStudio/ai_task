@@ -48,10 +48,7 @@ def get_available_agents():
                 "data": ["claude sdk", "claude cli"]
             }
     """
-    return jsonify({
-        'code': 200,
-        'data': AVAILABLE_AGENTS
-    })
+    return jsonify({'code': 200, 'data': AVAILABLE_AGENTS})
 
 
 @client_bp.route('', methods=['POST'])
@@ -101,11 +98,7 @@ def create_client_api():
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
 
-    return jsonify({
-        'code': 201,
-        'message': '客户端创建成功',
-        'data': response_data,
-    }), 201
+    return jsonify({'code': 201, 'message': '客户端创建成功', 'data': response_data}), 201
 
 
 @client_bp.route('/generate-default-database', methods=['POST'])
@@ -137,11 +130,7 @@ def generate_default_database_api():
             user_id=request.user_info.user_id,
             config=config,
         )
-        return jsonify({
-            'code': 200,
-            'message': '数据库创建成功',
-            'data': db_info,
-        })
+        return jsonify({'code': 200, 'message': '数据库创建成功', 'data': db_info})
     except ClientSaveError as e:
         return jsonify({'code': 400, 'message': e.message}), 400
 
@@ -184,11 +173,7 @@ def create_from_template_api():
         if not response_data:
             return jsonify({'code': 500, 'message': '应用创建成功但读取详情失败'}), 500
 
-        return jsonify({
-            'code': 201,
-            'message': '应用创建成功',
-            'data': response_data,
-        }), 201
+        return jsonify({'code': 201, 'message': '应用创建成功', 'data': response_data}), 201
     except ClientSaveError as e:
         return jsonify({'code': 400, 'message': e.message}), 400
 
@@ -232,11 +217,7 @@ def list_clients():
         if client.get('id') in heartbeat_map:
             client['last_sync_at'] = heartbeat_map[client.get('id')]
 
-    return jsonify({
-        'code': 200,
-        'message': '获取客户端列表成功',
-        'data': result
-    })
+    return jsonify({'code': 200, 'message': '获取客户端列表成功', 'data': result})
 
 
 @client_bp.route('/<int:client_id>', methods=['GET'])
@@ -252,11 +233,7 @@ def get_client_detail_api(client_id):
     if not payload:
         return jsonify({'code': 400, 'message': '客户端不存在'}), 400
 
-    return jsonify({
-        'code': 200,
-        'message': '获取客户端详情成功',
-        'data': payload
-    })
+    return jsonify({'code': 200, 'message': '获取客户端详情成功', 'data': payload})
 
 
 @client_bp.route('/<int:client_id>', methods=['PUT'])
@@ -309,11 +286,7 @@ def update_client_api(client_id):
     if not response_data:
         return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败'}), 500
 
-    return jsonify({
-        'code': 200,
-        'message': '客户端更新成功',
-        'data': response_data
-    })
+    return jsonify({'code': 200, 'message': '客户端更新成功', 'data': response_data})
 
 
 @client_bp.route('/<int:client_id>', methods=['DELETE'])
@@ -396,11 +369,7 @@ def get_running_chat_message_api(client_id):
     if not get_client_by_id(client_id=client_id, user_id=request.user_info.user_id):
         return jsonify({'code': 400, 'message': '客户端不存在或无权限'}), 400
     data = get_running_chat_messages_by_client(user_id=request.user_info.user_id, client_id=client_id)
-    return jsonify({
-        'code': 200,
-        'message': '获取运行中Chat消息成功',
-        'data': data
-    })
+    return jsonify({'code': 200, 'message': '获取运行中Chat消息成功', 'data': data})
 
 
 @client_bp.route('/<int:client_id>/copy', methods=['POST'])
@@ -437,11 +406,7 @@ def copy_client_api(client_id):
     source_detail.pop('id')
     cid = save_client(user_id=user_id, data=source_detail, client_id=None)
     payload = get_client_detail(client_id=cid, user_id=user_id)
-    return jsonify({
-        'code': 201,
-        'message': '客户端复制成功',
-        'data': payload,
-    }), 201
+    return jsonify({'code': 201, 'message': '客户端复制成功', 'data': payload}), 201
 
 
 @client_bp.route('/<int:client_id>/repos/<int:repo_id>/default-branch', methods=['PATCH'])
@@ -558,10 +523,7 @@ def get_client_oss_sts_api(client_id):
         logger.warning("生成 STS 临时凭证失败: %s", e)
         return jsonify({'code': 500, 'message': '生成 STS 临时凭证失败'}), 500
 
-    return jsonify({
-        'code': 200,
-        'data': oss_data,
-    })
+    return jsonify({'code': 200, 'data': oss_data})
 
 
 @client_bp.route('/<int:client_id>/repos/<int:repo_id>/refresh-token', methods=['POST'])
@@ -597,11 +559,7 @@ def refresh_repo_token_api(client_id, repo_id):
     if not update_client_repo_token(repo_id=repo_id, user_id=request.user_info.user_id, token=new_token):
         return jsonify({'code': 500, 'message': 'token已刷新但更新数据库失败'}), 500
 
-    return jsonify({
-        'code': 200,
-        'message': 'token刷新成功',
-        'data': {'token': new_token},
-    })
+    return jsonify({'code': 200, 'message': 'token刷新成功', 'data': {'token': new_token}})
 
 
 @client_bp.route('/startup-config', methods=['POST'])

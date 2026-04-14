@@ -65,11 +65,7 @@ def generate_app_jwt(app_id: str, private_key_pem: str) -> str:
     }
 
     try:
-        token = jwt.encode(
-            payload,
-            private_key_pem,
-            algorithm='RS256',
-        )
+        token = jwt.encode(payload, private_key_pem, algorithm='RS256')
         return token
     except Exception as e:
         logger.error("generate_app_jwt: failed, app_id=%s, error=%s", app_id, str(e))

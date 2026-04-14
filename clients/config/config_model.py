@@ -13,6 +13,7 @@ import uuid
 from rpc.apiserver_rpc import ApiServerRpc
 from config.base_checker import BaseChecker
 from utils import git_utils
+from utils import git_workflow_utils
 from agents.base_agent import BaseAgent
 from agents import get_agent_by_name
 from config.api_server_checker import ApiServerChecker
@@ -55,11 +56,7 @@ class GitRepoConfig:
 
     def to_simple_intro_dict(self) -> Dict[str, Any]:
         """转换为简单介绍字典"""
-        return {
-            'name': self.name,
-            'default_main_branch': self.default_branch,
-            'desc': self.desc
-        }
+        return {'name': self.name, 'default_main_branch': self.default_branch, 'desc': self.desc}
     
     def get_path_prefix(self, branch: str) -> str:
         """获取路径前缀，用于拼接文件浏览 URL。"""
@@ -73,15 +70,13 @@ class GitRepoConfig:
         """
         if self.default_branch:
             return
-        detected_branch = git_utils.detect_default_branch_from_url(auth_url=self.auth_url, repo_name=self.name)
+        detected_branch = git_workflow_utils.detect_default_branch_from_url(auth_url=self.auth_url, repo_name=self.name)
         if not detected_branch:
             logger.error(f"检测默认分支失败: {self.name} ({self.url})")
             return
         logger.info(f"  检测到默认分支: {detected_branch}")
         self.default_branch = detected_branch
-        success = apiserver_rpc.update_repo_default_branch(
-            repo_id=self.repo_id, default_branch=detected_branch
-        )
+        success = apiserver_rpc.update_repo_default_branch(repo_id=self.repo_id, default_branch=detected_branch)
         if not success:
             logger.error(f"更新默认分支到服务端失败: {self.name} ({self.url})")
         else:
@@ -229,10 +224,7 @@ class ClientConfig:
 
     def check_config(self):
         """检查客户端配置"""
-        self.checkers = [
-            ApiServerChecker(self),
-            GitRepoChecker(self),
-        ]
+        self.checkers = [ApiServerChecker(self), GitRepoChecker(self)]
         logger.info("=" * 50)
         logger.info("开始客户端配置检查...")
         logger.info("=" * 50)

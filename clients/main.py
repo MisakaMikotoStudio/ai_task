@@ -83,9 +83,7 @@ class ClientRunner:
             except OSError:
                 age = WORK_DIR_DELETE_MIN_AGE_SEC
             if age < WORK_DIR_DELETE_MIN_AGE_SEC:
-                logger.info(
-                    f"任务工作目录在 {WORK_DIR_DELETE_MIN_AGE_SEC // 3600} 小时内有执行完成记录，暂不删除: {path}"
-                )
+                logger.info(f"任务工作目录在 {WORK_DIR_DELETE_MIN_AGE_SEC // 3600} 小时内有执行完成记录，暂不删除: {path}")
                 return
         try:
             shutil.rmtree(path)

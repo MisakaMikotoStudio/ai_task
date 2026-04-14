@@ -106,12 +106,7 @@ def get_tasks(
             if status not in normalized_statuses:
                 normalized_statuses.append(status)
 
-    task_page = dao_get_tasks_by_user(
-        user_id=user_id,
-        statuses=normalized_statuses,
-        page=page,
-        page_num=page_num
-    )
+    task_page = dao_get_tasks_by_user(user_id=user_id, statuses=normalized_statuses, page=page, page_num=page_num)
     total = task_page['total']
 
     return {
