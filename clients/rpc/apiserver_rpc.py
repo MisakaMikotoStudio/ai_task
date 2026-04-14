@@ -178,11 +178,11 @@ class ApiServerRpc:
     def get_current_user(self) -> Dict[str, Any]:
         """
         获取当前登录用户信息
-        
+
         Returns:
             用户信息
         """
-        return self._request('GET', '/api/user/me')
+        return self._request('GET', '/api/open/user/me')
     
     # ==================== 任务相关 API ====================
         
@@ -197,7 +197,7 @@ class ApiServerRpc:
         Returns:
             任务对象，如果不存在返回 None
         """
-        result = self._request('GET', f'/api/task/{task_id}')
+        result = self._request('GET', f'/api/open/task/{task_id}')
         data = result.get('data')
         if not data:
             raise ApiException(404, "任务不存在")
@@ -215,7 +215,7 @@ class ApiServerRpc:
         Returns:
             对话任务列表（每项包含 task_id/chat_id/chat_messages）
         """
-        result = self._request('GET', f'/api/client/{client_id}/running_chat_message')
+        result = self._request('GET', f'/api/open/{client_id}/running_chat_message')
         return result.get('data', [])
 
     def sync_client(self, client_id: int, instance_uuid: str) -> Dict[str, Any]:
@@ -234,7 +234,7 @@ class ApiServerRpc:
         """
         result = self._request(
             'POST', 
-            f'/api/client/{client_id}/heartbeat',
+            f'/api/open/{client_id}/heartbeat',
             json_data={'instance_uuid': instance_uuid},
             network_retry_count=10
         )
@@ -251,7 +251,7 @@ class ApiServerRpc:
         Returns:
             客户端配置信息
         """
-        result = self._request('GET', f'/api/client/{client_id}/config')
+        result = self._request('GET', f'/api/open/{client_id}/config')
         return result.get('data', {})
 
     def get_oss_sts(self, client_id: int) -> Dict[str, Any]:
@@ -264,7 +264,7 @@ class ApiServerRpc:
         Returns:
             STS 临时凭证信息（tmp_secret_id, tmp_secret_key, session_token, expired_time, region, bucket, allow_prefix）
         """
-        result = self._request('GET', f'/api/client/{client_id}/oss-sts')
+        result = self._request('GET', f'/api/open/{client_id}/oss-sts')
         return result.get('data', {})
 
     def refresh_repo_token(self, repo_id: int) -> Optional[str]:
@@ -278,7 +278,7 @@ class ApiServerRpc:
             新的 token，失败返回 None
         """
         try:
-            result = self._request('POST', f'/api/client/{self.client_id}/repos/{repo_id}/refresh-token')
+            result = self._request('POST', f'/api/open/{self.client_id}/repos/{repo_id}/refresh-token')
             return result.get('data', {}).get('token')
         except ApiException as e:
             logger.warning(f"刷新仓库 token 失败: repo_id={repo_id}, {e.message}")
@@ -298,7 +298,7 @@ class ApiServerRpc:
         try:
             self._request(
                 'PATCH',
-                f'/api/client/{self.client_id}/repos/{repo_id}/default-branch',
+                f'/api/open/{self.client_id}/repos/{repo_id}/default-branch',
                 json_data={'default_branch': default_branch}
             )
             logger.info(f"更新仓库默认分支成功: repo_id={repo_id}, branch={default_branch}")
@@ -310,11 +310,11 @@ class ApiServerRpc:
     # ==================== 同步执行结果（给客户端写入数据库） ====================
     def sync_task_execute(self, task_id: int, develop_doc: str, merge_request: List[Dict[str, Any]]):
         """
-        /api/task/sync_execute
+        /api/open/task/sync_execute
         将 task 分支差异与开发文档链接写入 ai_task_tasks.extra
         """
         payload = {"task_id": task_id, "develop_doc": develop_doc, "merge_request": merge_request}
-        self._request("POST", "/api/task/sync_execute", json_data=payload)
+        self._request("POST", "/api/open/task/sync_execute", json_data=payload)
 
     def sync_chat_msg_sync_execute(
         self,
@@ -325,7 +325,7 @@ class ApiServerRpc:
         merge_request: List[Dict[str, Any]],
     ):
         """
-        /api/chat/msg/sync_execute
+        /api/open/chat/msg/sync_execute
         将 develop_doc/merge_request 写入 ai_task_chat_message.extra
         """
         payload = {
@@ -335,16 +335,16 @@ class ApiServerRpc:
             "develop_doc": develop_doc,
             "merge_request": merge_request or []
         }
-        self._request("POST", "/api/chat/msg/sync_execute", json_data=payload)
+        self._request("POST", "/api/open/chat/msg/sync_execute", json_data=payload)
 
     def update_chat_status(self, task_id: int, chat_id: int, status: str) -> bool:
         """
-        /api/chat/update_chat_status
+        /api/open/chat/update_chat_status
         更新 Chat 状态（running / completed / terminated）
         """
         payload = {"task_id": task_id, "chat_id": chat_id, "status": status}
         try:
-            self._request("POST", "/api/chat/update_chat_status", json_data=payload)
+            self._request("POST", "/api/open/chat/update_chat_status", json_data=payload)
             return True
         except ApiException as e:
             logger.warning(f"更新 Chat 状态失败: {e.message}")
@@ -352,11 +352,11 @@ class ApiServerRpc:
 
     def update_message_status(self, task_id: int, chat_id: int, message_id: int, status: str) -> bool:
         """
-        /api/chat/msg/update_message_status
+        /api/open/chat/msg/update_message_status
         更新 Message 状态（running / completed / terminated）
         """
         payload = {"task_id": task_id, "chat_id": chat_id, "message_id": message_id, "status": status}
-        return self._request("POST", f"/api/chat/msg/update_message_status", json_data=payload)
+        return self._request("POST", "/api/open/chat/msg/update_message_status", json_data=payload)
 
     def agent_reply_chat_msg(
         self,
@@ -367,7 +367,7 @@ class ApiServerRpc:
         session_id: Optional[str],
     ) -> Dict[str, Any]:
         """
-        /api/chat/msg/agent_reply
+        /api/open/chat/msg/agent_reply
         将 agent 执行结果同步回数据库：
         - ai_task_chat_message.output = agent reply
         - ai_task_chat.session_id = agent session_id
@@ -379,7 +379,7 @@ class ApiServerRpc:
             "reply": reply,
             "session_id": session_id,
         }
-        return self._request("POST", "/api/chat/msg/agent_reply", json_data=payload)
+        return self._request("POST", "/api/open/chat/msg/agent_reply", json_data=payload)
 
 
 class ApiException(Exception):

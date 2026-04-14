@@ -74,17 +74,17 @@ const userAPI = {
     // 注册
     async register(name, passwordHash) {
         const body = JSON.stringify({ name, password_hash: passwordHash });
-        return request('/user/register', { method: 'POST', body });
+        return request('/app/user/register', { method: 'POST', body });
     },
 
     // 登录
     async login(name, passwordHash) {
-        return request('/user/login', { method: 'POST', body: JSON.stringify({ name, password_hash: passwordHash }) });
+        return request('/app/user/login', { method: 'POST', body: JSON.stringify({ name, password_hash: passwordHash }) });
     },
-    
+
     // 获取当前用户
     async me() {
-        return request('/user/me');
+        return request('/app/user/me');
     }
 };
 
@@ -92,17 +92,17 @@ const userAPI = {
 const clientAPI = {
     // 获取列表（直接返回全部）
     async list() {
-        return request('/client');
+        return request('/app/client');
     },
 
     // 获取单个
     async get(id) {
-        return request(`/client/${id}`);
+        return request(`/app/client/${id}`);
     },
 
     // 获取可用的Agent列表
     async getAgents() {
-        return request('/client/agents');
+        return request('/app/client/agents');
     },
 
     // 创建（可选一次性提交 repos、env_vars，与编辑页 PUT 对齐）
@@ -113,7 +113,7 @@ const clientAPI = {
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
-        return request('/client', { method: 'POST', body: JSON.stringify(body) });
+        return request('/app/client', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 更新（可选 repos、env_vars、infrastructure 全量同步）
@@ -124,29 +124,29 @@ const clientAPI = {
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         if (options.infrastructure !== undefined) body.infrastructure = options.infrastructure;
-        return request(`/client/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+        return request(`/app/client/${id}`, { method: 'PUT', body: JSON.stringify(body) });
     },
 
     // 删除
     async delete(id) {
-        return request(`/client/${id}`, { method: 'DELETE' });
+        return request(`/app/client/${id}`, { method: 'DELETE' });
     },
 
     // 获取客户端完整配置（repos、agent 等）
     async getConfig(id) {
-        return request(`/client/${id}/config`);
+        return request(`/app/client/${id}/config`);
     },
 
     // 复制客户端
     async copy(id) {
-        return request(`/client/${id}/copy`, { method: 'POST' });
+        return request(`/app/client/${id}/copy`, { method: 'POST' });
     },
 
     // 从模板生成默认应用
     async createFromTemplate(appTypes, appName) {
         const payload = { app_types: appTypes };
         if (appName) payload.name = appName;
-        return request('/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
+        return request('/app/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
     }
 };
 
@@ -155,17 +155,17 @@ const clientAPI = {
 const secretAPI = {
     // 获取列表
     async list() {
-        return request('/user/secrets');
+        return request('/app/user/secrets');
     },
 
     // 创建
     async create(name) {
-        return request('/user/secrets', { method: 'POST', body: JSON.stringify({ name }) });
+        return request('/app/user/secrets', { method: 'POST', body: JSON.stringify({ name }) });
     },
 
     // 删除
     async delete(id) {
-        return request(`/user/secrets/${id}`, { method: 'DELETE' });
+        return request(`/app/user/secrets/${id}`, { method: 'DELETE' });
     }
 };
 
@@ -217,11 +217,11 @@ const adminClientAPI = {
         return request(`/admin/clients/${id}/copy`, { method: 'POST' });
     },
 
-    // 从模板生成默认应用（复用 /client 路由，管理员通过 token 鉴权）
+    // 从模板生成默认应用（复用 /app/client 路由，管理员通过 token 鉴权）
     async createFromTemplate(appTypes, appName) {
         const payload = { app_types: appTypes };
         if (appName) payload.name = appName;
-        return request('/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
+        return request('/app/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
     }
 };
 
@@ -346,12 +346,12 @@ const taskAPI = {
         }
 
         const queryString = query.toString();
-        return request(`/task${queryString ? `?${queryString}` : ''}`);
+        return request(`/app/task${queryString ? `?${queryString}` : ''}`);
     },
 
     // 获取单个任务详情
     async get(id) {
-        return request(`/task/${id}`);
+        return request(`/app/task/${id}`);
     },
 
     // 创建
@@ -364,17 +364,17 @@ const taskAPI = {
         if (status !== null) {
             body.status = status;
         }
-        return request('/task', { method: 'POST', body: JSON.stringify(body) });
+        return request('/app/task', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 更新状态
     async updateStatus(id, status) {
-        return request(`/task/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        return request(`/app/task/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
     },
 
     // 删除任务
     async delete(id) {
-        return request(`/task/${id}`, { method: 'DELETE' });
+        return request(`/app/task/${id}`, { method: 'DELETE' });
     },
 };
 
@@ -389,53 +389,53 @@ const okrAPI = {
         if (cycleStart) params.append('cycle_start', cycleStart);
         if (cycleEnd) params.append('cycle_end', cycleEnd);
         const query = params.toString() ? `?${params.toString()}` : '';
-        return request(`/okr/objectives${query}`);
+        return request(`/app/okr/objectives${query}`);
     },
 
     // 创建目标
     async createObjective(title, description = null, cycleType = 'quarter', cycleStart = null, cycleEnd = null) {
         const body = { title, description, cycle_type: cycleType, cycle_start: cycleStart, cycle_end: cycleEnd };
-        return request('/okr/objectives', { method: 'POST', body: JSON.stringify(body) });
+        return request('/app/okr/objectives', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 更新目标
     async updateObjective(id, data) {
-        return request(`/okr/objectives/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+        return request(`/app/okr/objectives/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
 
     // 删除目标
     async deleteObjective(id) {
-        return request(`/okr/objectives/${id}`, { method: 'DELETE' });
+        return request(`/app/okr/objectives/${id}`, { method: 'DELETE' });
     },
 
     // ========== KeyResult ==========
     // 创建KR
     async createKeyResult(objectiveId, title, description = null) {
         const body = JSON.stringify({ title, description });
-        return request(`/okr/objectives/${objectiveId}/key-results`, { method: 'POST', body });
+        return request(`/app/okr/objectives/${objectiveId}/key-results`, { method: 'POST', body });
     },
 
     // 更新KR
     async updateKeyResult(id, data) {
-        return request(`/okr/key-results/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+        return request(`/app/okr/key-results/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
 
     // 删除KR
     async deleteKeyResult(id) {
-        return request(`/okr/key-results/${id}`, { method: 'DELETE' });
+        return request(`/app/okr/key-results/${id}`, { method: 'DELETE' });
     },
 
     // ========== Reorder ==========
     // 重新排序目标
     async reorderObjectives(objectiveIds) {
         const body = JSON.stringify({ objective_ids: objectiveIds });
-        return request('/okr/objectives/reorder', { method: 'POST', body });
+        return request('/app/okr/objectives/reorder', { method: 'POST', body });
     },
 
     // 重新排序KR
     async reorderKeyResults(objectiveId, krIds) {
         const body = JSON.stringify({ kr_ids: krIds });
-        return request(`/okr/objectives/${objectiveId}/key-results/reorder`, { method: 'POST', body });
+        return request(`/app/okr/objectives/${objectiveId}/key-results/reorder`, { method: 'POST', body });
     }
 };
 
@@ -466,13 +466,13 @@ async function uploadRequest(url, formData) {
 // Chat API
 const chatAPI = {
     async listChats(taskId) {
-        return request(`/chat/task/${taskId}/chats`);
+        return request(`/app/chat/task/${taskId}/chats`);
     },
 
     async createChat(taskId, title, sessionid = null) {
         const body = { title };
         if (sessionid) body.sessionid = sessionid;
-        return request(`/chat/task/${taskId}/chats`, { method: 'POST', body: JSON.stringify(body) });
+        return request(`/app/chat/task/${taskId}/chats`, { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 独立 Chat（task_id=0）
@@ -484,40 +484,40 @@ const chatAPI = {
         if (params.page !== undefined) query.set('page', String(params.page));
         if (params.pageNum !== undefined) query.set('pageNum', String(params.pageNum));
         const qs = query.toString();
-        return request(`/chat/standalone/chats${qs ? `?${qs}` : ''}`);
+        return request(`/app/chat/standalone/chats${qs ? `?${qs}` : ''}`);
     },
 
     async createStandaloneChatWithMessage(input, clientId, extra = {}) {
         const body = JSON.stringify({ input, client_id: clientId, extra });
-        return request('/chat/standalone/messages', { method: 'POST', body });
+        return request('/app/chat/standalone/messages', { method: 'POST', body });
     },
 
     async updateChatStatus(taskId, chatId, status) {
         const body = JSON.stringify({ status });
-        return request(`/chat/task/${taskId}/chats/${chatId}/status`, { method: 'PATCH', body });
+        return request(`/app/chat/task/${taskId}/chats/${chatId}/status`, { method: 'PATCH', body });
     },
 
     async deleteChat(taskId, chatId) {
-        return request(`/chat/task/${taskId}/chats/${chatId}`, { method: 'DELETE' });
+        return request(`/app/chat/task/${taskId}/chats/${chatId}`, { method: 'DELETE' });
     },
 
     async listMessages(taskId, chatId) {
-        return request(`/chat/task/${taskId}/chats/${chatId}/messages`);
+        return request(`/app/chat/task/${taskId}/chats/${chatId}/messages`);
     },
 
     async createMessage(taskId, chatId, input, extra = {}) {
         const body = JSON.stringify({ input, extra });
-        return request(`/chat/task/${taskId}/chats/${chatId}/messages`, { method: 'POST', body });
+        return request(`/app/chat/task/${taskId}/chats/${chatId}/messages`, { method: 'POST', body });
     },
 
     // 软删除消息（用户终止），返回 { input } 用于回填输入框
     async deleteMessage(taskId, chatId, messageId) {
-        return request(`/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, { method: 'DELETE' });
+        return request(`/app/chat/task/${taskId}/chats/${chatId}/messages/${messageId}`, { method: 'DELETE' });
     },
 
     // 自动创建Chat并发送消息（Chat标题取输入内容前32字符）
     async createChatWithMessage(taskId, input, extra = {}) {
-        return request(`/chat/task/${taskId}/messages`, { method: 'POST', body: JSON.stringify({ input, extra }) });
+        return request(`/app/chat/task/${taskId}/messages`, { method: 'POST', body: JSON.stringify({ input, extra }) });
     },
 
     // 上传聊天图片（私有存储），返回 { oss_path, filename }
@@ -527,12 +527,12 @@ const chatAPI = {
         }
         const fd = new FormData();
         fd.append('file', file);
-        return uploadRequest('/chat/upload/image', fd);
+        return uploadRequest('/app/chat/upload/image', fd);
     },
 
     // 获取聊天图片预签名下载 URL（前端直接从 COS 下载）
     async getPresignedImageUrl(ossPath) {
-        return request(`/chat/image/presign?path=${encodeURIComponent(ossPath)}`);
+        return request(`/app/chat/image/presign?path=${encodeURIComponent(ossPath)}`);
     },
 };
 
@@ -540,24 +540,24 @@ const chatAPI = {
 const commercialAPI = {
     // 获取商品列表（公开，无需登录）
     async getProducts() {
-        return request('/commercial/products');
+        return request('/app/commercial/products');
     },
 
     // 生成支付链接
     async buy(productId, orderType = 'purchase', device = null) {
         const body = { product_id: productId, order_type: orderType };
         if (device) body.device = device;
-        return request('/commercial/buy', { method: 'POST', body: JSON.stringify(body) });
+        return request('/app/commercial/buy', { method: 'POST', body: JSON.stringify(body) });
     },
 
     // 获取当前用户的订单列表（分页）
     async getMyOrders(page = 1, pageSize = 20) {
-        return request(`/commercial/my-orders?page=${page}&page_size=${pageSize}`);
+        return request(`/app/commercial/my-orders?page=${page}&page_size=${pageSize}`);
     },
 
     // 获取当前用户正在生效的服务
     async getMyServices() {
-        return request('/commercial/my-services');
+        return request('/app/commercial/my-services');
     }
 };
 
@@ -565,12 +565,12 @@ const commercialAPI = {
 const todoAPI = {
     // 获取列表
     async list() {
-        return request('/todo');
+        return request('/app/todo');
     },
 
     // 创建
     async create(content) {
-        return request('/todo', { method: 'POST', body: JSON.stringify({ content }) });
+        return request('/app/todo', { method: 'POST', body: JSON.stringify({ content }) });
     },
 
     // 更新
@@ -578,12 +578,12 @@ const todoAPI = {
         const body = {};
         if (content !== null) body.content = content;
         if (completed !== null) body.completed = completed;
-        return request(`/todo/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        return request(`/app/todo/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
     },
 
     // 删除
     async delete(id) {
-        return request(`/todo/${id}`, { method: 'DELETE' });
+        return request(`/app/todo/${id}`, { method: 'DELETE' });
     }
 };
 

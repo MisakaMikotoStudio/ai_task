@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-商业化路由
-- GET  /api/commercial/products       - 商品列表（公开）
-- POST /api/commercial/buy            - 生成支付宝支付链接（需登录）
-- POST /api/commercial/alipay/notify  - 支付宝异步回调（无需登录，验签）
+商业化路由（Web 前端调用）
 """
 
 import logging
@@ -18,7 +15,7 @@ from routes.auth_plugin import skip_auth, skip_subscribe
 from service import order_service, alipay_service
 
 logger = logging.getLogger(__name__)
-commercial_bp = Blueprint('commercial', __name__)
+commercial_bp = Blueprint('app_commercial', __name__)
 
 
 @commercial_bp.route('/products', methods=['GET'])
@@ -38,7 +35,6 @@ def buy():
 
     product_id = data.get('product_id')
     order_type = data.get('order_type', 'purchase')
-    # device: pc / mobile，未传则根据 User-Agent 自动判断
     device = data.get('device') or _detect_device(request.headers.get('User-Agent', ''))
 
     if not product_id:
@@ -86,17 +82,14 @@ def alipay_notify():
     """接收支付宝异步回调通知"""
     config = current_app.config['APP_CONFIG']
 
-    # 支付宝 POST 参数可能是 form-data
     post_data = dict(request.form) if request.form else {}
     if not post_data and request.is_json:
         post_data = request.get_json(silent=True) or {}
 
-    # 转换 list 值为单值（flask form.getlist 问题）
     post_data = {k: v[0] if isinstance(v, list) else v for k, v in post_data.items()}
 
     logger.info("支付宝回调: %s", post_data)
 
-    # 验签
     if not alipay_service.verify_notify(config=config.alipay, post_data=post_data):
         logger.warning("支付宝回调验签失败")
         return 'fail', 400
@@ -109,7 +102,6 @@ def alipay_notify():
         with get_db_session():
             order_service.confirm_paid(out_trade_no=out_trade_no, trade_no=trade_no)
 
-    # 支付宝要求返回字符串 "success"
     return 'success', 200
 
 
@@ -125,7 +117,6 @@ def my_orders():
 
     orders, total = order_dao.list_orders(user_id=user.id, page=page, page_size=page_size)
 
-    # 批量查商品名称（按 key 去重避免重复查询）
     product_keys = list({o.product_key for o in orders})
     products_map = {}
     for key in product_keys:
@@ -155,7 +146,6 @@ def my_services():
 
     active_orders = order_dao.get_user_active_orders(user_id=user.id)
 
-    # 按商品 key 去重，保留每个商品到期时间最晚（expire_at 最大）的那条
     seen_keys: dict = {}
     for order in active_orders:
         key = order.product_key

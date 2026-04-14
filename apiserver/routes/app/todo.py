@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-待办事项路由
+待办事项路由（Web 前端调用）
 """
 
 from flask import Blueprint, request, jsonify
 
 from service.todo_service import create_todo, get_todos, update_todo, delete_todo
 
-todo_bp = Blueprint('todo', __name__)
+todo_bp = Blueprint('app_todo', __name__)
 
 
 @todo_bp.route('', methods=['GET'])

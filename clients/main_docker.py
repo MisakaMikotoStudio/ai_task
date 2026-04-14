@@ -197,7 +197,7 @@ def fetch_client_configs(apiserver: str, secret: str, client_ids: list[int] | No
     Returns:
         服务端返回 payload（data + invalid_ids）
     """
-    url = f"{apiserver.rstrip('/')}/api/client/startup-config"
+    url = f"{apiserver.rstrip('/')}/api/open/startup-config"
     headers = {'X-Client-Secret': secret, 'Content-Type': 'application/json'}
     payload_in = {'clientIds': client_ids or []}
 
