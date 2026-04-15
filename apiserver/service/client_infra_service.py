@@ -277,5 +277,15 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
 
     # 保存部署配置（deploys 是列表，不区分环境）
     if deploys_data is not None and isinstance(deploys_data, list):
-        from service.deploy_service import save_deploy_configs
+        from service.deploy_service import save_deploy_configs, execute_deploy
         save_deploy_configs(client_id=client_id, user_id=user_id, deploys_data=deploys_data)
+
+        # 保存后自动执行部署：SSH 写入配置文件到远程服务器
+        from dao.client_dao import get_client_deploys
+        saved_deploys = get_client_deploys(client_id=client_id, user_id=user_id)
+        for dep in saved_deploys:
+            try:
+                execute_deploy(client_id=client_id, user_id=user_id, deploy_id=dep.id)
+                logger.info("auto deploy after save: client_id=%s, deploy_id=%s, success", client_id, dep.id)
+            except Exception as e:
+                logger.warning("auto deploy after save: client_id=%s, deploy_id=%s, error=%s", client_id, dep.id, str(e))

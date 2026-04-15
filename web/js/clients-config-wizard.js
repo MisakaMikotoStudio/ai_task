@@ -824,8 +824,8 @@ function wizardRenderDeployList() {
             return `<label class="deploy-official-label"><input type="checkbox" class="deploy-official-check" value="${opt.key}" ${checked} ${disAttr}><span>${opt.label}</span></label>`;
         }).join('');
         const deleteBtn = isView ? '' : `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteDeploy(${idx})">删除</button>`;
-        const previewBtn = cfgClientId ? `<button type="button" class="btn-action" onclick="cfgPreviewDeploy(${idx})">预览</button>` : '';
-        const executeBtn = (cfgClientId && d.id && !isView) ? `<button type="button" class="btn-action" onclick="cfgExecuteDeploy(${idx})">部署</button>` : '';
+        const previewBtn = cfgClientId ? `<button type="button" class="btn-action btn-preview" onclick="cfgPreviewDeploy(${idx})">预览</button>` : '';
+        const executeBtn = (cfgClientId && d.id && !isView) ? `<button type="button" class="btn-action btn-deploy" onclick="cfgExecuteDeploy(${idx})">部署</button>` : '';
 
         return `
         <div class="deploy-card infra-card" data-deploy-idx="${idx}">

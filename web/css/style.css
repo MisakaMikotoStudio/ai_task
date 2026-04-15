@@ -931,6 +931,24 @@ input, select, textarea {
     background: rgba(63, 185, 80, 0.25);
 }
 
+.btn-preview {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent-primary);
+}
+
+.btn-preview:hover {
+    background: rgba(88, 166, 255, 0.25);
+}
+
+.btn-deploy {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.btn-deploy:hover {
+    background: rgba(63, 185, 80, 0.25);
+}
+
 /* Task Detail Modal Styles */
 .task-detail-content {
     display: flex;
