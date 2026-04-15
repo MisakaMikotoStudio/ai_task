@@ -12,8 +12,6 @@ from typing import Optional, List
 from utils import git_utils
 from utils import git_workflow_utils
 import shutil
-import time
-import re
 import json
 from .base_worker import BaseWorker
 from config.config_model import GitRepoConfig
@@ -134,6 +132,8 @@ class CodeDevelopWorker(BaseWorker):
 
     def before_execute(self):
         """准备执行节点逻辑 - 准备执行节点所需的环境和数据"""
+        self._pending_rebases: List[dict] = []
+
         # 更新消息状态为 running
         message_id = self.task.get("chat_messages")[-1].get("id")
         self.client_config.apiserver_rpc.update_message_status(
@@ -149,7 +149,6 @@ class CodeDevelopWorker(BaseWorker):
                 repo_config=git_repo,
                 trace_id=self.trace_id,
             )
-            # 认证失败时调用 apiserver 刷新 token 后重试一次
             if not git_result.success and git_utils.git_error_is_auth_failure(git_result.message):
                 logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} 认证失败，尝试刷新 token")
                 if self.client_config.refresh_repo_token(repo_config=git_repo):
@@ -163,13 +162,22 @@ class CodeDevelopWorker(BaseWorker):
         # 工作目录仓库同步(优先同步文档仓库)
         git_repos = [self.docs_git] + self.code_git
         if self.is_standalone:
-            # 独立 Chat：跳过 task 分支，直接从默认分支创建 chat 分支
             for git_repo in git_repos:
-                self._sync_repo(git_repo, type="chat_standalone")
+                self._sync_repo_or_defer(git_repo, sync_type="chat_standalone")
         else:
             for git_repo in git_repos:
-                self._sync_repo(git_repo, type="task") # task分支rebase主分支
-                self._sync_repo(git_repo, type="chat") # chat分支rebase task分支
+                task_ok = self._sync_repo_or_defer(git_repo, sync_type="task")
+                if task_ok:
+                    self._sync_repo_or_defer(git_repo, sync_type="chat")
+                else:
+                    # task 分支有冲突，chat 分支也跳过程序化 rebase（依赖 task）
+                    self._prepare_repo_dir(git_repo)
+                    self._pending_rebases.append({
+                        "repo_name": git_repo.name,
+                        "repo_dir": os.path.join(self.work_dir, git_repo.name),
+                        "dev_branch": self._get_chat_branch_name(git_repo),
+                        "default_branch": self._get_task_branch_name(git_repo),
+                    })
         # 文档仓库init_docs拷贝到当前目录，如果没有的话，默认使用当前clients目录下的init_docs
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
         default_init_docs_dir = os.path.join(os.path.dirname(current_file_dir), "init_docs")
@@ -336,82 +344,55 @@ class CodeDevelopWorker(BaseWorker):
             session_id=session_id,
         )
 
-    # git 仓库的rebase同步, type=task 代表task执行分支rebase主分支，type=chat 代表chat执行分支rebase task分支
-    # type=chat_standalone 代表独立chat分支rebase默认分支（跳过task分支层）
-    def _sync_repo(self, git_repo: GitRepoConfig, type="task"):
-        if type == "task":
-            dev_branch = self._get_task_branch_name(git_repo)
-            default_branch = git_repo.default_branch
-        elif type == "chat":
-            dev_branch = self._get_chat_branch_name(git_repo)
-            default_branch = self._get_task_branch_name(git_repo)
-        elif type == "chat_standalone":
-            dev_branch = self._get_chat_branch_name(git_repo)
-            default_branch = git_repo.default_branch
-        else:
-            raise Exception(f"Invalid type: {type}")
+    def _prepare_repo_dir(self, git_repo: GitRepoConfig):
+        """确保工作目录中存在该仓库副本并更新认证 URL"""
         work_repo_dir = os.path.join(self.work_dir, git_repo.name)
         if not os.path.exists(work_repo_dir):
             src_repo_dir = os.path.join(self.git_repo_cache_dir, git_repo.name)
             shutil.copytree(src_repo_dir, work_repo_dir, dirs_exist_ok=True)
         git_utils.update_remote_auth_url(work_repo_dir, git_repo.auth_url, trace_id=self.trace_id)
+
+    def _resolve_sync_branches(self, git_repo: GitRepoConfig, sync_type: str) -> tuple:
+        """根据同步类型返回 (dev_branch, default_branch)"""
+        if sync_type == "task":
+            return self._get_task_branch_name(git_repo), git_repo.default_branch
+        elif sync_type == "chat":
+            return self._get_chat_branch_name(git_repo), self._get_task_branch_name(git_repo)
+        elif sync_type == "chat_standalone":
+            return self._get_chat_branch_name(git_repo), git_repo.default_branch
+        raise Exception(f"Invalid sync_type: {sync_type}")
+
+    def _sync_repo_or_defer(self, git_repo: GitRepoConfig, sync_type: str) -> bool:
+        """程序化 rebase 同步，成功返回 True；冲突时记录到 _pending_rebases 并返回 False；其他错误 raise。"""
+        dev_branch, default_branch = self._resolve_sync_branches(git_repo, sync_type)
+        self._prepare_repo_dir(git_repo)
+        work_repo_dir = os.path.join(self.work_dir, git_repo.name)
+
         git_result = git_workflow_utils.sync_and_rebase_branch(
-            repo_dir=work_repo_dir,
-            dev_branch=dev_branch,
-            default_branch=default_branch,
-            trace_id=self.trace_id,
+            repo_dir=work_repo_dir, dev_branch=dev_branch,
+            default_branch=default_branch, trace_id=self.trace_id,
         )
-        # 认证失败时调用 apiserver 刷新 token 后重试一次
         if not git_result.success and git_utils.git_error_is_auth_failure(git_result.message):
             logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} sync_and_rebase 认证失败，尝试刷新 token")
             if self.client_config.refresh_repo_token(repo_config=git_repo):
                 git_utils.update_remote_auth_url(work_repo_dir, git_repo.auth_url, trace_id=self.trace_id)
                 git_result = git_workflow_utils.sync_and_rebase_branch(
-                    repo_dir=work_repo_dir,
-                    dev_branch=dev_branch,
-                    default_branch=default_branch,
-                    trace_id=self.trace_id,
+                    repo_dir=work_repo_dir, dev_branch=dev_branch,
+                    default_branch=default_branch, trace_id=self.trace_id,
                 )
         if git_result.success:
-            return
+            return True
         if 'conflict' not in git_result.message.lower():
             raise Exception(f"{work_repo_dir} 同步并 rebase 失败: {git_result.message}")
 
-        """Agent 处理 rebase 冲突（注意：rebase 已被 abort，需要重新发起）"""
-        develop_ctx = ""
-        if os.path.exists(self.develop_file_path):
-            develop_ctx = f"\n当前分支的开发内容文档位于 `{self.develop_file_path}`，请阅读该文档以理解本分支的修改意图，优先保留本分支的开发内容。"
-
-        prompt = f"""# Rebase 冲突解决
-
-## 背景
-当前在仓库 `{work_repo_dir}` 的开发分支 `{dev_branch}` 上。
-该分支需要 rebase 到主分支 `origin/{default_branch}`，但存在冲突（rebase 已被中止，仓库当前处于干净状态）。{develop_ctx}
-
-## 冲突解决策略
-- 优先保留本分支 `{dev_branch}` 的修改，同时整合主分支 `{default_branch}` 的新改动
-- 同一处冲突以本分支意图为准，但确保代码可正常运行
-
-## 操作步骤
-1. 重新发起 rebase：`git rebase origin/{default_branch}`
-2. 查看冲突文件：`git status`（查找 "both modified" 的文件）
-3. 逐个打开冲突文件，分析冲突标记（`<<<<<<<`、`=======`、`>>>>>>>`），按上述策略解决
-4. 解决后暂存：`git add <已解决的文件>`
-5. 继续 rebase：`GIT_EDITOR=true git rebase --continue`
-6. 如果还有冲突，重复步骤 2-5
-7. rebase 完成后，强制推送：`git push -f origin {dev_branch}`
-
-## 注意事项
-- 如果冲突无法解决，执行 `git rebase --abort` 回退
-- rebase --continue 时必须使用 `GIT_EDITOR=true` 前缀，避免打开交互式编辑器"""
-
-        _reply, _session_id = self.run_agent_prompt(cwd=work_repo_dir, prompt=prompt)
-        # 通过检查 rebase 状态判断成功与否，而非依赖 agent 的文本输出
-        rebase_in_progress = os.path.exists(os.path.join(work_repo_dir, '.git', 'rebase-merge')) or \
-                             os.path.exists(os.path.join(work_repo_dir, '.git', 'rebase-apply'))
-        if rebase_in_progress:
-            git_workflow_utils.abort_rebase(repo_dir=work_repo_dir, trace_id=self.trace_id)
-            raise Exception(f"Agent 未能完成 rebase 冲突解决，已自动 abort")
+        logger.warning(f"[{self.trace_id}] 仓库 {git_repo.name} rebase 冲突，将由 agent 在主流程中解决")
+        self._pending_rebases.append({
+            "repo_name": git_repo.name,
+            "repo_dir": work_repo_dir,
+            "dev_branch": dev_branch,
+            "default_branch": default_branch,
+        })
+        return False
 
     def _download_chat_images(self) -> list:
         """检查最新消息的 extra.images，通过 COS STS 凭证下载到工作目录。
@@ -553,6 +534,11 @@ class CodeDevelopWorker(BaseWorker):
                 "## 前置阅读（编码前须完成）\n\n" + "\n".join(read_items)
             )
 
+        # ===== 4.5 Rebase 冲突（有 pending 时插入）=====
+        rebase_instructions = self._build_rebase_instructions()
+        if rebase_instructions:
+            sections.append(rebase_instructions)
+
         # ===== 5. 强制约束 =====
         constraints = [
             "**禁止切换分支** — 仅当用户需求明确要求合并操作时例外",
@@ -572,6 +558,13 @@ class CodeDevelopWorker(BaseWorker):
 
         # ===== 6. 执行步骤 =====
         step_bodies: List[str] = []
+
+        if self._pending_rebases:
+            repo_names = ", ".join(f"`{r['repo_name']}`" for r in self._pending_rebases)
+            step_bodies.append(
+                f"**解决 Rebase 冲突** — 按照上方「Rebase 冲突解决」章节的指引，"
+                f"逐一解决 {repo_names} 的分支冲突并推送，完成前不得进行任何开发"
+            )
 
         if has_chat_history:
             step_bodies.append(
@@ -672,6 +665,46 @@ class CodeDevelopWorker(BaseWorker):
             lines.append(f"- `{repo_name}`: `{commit_id[:12]}`")
         lines.append("")
         lines.append("代码可能已被其他任务修改，请基于当前最新状态开发。")
+
+        return "\n".join(lines)
+
+    def _build_rebase_instructions(self) -> str:
+        """根据 _pending_rebases 生成 agent 需要执行的 rebase 冲突解决指令"""
+        if not self._pending_rebases:
+            return ""
+
+        lines = [
+            "## Rebase 冲突解决（必须最先完成）\n",
+            "以下仓库的分支 rebase 存在冲突（rebase 已被中止，仓库处于干净状态），",
+            "请在开始正式开发前逐一解决。\n",
+        ]
+
+        for info in self._pending_rebases:
+            lines.append(
+                f"### 仓库 `{info['repo_name']}`\n"
+                f"- **仓库目录**: `{info['repo_dir']}`\n"
+                f"- **开发分支**: `{info['dev_branch']}`\n"
+                f"- **目标分支**: `origin/{info['default_branch']}`\n"
+            )
+
+        lines.append("### 操作步骤（对每个冲突仓库）\n")
+        lines.append(
+            "1. 进入仓库目录\n"
+            "2. 重新发起 rebase：`git rebase origin/<目标分支>`\n"
+            "3. 查看冲突文件：`git status`（查找 \"both modified\" 的文件）\n"
+            "4. 逐个解决冲突文件中的冲突标记（`<<<<<<<` / `=======` / `>>>>>>>`）\n"
+            "5. 解决后暂存：`git add <已解决的文件>`\n"
+            "6. 继续 rebase：`GIT_EDITOR=true git rebase --continue`\n"
+            "7. 如果还有冲突，重复步骤 3-6\n"
+            "8. rebase 完成后，强制推送：`git push -f origin <开发分支>`\n"
+        )
+        lines.append(
+            "### 冲突解决策略\n"
+            "- 优先保留开发分支的修改，同时整合目标分支的新改动\n"
+            "- 同一处冲突以开发分支意图为准，但确保代码可正常运行\n"
+            "- rebase --continue 时必须使用 `GIT_EDITOR=true` 前缀，避免打开交互式编辑器\n"
+            "- 如果冲突无法解决，执行 `git rebase --abort` 回退并在回复中说明"
+        )
 
         return "\n".join(lines)
 
