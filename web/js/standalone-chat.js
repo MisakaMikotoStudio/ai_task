@@ -131,6 +131,7 @@ function initStandaloneChatPanel() {
                 scSendNewChat();
             }
         });
+        textarea.addEventListener('input', () => scAutoResize(textarea));
         textarea.addEventListener('paste', (e) => scHandlePasteImages(e, 'welcome'));
     }
 

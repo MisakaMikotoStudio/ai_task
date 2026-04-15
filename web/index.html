@@ -303,6 +303,10 @@
         line-height: 1.5;
         font-family: inherit;
         box-sizing: border-box;
+        min-height: 40px;
+        max-height: 160px;
+        overflow-y: auto;
+        display: block;
     }
 
     .sc-composer-footer {
@@ -1231,7 +1235,7 @@
                                         class="sc-composer-textarea"
                                         id="sc-welcome-input"
                                         placeholder="输入消息，发送后自动创建 Chat..."
-                                        rows="3"
+                                        rows="1"
                                     ></textarea>
                                     <input type="file" id="sc-welcome-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple style="display:none" onchange="scHandleImageSelect(event, 'welcome')">
                                     <div class="sc-composer-footer">
