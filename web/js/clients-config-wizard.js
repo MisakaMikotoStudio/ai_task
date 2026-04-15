@@ -837,8 +837,8 @@ function wizardRenderDeployList() {
                 <label>启动命令</label>
                 <input type="text" class="deploy-cmd-input" value="${escapeHtml(d.startup_command || '')}" placeholder="如 gunicorn ... main:app" ${disAttr}>
             </div>
-            <div class="form-group">
-                <label>官方配置</label>
+            <div class="deploy-official-row">
+                <label class="deploy-official-row-label">官方配置</label>
                 <div class="deploy-official-group">${officialChecks}</div>
             </div>
             <div class="form-group">
