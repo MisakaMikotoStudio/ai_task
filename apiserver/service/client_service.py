@@ -100,6 +100,10 @@ def _normalize_client_payload(data: dict) -> Optional[str]:
             return v
         data['official_cloud_deploy'] = v
 
+    if 'test_domain' in data:
+        td = _strip_str(data.get('test_domain'))
+        data['test_domain'] = td if td else ''
+
     if 'repos' in data:
         repos = data.get('repos')
         if not isinstance(repos, list):
@@ -261,6 +265,7 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
     name = data['name']
     agent = data['agent']
     official_cloud_deploy = data['official_cloud_deploy']
+    test_domain = data.get('test_domain')
 
     if client_id is None:
         if check_client_name_exists(user_id, name):
@@ -269,6 +274,8 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
             user_id, name, agent=agent, official_cloud_deploy=official_cloud_deploy
         )
         cid = new_id
+        if test_domain is not None:
+            update_client(client_id=cid, user_id=user_id, test_domain=test_domain)
     else:
         cid = client_id
         if not get_client_by_id(client_id=cid, user_id=user_id):
@@ -281,6 +288,7 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
             name=name,
             agent=agent,
             official_cloud_deploy=official_cloud_deploy,
+            test_domain=test_domain,
         )
 
     save_client_repos(cid, data.get('repos', []), user_id=user_id)

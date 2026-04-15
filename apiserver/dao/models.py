@@ -86,6 +86,7 @@ class Client(Base):
     agent = Column(String(64), nullable=True, default='claude sdk', comment='Agent类型')
     official_cloud_deploy = Column(Integer, nullable=False, default=0, server_default='0', comment='官方云部署：0否 1是')
     version = Column(Integer, nullable=False, default=1, server_default='1', comment='客户端配置版本（用于触发启动器重建容器）')
+    test_domain = Column(String(255), nullable=True, default=None, comment='应用测试环境域名')
 
     __table_args__ = (
         Index('uk_user_client', 'user_id', 'name', unique=True),
@@ -101,6 +102,7 @@ class Client(Base):
             'agent': self.agent or 'claude sdk',
             'official_cloud_deploy': self.official_cloud_deploy if self.official_cloud_deploy is not None else 0,
             'version': self.version or 0,
+            'test_domain': self.test_domain or '',
         }
 
 
@@ -560,4 +562,60 @@ class ChatMessage(Base):
             'extra': self.extra or {},
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at)
+        }
+
+
+class DeployRecord(Base):
+    """发布记录表"""
+    __tablename__ = 'ai_task_deploy_records'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='所属用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联应用ID')
+    environment = Column(String(16), nullable=False, comment='环境: test/prod')
+    description = Column(String(255), nullable=False, default='', comment='描���')
+    status = Column(String(20), nullable=False, default='pending', comment='状态: pending/publishing/failed/success/cancel')
+    detail = Column(JSON, default=dict, comment='详情(task_id, chat_id, msg_id等)')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不��空表示已删除')
+
+    __table_args__ = (
+        Index('idx_deploy_records_user_client', 'user_id', 'client_id'),
+    )
+
+    STATUS_PENDING = 'pending'
+    STATUS_PUBLISHING = 'publishing'
+    STATUS_FAILED = 'failed'
+    STATUS_SUCCESS = 'success'
+    STATUS_CANCEL = 'cancel'
+
+    STATUS_TEXT = {
+        'pending': '等��发布',
+        'publishing': '发布中',
+        'failed': '失败',
+        'success': '成功',
+        'cancel': '取消',
+    }
+
+    ENV_TEST = 'test'
+    ENV_PROD = 'prod'
+
+    ENV_TEXT = {
+        'test': '测试',
+        'prod': '生产',
+    }
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'environment': self.environment,
+            'environment_text': self.ENV_TEXT.get(self.environment, self.environment),
+            'description': self.description or '',
+            'status': self.status,
+            'status_text': self.STATUS_TEXT.get(self.status, self.status),
+            'detail': self.detail or {},
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
         }

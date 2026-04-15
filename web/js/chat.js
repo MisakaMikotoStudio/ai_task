@@ -5,6 +5,7 @@
 // ===== State =====
 let taskId = null;
 let taskInfo = null;
+let clientDetail = null;
 let currentChatId = null;
 let chatsCache = [];
 let messagesCache = [];
@@ -60,6 +61,14 @@ async function loadTaskInfo() {
         if (clientName) {
             document.getElementById('sidebar-client-name').textContent = clientName;
             document.getElementById('sidebar-client-link').style.display = 'inline-flex';
+        }
+
+        // 加载客户端详情（获取 test_domain 等配置）
+        if (taskInfo.client_id) {
+            try {
+                const clientRes = await clientAPI.get(taskInfo.client_id);
+                clientDetail = clientRes.data;
+            } catch (_) { clientDetail = null; }
         }
 
         renderSidebarExtra(taskInfo);
@@ -149,6 +158,10 @@ function renderChatList() {
                 <span class="chat-status-label ${st}">${statusLabel[st] || st}</span>
             </div>
             <div class="chat-item-row2">${escapeHtml(preview)}</div>
+            <div class="chat-item-actions" onclick="event.stopPropagation()">
+                <button class="chat-action-btn preview-btn" onclick="previewChat(${chat.id})" title="预览">预览</button>
+                <button class="chat-action-btn publish-btn" onclick="publishChat(${chat.id})" title="发布">发布</button>
+            </div>
         </div>`;
     }).join('');
 }
@@ -255,6 +268,12 @@ function renderFeed() {
             extraBtns += `<button class="msg-extra-btn mr-btn" onclick="showMergeRequestModal('${storeKey}')">🔀 变更详情</button>`;
         }
 
+        // 预览/发布按钮（仅已完成消息）
+        let deployBtns = '';
+        if (msg.status === 'completed') {
+            deployBtns = `<button class="msg-extra-btn preview-btn" onclick="previewMessage(${msg.id})">预览</button><button class="msg-extra-btn publish-btn" onclick="publishMessage(${msg.id})">发布</button>`;
+        }
+
         const agentRow = `
         <div class="msg-agent-row">
             <div class="msg-avatar agent-avatar">⚡</div>
@@ -267,6 +286,7 @@ function renderFeed() {
                 <div class="msg-status-row">
                     <span class="msg-status-chip ${chipClass}">${chipLabel}</span>
                     ${extraBtns}
+                    ${deployBtns}
                 </div>
             </div>
         </div>`;
@@ -585,4 +605,113 @@ async function sendNewChatMessage() {
 
 function handleWelcomeInputKeydown(e) {
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendNewChatMessage(); }
+}
+
+// ===== Preview & Publish =====
+
+function getTestDomain() {
+    return (clientDetail && clientDetail.test_domain) ? clientDetail.test_domain : '';
+}
+
+function buildPreviewUrl(chatId, msgId) {
+    const domain = getTestDomain();
+    if (!domain) return null;
+    return `http://task${taskId}chat${chatId}msg${msgId}.${domain}`;
+}
+
+function previewMessage(msgId) {
+    if (!currentChatId) { showToast('请先选择一个 Chat', 'error'); return; }
+    const url = buildPreviewUrl(currentChatId, msgId);
+    if (!url) { showToast('请先在应用配置中设置测试环境域名', 'error'); return; }
+    window.open(url, '_blank');
+}
+
+function previewChat(chatId) {
+    const msgs = messagesCache.length > 0 && currentChatId === chatId ? messagesCache : null;
+    if (msgs) {
+        const completed = msgs.filter(m => m.status === 'completed');
+        const lastMsg = completed.length > 0 ? completed[completed.length - 1] : msgs[msgs.length - 1];
+        if (lastMsg) {
+            const url = buildPreviewUrl(chatId, lastMsg.id);
+            if (!url) { showToast('请先在应用配置中设置测试环境域名', 'error'); return; }
+            window.open(url, '_blank');
+            return;
+        }
+    }
+    // 需要先加载消息来获取 msgId
+    loadMessagesAndPreview(chatId);
+}
+
+async function loadMessagesAndPreview(chatId) {
+    try {
+        const res = await chatAPI.listMessages(taskId, chatId);
+        const msgs = res.data || [];
+        if (msgs.length === 0) { showToast('该 Chat 暂无消息', 'error'); return; }
+        const completed = msgs.filter(m => m.status === 'completed');
+        const lastMsg = completed.length > 0 ? completed[completed.length - 1] : msgs[msgs.length - 1];
+        const url = buildPreviewUrl(chatId, lastMsg.id);
+        if (!url) { showToast('请先在应用配置中设置测试环境域名', 'error'); return; }
+        window.open(url, '_blank');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function publishMessage(msgId) {
+    if (!currentChatId) { showToast('请先选择一个 Chat', 'error'); return; }
+    if (!taskInfo || !taskInfo.client_id) { showToast('任务未关联应用', 'error'); return; }
+    if (!confirm('确定要发布到生产环境吗？将先合并分支到默认分支。')) return;
+
+    const chat = chatsCache.find(c => c.id === currentChatId);
+    const chatTitle = chat ? chat.title : `Chat #${currentChatId}`;
+
+    try {
+        showToast('正在合并分支...', 'info');
+        const mergeRes = await deployAPI.merge(taskInfo.client_id, taskId, currentChatId);
+        const results = (mergeRes.data && mergeRes.data.results) || [];
+        const allSuccess = results.every(r => r.success);
+        if (!allSuccess) {
+            const failedRepos = results.filter(r => !r.success).map(r => `${r.repo_name}: ${r.message}`).join('\n');
+            showToast(`部分仓库合并失败:\n${failedRepos}`, 'error');
+            return;
+        }
+
+        // 合并成功，创建发布记录
+        await deployAPI.createRecord(taskInfo.client_id, 'prod', chatTitle, { task_id: taskId, chat_id: currentChatId, msg_id: msgId });
+        showToast('发布记录已创建', 'success');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function publishChat(chatId) {
+    if (!taskInfo || !taskInfo.client_id) { showToast('任务未关联应用', 'error'); return; }
+    if (!confirm('确定要发布到生产环境吗？将先合并分支到默认分支。')) return;
+
+    const chat = chatsCache.find(c => c.id === chatId);
+    const chatTitle = chat ? chat.title : `Chat #${chatId}`;
+
+    try {
+        // 获取最新消息 ID
+        const res = await chatAPI.listMessages(taskId, chatId);
+        const msgs = res.data || [];
+        if (msgs.length === 0) { showToast('该 Chat 暂无消息', 'error'); return; }
+        const completed = msgs.filter(m => m.status === 'completed');
+        const lastMsg = completed.length > 0 ? completed[completed.length - 1] : msgs[msgs.length - 1];
+
+        showToast('正在合并分支...', 'info');
+        const mergeRes = await deployAPI.merge(taskInfo.client_id, taskId, chatId);
+        const results = (mergeRes.data && mergeRes.data.results) || [];
+        const allSuccess = results.every(r => r.success);
+        if (!allSuccess) {
+            const failedRepos = results.filter(r => !r.success).map(r => `${r.repo_name}: ${r.message}`).join('\n');
+            showToast(`部分仓库合并失败:\n${failedRepos}`, 'error');
+            return;
+        }
+
+        await deployAPI.createRecord(taskInfo.client_id, 'prod', chatTitle, { task_id: taskId, chat_id: chatId, msg_id: lastMsg.id });
+        showToast('发布记录已创建', 'success');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
 }

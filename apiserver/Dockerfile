@@ -22,5 +22,6 @@ RUN pip install  --retries 10 "sqlalchemy>=2.0.0"
 RUN pip install  --retries 10 "tomli>=2.0.0"
 RUN pip install  --retries 10 "cryptography>=42.0.0"
 RUN pip install  --retries 10 "cos-python-sdk-v5"
+RUN pip install  --retries 10 "requests>=2.28.0"
 
 COPY . /app

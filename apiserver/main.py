@@ -45,6 +45,7 @@ from routes.todo import todo_bp
 from routes.chat import chat_bp
 from routes.commercial import commercial_bp
 from routes.admin import admin_bp
+from routes.deploy import deploy_bp
 from routes.auth_plugin import register_global_auth, skip_auth
 
 
@@ -75,6 +76,7 @@ def create_app(config: AppConfig) -> Flask:
     app.register_blueprint(chat_bp, url_prefix=f'{prefix}/api/chat')
     app.register_blueprint(commercial_bp, url_prefix=f'{prefix}/api/commercial')
     app.register_blueprint(admin_bp, url_prefix=f'{prefix}/api/admin')
+    app.register_blueprint(deploy_bp, url_prefix=f'{prefix}/api/deploy')
     register_global_auth(app, api_prefix=f'{prefix}/api')
 
     api_prefix = f'{prefix}/api'

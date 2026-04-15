@@ -225,7 +225,8 @@ def update_client(
     user_id: int,
     name: Optional[str] = None,
     agent: Optional[str] = None,
-    official_cloud_deploy: Optional[int] = None
+    official_cloud_deploy: Optional[int] = None,
+    test_domain: Optional[str] = None,
 ) -> bool:
     """
     更新客户端信息
@@ -236,6 +237,7 @@ def update_client(
         name: 新的客户端名称
         agent: Agent类型
         official_cloud_deploy: 官方云部署（0否 1是）
+        test_domain: 应用测试环境域名
 
     Returns:
         是否更新成功
@@ -248,6 +250,8 @@ def update_client(
             update_data[Client.agent] = agent
         if official_cloud_deploy is not None:
             update_data[Client.official_cloud_deploy] = official_cloud_deploy
+        if test_domain is not None:
+            update_data[Client.test_domain] = test_domain
         if not update_data:
             return False
 

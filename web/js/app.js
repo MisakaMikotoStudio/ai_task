@@ -558,6 +558,7 @@ function renderClientRow(client) {
     if (client.editable) {
         actionsHtml = `<div class="client-actions">
             <button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
+            <button class="btn-action btn-deploy" onclick="openDeployRecords(${client.id}, '${escapeHtml(client.name)}')">发布详情</button>
             <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>
         </div>`;
@@ -625,6 +626,75 @@ async function copyClient(id) {
         showToast(error.message, 'error');
     }
 }
+
+// ===== 发布详情弹窗 =====
+
+const DEPLOY_STATUS_CLASS = { pending: 'status-pending', publishing: 'status-publishing', failed: 'status-failed', success: 'status-success', cancel: 'status-cancel' };
+const DEPLOY_STATUS_TEXT = { pending: '等待发布', publishing: '发布中', failed: '失败', success: '成功', cancel: '取消' };
+const DEPLOY_ENV_TEXT = { test: '测试', prod: '生产' };
+
+async function openDeployRecords(clientId, clientName) {
+    const modal = document.getElementById('deploy-records-modal');
+    const body = document.getElementById('deploy-records-body');
+    const title = document.getElementById('deploy-modal-title');
+    title.textContent = `发布详情 - ${clientName}`;
+    body.innerHTML = '<div class="deploy-loading">加载中...</div>';
+    modal.style.display = 'flex';
+
+    try {
+        const res = await deployAPI.listRecords(clientId);
+        const records = res.data || [];
+        if (records.length === 0) {
+            body.innerHTML = '<div class="deploy-empty-text">暂无发布记录</div>';
+            return;
+        }
+        body.innerHTML = `
+            <table class="deploy-table">
+                <thead>
+                    <tr><th>环境</th><th>描述</th><th>状态</th><th>详情</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    ${records.map(r => {
+                        const envText = DEPLOY_ENV_TEXT[r.environment] || r.environment;
+                        const statusText = DEPLOY_STATUS_TEXT[r.status] || r.status;
+                        const statusClass = DEPLOY_STATUS_CLASS[r.status] || '';
+                        const detail = r.detail || {};
+                        const detailStr = Object.keys(detail).length > 0 ? `task:${detail.task_id || '-'} chat:${detail.chat_id || '-'} msg:${detail.msg_id || '-'}` : '-';
+                        const canCancel = r.status === 'pending' || r.status === 'publishing';
+                        const cancelBtn = canCancel ? `<button class="btn-action btn-cancel-deploy" onclick="cancelDeployRecord(${r.id}, ${clientId}, '${escapeHtml(clientName)}')">取消</button>` : '-';
+                        return `<tr>
+                            <td><span class="deploy-env-badge ${r.environment}">${escapeHtml(envText)}</span></td>
+                            <td class="deploy-desc-cell">${escapeHtml(r.description || '-')}</td>
+                            <td><span class="deploy-status-badge ${statusClass}">${escapeHtml(statusText)}</span></td>
+                            <td class="deploy-detail-cell"><code>${escapeHtml(detailStr)}</code></td>
+                            <td>${cancelBtn}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>`;
+    } catch (e) {
+        body.innerHTML = `<div class="deploy-empty-text">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function cancelDeployRecord(recordId, clientId, clientName) {
+    if (!confirm('确定要取消这条发布记录吗？')) return;
+    try {
+        await deployAPI.cancelRecord(recordId);
+        showToast('已取消', 'success');
+        openDeployRecords(clientId, clientName);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function closeDeployRecordsModal() {
+    document.getElementById('deploy-records-modal').style.display = 'none';
+}
+
+document.getElementById('deploy-records-modal')?.addEventListener('click', function (e) {
+    if (e.target === this) closeDeployRecordsModal();
+});
 
 // ===== 客户端配置页面 =====
 
@@ -716,6 +786,7 @@ async function openClientConfig(id, mode) {
             document.getElementById('cfg-client-name').value = clientData.name;
             agentSelect.value = clientData.agent || 'claude sdk';
             officialCloudDeploySelect.value = String(clientData.official_cloud_deploy ?? 0);
+            document.getElementById('cfg-client-test-domain').value = clientData.test_domain || '';
         } catch (error) {
             showToast(error.message, 'error');
             return;
@@ -724,6 +795,7 @@ async function openClientConfig(id, mode) {
         document.getElementById('cfg-client-name').value = '';
         agentSelect.value = agentOptions[0] || 'claude sdk';
         officialCloudDeploySelect.value = '0';
+        document.getElementById('cfg-client-test-domain').value = '';
     }
 
     cfgApplyBasicFormMode();
@@ -763,7 +835,8 @@ function cfgCollectBasicFields() {
     const name = document.getElementById('cfg-client-name').value.trim();
     const agent = document.getElementById('cfg-client-agent').value;
     const officialCloudDeploy = parseInt(document.getElementById('cfg-client-official-cloud-deploy').value, 10) || 0;
-    return { name, agent, officialCloudDeploy };
+    const testDomain = document.getElementById('cfg-client-test-domain').value.trim();
+    return { name, agent, officialCloudDeploy, testDomain };
 }
 
 function cfgBuildReposPayload() {
@@ -807,7 +880,7 @@ function cfgBuildEnvVarsPayload() {
 async function cfgUnifiedSaveClient() {
     if (cfgClientMode === 'view') return;
 
-    const { name, agent, officialCloudDeploy } = cfgCollectBasicFields();
+    const { name, agent, officialCloudDeploy, testDomain } = cfgCollectBasicFields();
     if (!name) {
         showToast('应用名称不能为空', 'error');
         return;
@@ -840,6 +913,7 @@ async function cfgUnifiedSaveClient() {
             await activeClientAPI.create(name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
+                test_domain: testDomain,
                 repos,
                 env_vars
             });
@@ -848,6 +922,7 @@ async function cfgUnifiedSaveClient() {
             await activeClientAPI.update(cfgClientId, name, {
                 agent,
                 official_cloud_deploy: officialCloudDeploy,
+                test_domain: testDomain,
                 repos,
                 env_vars
             });

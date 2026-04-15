@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Chat</title>
-    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/style.css?v=16">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked-highlight@2.1.1/lib/index.umd.min.js"></script>
@@ -387,6 +387,40 @@
         }
 
         .chat-item.active .chat-item-row2 { color: var(--text-primary); }
+
+        .chat-item-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .chat-action-btn {
+            padding: 3px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .chat-action-btn.preview-btn {
+            background: rgba(88, 166, 255, 0.12);
+            color: var(--accent-primary);
+        }
+
+        .chat-action-btn.preview-btn:hover {
+            background: rgba(88, 166, 255, 0.25);
+        }
+
+        .chat-action-btn.publish-btn {
+            background: rgba(163, 113, 247, 0.12);
+            color: var(--accent-purple);
+        }
+
+        .chat-action-btn.publish-btn:hover {
+            background: rgba(163, 113, 247, 0.25);
+        }
 
         .chat-sidebar-empty {
             padding: 16px 8px;
@@ -837,6 +871,28 @@
         }
 
         .msg-extra-btn.mr-btn:hover {
+            background: rgba(163, 113, 247, 0.2);
+            border-color: rgba(163, 113, 247, 0.35);
+        }
+
+        .msg-extra-btn.preview-btn {
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent-primary);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+        }
+
+        .msg-extra-btn.preview-btn:hover {
+            background: rgba(88, 166, 255, 0.2);
+            border-color: rgba(88, 166, 255, 0.35);
+        }
+
+        .msg-extra-btn.publish-btn {
+            background: rgba(163, 113, 247, 0.1);
+            color: var(--accent-purple);
+            border: 1px solid rgba(163, 113, 247, 0.2);
+        }
+
+        .msg-extra-btn.publish-btn:hover {
             background: rgba(163, 113, 247, 0.2);
             border-color: rgba(163, 113, 247, 0.35);
         }
@@ -1353,7 +1409,7 @@
 <div class="chat-toast" id="chat-toast"></div>
 
 <script src="js/utils.js?v=3"></script>
-<script src="js/api.js?v=10"></script>
-<script src="js/chat.js?v=7"></script>
+<script src="js/api.js?v=12"></script>
+<script src="js/chat.js?v=8"></script>
 </body>
 </html>

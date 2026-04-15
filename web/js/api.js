@@ -115,6 +115,7 @@ const clientAPI = {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.test_domain !== undefined) body.test_domain = options.test_domain;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         return request('/client', {
@@ -128,6 +129,7 @@ const clientAPI = {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.test_domain !== undefined) body.test_domain = options.test_domain;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         return request(`/client/${id}`, {
@@ -207,6 +209,7 @@ const adminClientAPI = {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.test_domain !== undefined) body.test_domain = options.test_domain;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         return request('/admin/clients', {
@@ -218,6 +221,7 @@ const adminClientAPI = {
         const body = { name };
         if (options.agent !== undefined) body.agent = options.agent;
         if (options.official_cloud_deploy !== undefined) body.official_cloud_deploy = options.official_cloud_deploy;
+        if (options.test_domain !== undefined) body.test_domain = options.test_domain;
         if (options.repos !== undefined) body.repos = options.repos;
         if (options.env_vars !== undefined) body.env_vars = options.env_vars;
         return request(`/admin/clients/${id}`, {
@@ -499,6 +503,28 @@ const chatAPI = {
         return request(`/chat/task/${taskId}/messages`, {
             method: 'POST',
             body: JSON.stringify({ input, extra })
+        });
+    }
+};
+
+// 发布记录 API
+const deployAPI = {
+    async listRecords(clientId) {
+        return request(`/deploy/records?client_id=${clientId}`);
+    },
+    async createRecord(clientId, environment, description, detail) {
+        return request('/deploy/records', {
+            method: 'POST',
+            body: JSON.stringify({ client_id: clientId, environment, description, detail })
+        });
+    },
+    async cancelRecord(recordId) {
+        return request(`/deploy/records/${recordId}/cancel`, { method: 'PATCH' });
+    },
+    async merge(clientId, taskId, chatId) {
+        return request('/deploy/merge', {
+            method: 'POST',
+            body: JSON.stringify({ client_id: clientId, task_id: taskId, chat_id: chatId })
         });
     }
 };

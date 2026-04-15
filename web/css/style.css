@@ -4793,3 +4793,175 @@ textarea:focus {
         grid-template-columns: 1fr;
     }
 }
+
+/* ===== Deploy Records Modal ===== */
+
+#deploy-records-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1100;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.deploy-modal-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    width: 100%;
+    max-width: 800px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-lg);
+    animation: modalIn 0.2s ease;
+}
+
+.deploy-modal-card .modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.deploy-modal-card .modal-head h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.deploy-records-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.deploy-loading, .deploy-empty-text {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 32px 0;
+    font-size: 14px;
+}
+
+.deploy-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.deploy-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.deploy-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+    vertical-align: middle;
+}
+
+.deploy-desc-cell {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.deploy-detail-cell code {
+    font-size: 12px;
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+}
+
+.deploy-env-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.deploy-env-badge.test {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent-primary);
+}
+
+.deploy-env-badge.prod {
+    background: rgba(163, 113, 247, 0.15);
+    color: var(--accent-purple);
+}
+
+.deploy-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.deploy-status-badge.status-pending {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--accent-warning);
+}
+
+.deploy-status-badge.status-publishing {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent-primary);
+}
+
+.deploy-status-badge.status-failed {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--accent-danger);
+}
+
+.deploy-status-badge.status-success {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.deploy-status-badge.status-cancel {
+    background: rgba(139, 148, 158, 0.15);
+    color: var(--text-secondary);
+}
+
+.btn-cancel-deploy {
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    background: rgba(248, 81, 73, 0.12);
+    color: var(--accent-danger);
+    border: none;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-cancel-deploy:hover {
+    background: rgba(248, 81, 73, 0.25);
+}
+
+/* Deploy action button on clients table */
+.btn-deploy {
+    background: rgba(163, 113, 247, 0.15);
+    color: var(--accent-purple);
+}
+
+.btn-deploy:hover {
+    background: rgba(163, 113, 247, 0.25);
+}
+
+/* Client basic form domain field */
+.client-basic-domain {
+    grid-column: 1 / -1;
+}
