@@ -7,8 +7,12 @@ host = "0.0.0.0"
 port = 8080
 # 调试模式（生产环境请设为 false）
 debug = false
-# Gunicorn worker 进程数（建议设为 CPU 核数 * 2 + 1）
-workers = 4
+# Gunicorn worker 进程数
+# 使用 gevent 时建议设为 1（单进程 + 协程池即可应对高并发 I/O，且避免多进程定时任务冲突）
+# 如需多进程可调大，但需注意进程间状态隔离
+workers = 1
+# Gunicorn worker 类型: gevent（协程，推荐 I/O 密集型）/ sync（同步）/ gthread（多线程）
+worker_class = "gevent"
 # Gunicorn worker 超时时间（秒）
 timeout = 120
 
