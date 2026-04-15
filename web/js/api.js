@@ -147,6 +147,16 @@ const clientAPI = {
         const payload = { app_types: appTypes };
         if (appName) payload.name = appName;
         return request('/app/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
+    },
+
+    // 预览部署 TOML 配置
+    async deployPreview(clientId, data) {
+        return request(`/app/client/${clientId}/deploy-preview`, { method: 'POST', body: JSON.stringify(data) });
+    },
+
+    // 执行部署
+    async deployExecute(clientId, deployId) {
+        return request(`/app/client/${clientId}/deploy/${deployId}/execute`, { method: 'POST' });
     }
 };
 
@@ -222,6 +232,12 @@ const adminClientAPI = {
         const payload = { app_types: appTypes };
         if (appName) payload.name = appName;
         return request('/app/client/create-from-template', { method: 'POST', body: JSON.stringify(payload) });
+    },
+    async deployPreview(clientId, data) {
+        return request(`/app/client/${clientId}/deploy-preview`, { method: 'POST', body: JSON.stringify(data) });
+    },
+    async deployExecute(clientId, deployId) {
+        return request(`/app/client/${clientId}/deploy/${deployId}/execute`, { method: 'POST' });
     }
 };
 

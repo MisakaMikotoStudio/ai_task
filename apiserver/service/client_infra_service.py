@@ -230,12 +230,16 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
     for oss in get_client_oss(client_id=client_id, user_id=user_id):
         oss_result[oss.env] = oss.to_dict()
 
+    from dao.client_dao import get_client_deploys
+    deploys_result = [d.to_dict() for d in get_client_deploys(client_id=client_id, user_id=user_id)]
+
     return {
         'servers': servers_result,
         'domains': domains_result,
         'databases': databases_result,
         'payments': payments_result,
         'oss': oss_result,
+        'deploys': deploys_result,
     }
 
 
@@ -251,6 +255,7 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
     databases_data = data.get('databases') or {}
     payments_data = data.get('payments') or {}
     oss_data = data.get('oss') or {}
+    deploys_data = data.get('deploys')
 
     # SSH 连通性校验（仅在有服务器 ip 时）
     if servers_data:
@@ -269,3 +274,8 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='payments', data=payments_data)
     if oss_data:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='oss', data=oss_data)
+
+    # 保存部署配置（deploys 是列表，不区分环境）
+    if deploys_data is not None and isinstance(deploys_data, list):
+        from service.deploy_service import save_deploy_configs
+        save_deploy_configs(client_id=client_id, user_id=user_id, deploys_data=deploys_data)

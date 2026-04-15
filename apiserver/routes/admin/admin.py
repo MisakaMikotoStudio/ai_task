@@ -33,7 +33,7 @@ from dao.heartbeat_dao import get_heartbeats_by_user
 from dao.models import PermissionConfig, Resource
 from dao import resource_dao
 from service import oss_service, order_service
-from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_client, ClientSaveError
+from service.client_service import AVAILABLE_AGENTS, get_client_detail, save_client, ClientSaveError, DeployConfigError
 from service.resource_mysql_service import ResourceMySQLError, list_databases, create_database_for_user
 
 logger = logging.getLogger(__name__)
@@ -320,7 +320,7 @@ def admin_create_client():
         if not response_data:
             return jsonify({'code': 500, 'message': '客户端保存成功但读取详情失败', 'data': None}), 500
         return jsonify({'code': 201, 'message': '客户端创建成功', 'data': response_data}), 201
-    except ClientSaveError as e:
+    except (ClientSaveError, DeployConfigError) as e:
         return jsonify({'code': 400, 'message': e.message, 'data': None}), 400
     except Exception as e:
         logger.exception('admin_create_client failed')
@@ -347,7 +347,7 @@ def admin_update_client(client_id: int):
             data=data,
             client_id=client_id,
         )
-    except ClientSaveError as e:
+    except (ClientSaveError, DeployConfigError) as e:
         return jsonify({'code': 400, 'message': e.message, 'data': None}), 400
     except Exception as e:
         logger.exception('admin_update_client failed')
