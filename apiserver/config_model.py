@@ -18,8 +18,9 @@ class ServerConfig:
     port: int = 8105
     debug: bool = False
     url_prefix: str = ""  # URL 前缀，例如 "/v1"，为空则不添加前缀
-    workers: int = 4  # Gunicorn worker 进程数
+    workers: int = 1  # Gunicorn worker 进程数（单 worker + gevent 协程即可应对高并发 I/O）
     timeout: int = 120  # Gunicorn worker 超时时间（秒）
+    worker_class: str = "gevent"  # Gunicorn worker 类型：gevent（协程）/ sync（同步）/ gthread（多线程）
 
 
 @dataclass

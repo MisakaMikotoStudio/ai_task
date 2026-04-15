@@ -2,7 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 AI任务需求管理系统 - API Server
+支持 Gunicorn + gevent 高并发部署
 """
+
+# gevent monkey-patch 必须在所有其他 import 之前执行
+# 仅在 Gunicorn gevent worker 场景下生效；本地 flask 开发时无影响
+try:
+    from gevent import monkey
+    monkey.patch_all()
+except ImportError:
+    pass
 
 import argparse
 import logging
@@ -12,7 +21,6 @@ import sys
 from flask import Flask, send_from_directory, jsonify, request
 from werkzeug.exceptions import HTTPException
 
-# 配置日志格式
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
