@@ -158,6 +158,10 @@ def create_app(config: AppConfig) -> Flask:
     def static_files(path):
         return send_from_directory(app.static_folder, path)
 
+    # 启动生产环境部署定时调度器
+    from scheduler import start_deploy_scheduler
+    start_deploy_scheduler()
+
     return app
 
 

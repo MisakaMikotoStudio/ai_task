@@ -45,6 +45,43 @@ def get_deploy_records_by_client(user_id: int, client_id: int, status: str = Non
         return {'records': [r.to_dict() for r in records], 'total': total, 'page': page, 'page_size': page_size}
 
 
+def get_pending_prod_deploy_records() -> List[DeployRecord]:
+    """获取所有生产环境待发布和发布中的记录（跨用户，供调度器使用）"""
+    with get_db_session() as session:
+        records = session.query(DeployRecord).filter(
+            DeployRecord.env == 'prod',
+            DeployRecord.status.in_([DeployRecord.STATUS_PENDING, DeployRecord.STATUS_PUBLISHING]),
+            DeployRecord.deleted_at.is_(None),
+        ).order_by(DeployRecord.client_id.asc(), DeployRecord.created_at.desc()).all()
+        return records
+
+
+def update_deploy_record_status(record_id: int, status: str, detail: dict = None) -> bool:
+    """更新发布记录的状态和详情（供调度器使用，不校验 user_id）"""
+    with get_db_session() as session:
+        update_data = {DeployRecord.status: status}
+        if detail is not None:
+            update_data[DeployRecord.detail] = detail
+        affected = session.query(DeployRecord).filter(
+            DeployRecord.id == record_id,
+            DeployRecord.deleted_at.is_(None),
+        ).update(update_data)
+        return affected > 0
+
+
+def batch_cancel_deploy_records(record_ids: list) -> int:
+    """批量将 pending 状态的发布记录标记为 cancel"""
+    if not record_ids:
+        return 0
+    with get_db_session() as session:
+        affected = session.query(DeployRecord).filter(
+            DeployRecord.id.in_(record_ids),
+            DeployRecord.status == DeployRecord.STATUS_PENDING,
+            DeployRecord.deleted_at.is_(None),
+        ).update({DeployRecord.status: DeployRecord.STATUS_CANCEL}, synchronize_session=False)
+        return affected
+
+
 def cancel_deploy_record(user_id: int, record_id: int) -> bool:
     """取消发布记录，返回是否成功"""
     with get_db_session() as session:

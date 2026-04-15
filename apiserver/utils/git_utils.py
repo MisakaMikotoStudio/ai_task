@@ -429,6 +429,38 @@ def build_repo_url(organization: str, repo_name: str) -> str:
     return f"https://github.com/{organization}/{repo_name}.git"
 
 
+def get_branch_latest_commit(token: str, organization: str, repo_name: str, branch: str) -> str:
+    """
+    获取 GitHub 仓库指定分支的最新 commit SHA。
+
+    Args:
+        token: Installation Access Token
+        organization: 组织名
+        repo_name: 仓库名
+        branch: 分支名
+
+    Returns:
+        完整的 commit SHA 字符串
+
+    Raises:
+        GitHubServiceError: 查询失败
+    """
+    headers = make_headers(token=token)
+    url = f"{GITHUB_API_BASE}/repos/{organization}/{repo_name}/commits/{branch}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        logger.info("get_branch_latest_commit: org=%s, repo=%s, branch=%s, status=%d", organization, repo_name, branch, resp.status_code)
+        if resp.status_code != 200:
+            raise GitHubServiceError(f"获取仓库 {repo_name} 分支 {branch} 最新提交失败（HTTP {resp.status_code}）：{resp.text[:200]}")
+        return resp.json()['sha']
+    except GitHubServiceError:
+        raise
+    except requests.RequestException as e:
+        raise GitHubServiceError(f"获取仓库 {repo_name} 分支 {branch} 最新提交网络请求失败：{str(e)}")
+    except Exception as e:
+        raise GitHubServiceError(f"获取仓库 {repo_name} 分支 {branch} 最新提交失败：{str(e)}")
+
+
 def parse_github_url(url: str):
     """
     从 GitHub 仓库 URL 中解析出组织名和仓库名。

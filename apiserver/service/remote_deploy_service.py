@@ -1,0 +1,458 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+远程服务器部署服务 —— 生产环境定时部署执行
+
+流程概览：
+1. 查询所有 prod 环境 pending/publishing 状态的发布记录
+2. 按 client_id 分组：publishing 跳过，pending 取消旧记录、部署最新
+3. 部署步骤：commit 补充 → SSH 检查 → 目录检查 → Docker 容器部署 → Nginx 路由
+"""
+
+import logging
+from collections import defaultdict
+
+from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
+from dao.client_dao import get_client_repos, get_client_deploys, get_client_servers, get_client_domains
+from dao.models import DeployRecord
+from service.deploy_service import generate_deploy_toml
+from utils.git_utils import parse_github_url, get_branch_latest_commit
+
+logger = logging.getLogger(__name__)
+
+SSH_CONNECT_TIMEOUT = 10
+
+
+class RemoteDeployError(Exception):
+    """远程部署执行失败"""
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+# ============================================================
+# SSH 工具函数
+# ============================================================
+
+def _create_ssh_client(ip: str, username: str, password: str):
+    """创建 SSH 客户端并连接到远程服务器"""
+    import paramiko
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(hostname=ip, username=username, password=password, timeout=SSH_CONNECT_TIMEOUT, allow_agent=False, look_for_keys=False)
+    return client
+
+
+def _ssh_exec(ssh, command: str) -> str:
+    """执行 SSH 命令并返回 stdout，非零退出码抛出异常"""
+    stdin, stdout, stderr = ssh.exec_command(command)
+    exit_status = stdout.channel.recv_exit_status()
+    out = stdout.read().decode('utf-8', errors='replace').strip()
+    if exit_status != 0:
+        err = stderr.read().decode('utf-8', errors='replace').strip()
+        raise RemoteDeployError(f"命令失败(exit={exit_status}): {command[:120]}  stderr: {err[:500]}")
+    return out
+
+
+def _ssh_exec_ignore_error(ssh, command: str) -> str:
+    """执行 SSH 命令，忽略错误返回 stdout"""
+    stdin, stdout, stderr = ssh.exec_command(command)
+    stdout.channel.recv_exit_status()
+    return stdout.read().decode('utf-8', errors='replace').strip()
+
+
+def _ssh_write_file(ssh, remote_dir: str, remote_path: str, content: str) -> None:
+    """通过 SSH 创建远程目录并写入文件"""
+    _ssh_exec(ssh=ssh, command=f'mkdir -p {remote_dir}')
+    sftp = ssh.open_sftp()
+    try:
+        with sftp.file(remote_path, 'w') as f:
+            f.write(content)
+    finally:
+        sftp.close()
+
+
+# ============================================================
+# 主入口
+# ============================================================
+
+def process_pending_prod_deploys():
+    """
+    处理所有生产环境待发布的部署记录（供调度器调用）。
+
+    按 client_id 分组，每个应用独立处理：
+    - 存在 publishing 记录 → 跳过
+    - 仅 pending → 取消旧记录，部署最新
+    """
+    records = get_pending_prod_deploy_records()
+    if not records:
+        return
+
+    grouped = defaultdict(list)
+    for record in records:
+        grouped[record.client_id].append(record)
+
+    for client_id, client_records in grouped.items():
+        try:
+            _process_client_records(client_id=client_id, records=client_records)
+        except Exception:
+            logger.exception("process_pending_prod_deploys: client_id=%s error", client_id)
+
+
+def _process_client_records(client_id: int, records: list):
+    """处理单个应用（client）的部署记录"""
+    # 存在 publishing 记录则跳过
+    if any(r.status == DeployRecord.STATUS_PUBLISHING for r in records):
+        logger.debug("client_id=%s has publishing record, skip", client_id)
+        return
+
+    pending = [r for r in records if r.status == DeployRecord.STATUS_PENDING]
+    if not pending:
+        return
+
+    # 按创建时间降序排列，最新在前
+    pending.sort(key=lambda r: r.created_at, reverse=True)
+    latest = pending[0]
+
+    # 取消所有非最新的 pending 记录
+    cancel_ids = [r.id for r in pending[1:]]
+    if cancel_ids:
+        batch_cancel_deploy_records(record_ids=cancel_ids)
+        logger.info("Cancelled %d older pending records for client_id=%s", len(cancel_ids), client_id)
+
+    # 执行最新记录的部署
+    _execute_prod_deploy(record=latest)
+
+
+# ============================================================
+# 部署执行主流程
+# ============================================================
+
+def _execute_prod_deploy(record):
+    """
+    执行单条生产环境部署记录的完整流程。
+
+    步骤：
+    3.1 补充 commit 信息（GitHub API 查询默认分支最新 commit）
+    3.2 SSH 连通性检查（连接生产服务器）
+    3.3 目录文件检查（创建目录、下载/更新仓库）
+    3.4 遍历部署命令（Docker 镜像打包、容器启动、Nginx 路由）
+    """
+    record_id = record.id
+    client_id = record.client_id
+    user_id = record.user_id
+    detail = dict(record.detail or {})
+
+    try:
+        # 标记为 publishing
+        update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
+        logger.info("Start prod deploy: record_id=%s, client_id=%s", record_id, client_id)
+
+        # 3.1 补充 repo commit 信息
+        repos = get_client_repos(client_id=client_id, user_id=user_id)
+        commits, repo_auth = _fill_commit_info(repos=repos)
+        detail['commits'] = commits
+        update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
+
+        # 3.2 SSH 检查
+        servers = get_client_servers(client_id=client_id, user_id=user_id)
+        prod_server = next((s for s in servers if s.env == 'prod'), None)
+        if not prod_server:
+            raise RemoteDeployError("未配置生产环境云服务器")
+
+        ip = (prod_server.ip or '').strip()
+        username = (prod_server.name or '').strip()
+        password = (prod_server.password or '').strip()
+        if not ip or not username:
+            raise RemoteDeployError("生产环境服务器 IP 或用户名为空")
+
+        ssh = _create_ssh_client(ip=ip, username=username, password=password)
+        try:
+            logger.info("SSH connected: record_id=%s, ip=%s", record_id, ip)
+
+            # 3.3 目录文件检查
+            _setup_directories(ssh=ssh, username=username, client_id=client_id, repos=repos, repo_auth=repo_auth)
+
+            # 3.4 遍历部署命令
+            deploys = get_client_deploys(client_id=client_id, user_id=user_id)
+            if not deploys:
+                raise RemoteDeployError("未配置部署命令")
+
+            key = detail.get('key', '')
+            domains = get_client_domains(client_id=client_id, user_id=user_id)
+            prod_domains = [d.domain for d in domains if d.env == 'prod']
+
+            container_names = []
+            for deploy in deploys:
+                cname = _execute_single_deploy(
+                    ssh=ssh, username=username, client_id=client_id, record_id=record_id,
+                    deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=user_id, key=key,
+                )
+                container_names.append(cname)
+
+            # 创建 nginx 容器
+            if prod_domains and container_names:
+                _setup_nginx_container(
+                    ssh=ssh, username=username, client_id=client_id,
+                    container_names=container_names, key=key, prod_domains=prod_domains,
+                )
+
+            # 部署成功
+            detail['deploy_log'] = '部署成功'
+            update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_SUCCESS, detail=detail)
+            logger.info("Prod deploy success: record_id=%s, client_id=%s", record_id, client_id)
+        finally:
+            ssh.close()
+
+    except Exception as e:
+        error_msg = str(e)
+        detail['deploy_log'] = f'部署失败：{error_msg}'
+        update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_FAILED, detail=detail)
+        logger.error("Prod deploy failed: record_id=%s, client_id=%s, error=%s", record_id, client_id, error_msg)
+
+
+# ============================================================
+# 步骤 3.1：Commit 信息补充
+# ============================================================
+
+def _fill_commit_info(repos) -> tuple:
+    """
+    查询所有仓库默认分支的最新 commitId。
+
+    Returns:
+        (commits, repo_auth):
+        - commits: {repo_id_str: {url, branch, commit_id}} — 写入数据库 detail
+        - repo_auth: {repo_id_str: {token, org, repo_name}} — 仅运行时使用，不落库
+    """
+    from service.git_service import refresh_repo_token_by_url
+
+    commits = {}
+    repo_auth = {}
+
+    for repo in repos:
+        url = repo.url
+        org, repo_name = parse_github_url(url=url)
+        if not org or not repo_name:
+            logger.warning("Cannot parse repo URL: %s, skip", url)
+            continue
+
+        # 刷新 GitHub Installation Token
+        try:
+            token = refresh_repo_token_by_url(repo_url=url)
+        except Exception as e:
+            raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
+
+        # 获取默认分支最新 commit
+        branch = repo.default_branch or 'main'
+        try:
+            commit_id = get_branch_latest_commit(token=token, organization=org, repo_name=repo_name, branch=branch)
+        except Exception as e:
+            raise RemoteDeployError(f"获取仓库 {repo_name} 分支 {branch} 最新提交失败：{e}")
+
+        repo_id_str = str(repo.id)
+        commits[repo_id_str] = {'url': url, 'branch': branch, 'commit_id': commit_id}
+        repo_auth[repo_id_str] = {'token': token, 'org': org, 'repo_name': repo_name}
+        logger.info("Got commit: repo=%s, branch=%s, commit=%s", repo_name, branch, commit_id[:8])
+
+    return commits, repo_auth
+
+
+# ============================================================
+# 步骤 3.3：目录文件检查
+# ============================================================
+
+def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict):
+    """
+    检查远程服务器目录结构并下载缺失的仓库。
+
+    目录结构：
+    /home/{username}/app{client_id}/
+    ├── repo/          # 持久化 git 仓库
+    │   ├── {repo1}/
+    │   └── {repo2}/
+    └── repo_tmp/      # 部署临时文件
+    """
+    base_dir = f'/home/{username}/app{client_id}'
+    repo_dir = f'{base_dir}/repo'
+    repo_tmp_dir = f'{base_dir}/repo_tmp'
+
+    _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_dir}')
+    _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_tmp_dir}')
+
+    for repo in repos:
+        repo_id_str = str(repo.id)
+        if repo_id_str not in repo_auth:
+            continue
+
+        auth = repo_auth[repo_id_str]
+        repo_name = auth['repo_name']
+        token = auth['token']
+        url = repo.url
+        auth_url = url.replace('https://github.com', f'https://x-access-token:{token}@github.com')
+
+        # 检查仓库目录是否存在
+        check = _ssh_exec_ignore_error(ssh=ssh, command=f'test -d {repo_dir}/{repo_name} && echo "exists" || echo "not_exists"')
+
+        if 'not_exists' in check:
+            logger.info("Cloning repo: %s -> %s/%s", repo_name, repo_dir, repo_name)
+            _ssh_exec(ssh=ssh, command=f'cd {repo_dir} && git clone {auth_url} {repo_name}')
+        else:
+            # 更新远程 URL（刷新 token）并 fetch 最新代码
+            _ssh_exec(ssh=ssh, command=f'cd {repo_dir}/{repo_name} && git remote set-url origin {auth_url} && git fetch origin')
+
+
+# ============================================================
+# 步骤 3.4：单条部署命令执行
+# ============================================================
+
+def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, deploy, commits: dict, repo_auth: dict, user_id: int, key: str) -> str:
+    """
+    执行单条部署命令（ClientDeploy）：拷贝仓库、打包镜像、启动容器。
+
+    Returns:
+        启动的容器名称
+    """
+    deploy_uuid = deploy.uuid
+    repo_id = deploy.repo_id
+    work_dir = (deploy.work_dir or '').strip().strip('/')
+    startup_command = (deploy.startup_command or '').strip()
+
+    if not repo_id:
+        raise RemoteDeployError(f"部署配置 {deploy_uuid} 未关联代码仓库")
+
+    repo_id_str = str(repo_id)
+    if repo_id_str not in commits:
+        raise RemoteDeployError(f"部署配置 {deploy_uuid} 关联的仓库 ID={repo_id} 无 commit 信息")
+
+    commit_info = commits[repo_id_str]
+    commit_id = commit_info['commit_id']
+    commit_short = commit_id[:8]
+    auth = repo_auth[repo_id_str]
+    repo_name = auth['repo_name']
+
+    base_dir = f'/home/{username}/app{client_id}'
+    repo_dir = f'{base_dir}/repo'
+    tmp_dir = f'{base_dir}/repo_tmp/tmp_{record_id}'
+    tmp_repo_dir = f'{tmp_dir}/{repo_name}'
+    full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
+
+    # 创建临时目录，拷贝仓库代码，切换到指定 commit
+    _ssh_exec(ssh=ssh, command=f'mkdir -p {tmp_dir}')
+    _ssh_exec(ssh=ssh, command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
+    _ssh_exec(ssh=ssh, command=f'cd {tmp_repo_dir} && git checkout {commit_id}')
+
+    # Docker 镜像：检查 Dockerfile 是否存在
+    image_name = f'app{client_id}_{deploy_uuid}'
+    image_tag = commit_short
+    image_full = f'{image_name}:{image_tag}'
+
+    df_check = _ssh_exec_ignore_error(ssh=ssh, command=f'test -f {full_work_dir}/Dockerfile && echo "found" || echo "not_found"')
+    if 'not_found' in df_check:
+        raise RemoteDeployError(f"工作目录 {work_dir or '/'} 下未找到 Dockerfile")
+
+    # 镜像打包（已存在则跳过）
+    img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
+    if 'not_exists' in img_check:
+        logger.info("Building image: %s from %s", image_full, full_work_dir)
+        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && docker build -t {image_full} .')
+    else:
+        logger.info("Image %s already exists, skip build", image_full)
+
+    # 生成 TOML 配置并写入远程服务器
+    toml_content = generate_deploy_toml(
+        client_id=client_id, user_id=user_id,
+        official_configs=deploy.official_configs or [],
+        custom_config=deploy.custom_config or '',
+        env='prod',
+    )
+    config_dir = f'{base_dir}/config{deploy_uuid}'
+    config_path = f'{config_dir}/config.toml'
+    if toml_content:
+        _ssh_write_file(ssh=ssh, remote_dir=config_dir, remote_path=config_path, content=toml_content)
+
+    # 创建 Docker 网络
+    network_name = f'network_{client_id}_{key}' if key else f'network_{client_id}'
+    _ssh_exec_ignore_error(ssh=ssh, command=f'docker network create {network_name} 2>/dev/null')
+
+    # 停止并删除旧容器
+    container_name = f'app_{client_id}_{deploy_uuid}'
+    _ssh_exec_ignore_error(ssh=ssh, command=f'docker rm -f {container_name} 2>/dev/null')
+
+    # 生成随机端口
+    port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
+
+    # 启动容器
+    mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
+    run_cmd = f'docker run -d --name {container_name} --network {network_name} -p {port}:8080 {mount_opt} {image_full}'
+    if startup_command:
+        escaped_cmd = startup_command.replace("'", "'\\''")
+        run_cmd += f" sh -c '{escaped_cmd}'"
+
+    _ssh_exec(ssh=ssh, command=run_cmd)
+    logger.info("Container started: name=%s, port=%s, image=%s", container_name, port, image_full)
+
+    return container_name
+
+
+# ============================================================
+# Nginx 容器路由
+# ============================================================
+
+def _setup_nginx_container(ssh, username: str, client_id: int, container_names: list, key: str, prod_domains: list):
+    """
+    创建 Nginx 容器用于域名路由。
+
+    通过 Docker 网络内的容器名称实现反向代理：
+    域名 key.{host}（或 {host}）→ Nginx 容器 → 应用容器:8080
+    """
+    if not prod_domains or not container_names:
+        return
+
+    base_dir = f'/home/{username}/app{client_id}'
+    network_name = f'network_{client_id}_{key}' if key else f'network_{client_id}'
+    nginx_name = f'nginx_{client_id}_{key}' if key else f'nginx_{client_id}'
+
+    # 构建 server_name
+    if key:
+        server_names = ' '.join(f'{key}.{d}' for d in prod_domains)
+    else:
+        server_names = ' '.join(prod_domains)
+
+    # 生成 Nginx 配置（代理到第一个应用容器）
+    primary_container = container_names[0]
+    nginx_conf = (
+        'server {\n'
+        '    listen 80;\n'
+        f'    server_name {server_names};\n'
+        '\n'
+        '    location / {\n'
+        f'        proxy_pass http://{primary_container}:8080;\n'
+        '        proxy_set_header Host $host;\n'
+        '        proxy_set_header X-Real-IP $remote_addr;\n'
+        '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
+        '        proxy_set_header X-Forwarded-Proto $scheme;\n'
+        '        proxy_read_timeout 3600s;\n'
+        '        proxy_send_timeout 3600s;\n'
+        '    }\n'
+        '}\n'
+    )
+
+    # 写入 Nginx 配置文件
+    nginx_dir = f'{base_dir}/nginx_{key}' if key else f'{base_dir}/nginx'
+    nginx_conf_path = f'{nginx_dir}/default.conf'
+    _ssh_write_file(ssh=ssh, remote_dir=nginx_dir, remote_path=nginx_conf_path, content=nginx_conf)
+
+    # 停止并删除旧 Nginx 容器
+    _ssh_exec_ignore_error(ssh=ssh, command=f'docker rm -f {nginx_name} 2>/dev/null')
+
+    # 生成随机端口
+    nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
+
+    # 启动 Nginx 容器
+    _ssh_exec(ssh=ssh, command=(
+        f'docker run -d --name {nginx_name} --network {network_name} '
+        f'-p {nginx_port}:80 '
+        f'-v {nginx_conf_path}:/etc/nginx/conf.d/default.conf:ro '
+        f'nginx:alpine'
+    ))
+    logger.info("Nginx container started: name=%s, port=%s, server_name=%s", nginx_name, nginx_port, server_names)
