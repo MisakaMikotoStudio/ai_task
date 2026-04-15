@@ -931,6 +931,24 @@ input, select, textarea {
     background: rgba(63, 185, 80, 0.25);
 }
 
+.btn-preview {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent-primary);
+}
+
+.btn-preview:hover {
+    background: rgba(88, 166, 255, 0.25);
+}
+
+.btn-deploy {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-success);
+}
+
+.btn-deploy:hover {
+    background: rgba(63, 185, 80, 0.25);
+}
+
 /* Task Detail Modal Styles */
 .task-detail-content {
     display: flex;
@@ -6203,4 +6221,123 @@ textarea:focus {
 
 .btn-success:hover {
     opacity: 0.85;
+}
+
+/* ===== 部署配置 ===== */
+
+.deploy-card {
+    margin-bottom: 16px;
+    padding: 16px 20px;
+}
+
+.deploy-card .form-group {
+    margin-bottom: 14px;
+}
+
+.deploy-card .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.deploy-official-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 14px;
+}
+
+.deploy-official-row-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex: none;
+}
+
+.deploy-official-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+}
+
+.deploy-official-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: var(--bg-tertiary, #f5f5f5);
+    transition: background 0.15s;
+}
+
+.deploy-official-label:hover {
+    background: var(--bg-secondary, #eaeaea);
+}
+
+.deploy-official-label input[type="checkbox"] {
+    margin: 0;
+    accent-color: var(--accent-primary, #58a6ff);
+}
+
+.deploy-uuid-badge {
+    display: inline-block;
+    background: var(--bg-secondary, #f0f0f0);
+    color: var(--text-secondary);
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    margin-left: 8px;
+}
+
+.deploy-custom-input {
+    width: 100%;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+/* 部署预览模态框 */
+.modal-container {
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    animation: modalIn 0.2s ease;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.modal-close-btn:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px 24px;
 }

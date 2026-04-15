@@ -11,6 +11,7 @@ const WIZARD_STEPS = [
     { id: 5, label: '数据库',   required: false },
     { id: 6, label: '支付',     required: false },
     { id: 7, label: '对象存储', required: false },
+    { id: 8, label: '部署',     required: false },
 ];
 
 // 当前向导状态
@@ -42,6 +43,11 @@ let cfgPaymentCurrentEnv = 'test';
 let cfgOssByEnv = { test: {}, prod: {} };
 let cfgOssCurrentEnv = 'test';
 
+// 部署配置：列表，不区分环境
+let cfgDeploysList = [];
+// 当前预览的 deploy 索引
+let cfgDeployPreviewIdx = null;
+
 function cfgResetClientConfigState() {
     cfgClientId = null;
     cfgClientMode = 'add';
@@ -58,6 +64,8 @@ function cfgResetClientConfigState() {
     cfgPaymentCurrentEnv = 'test';
     cfgOssByEnv = { test: {}, prod: {} };
     cfgOssCurrentEnv = 'test';
+    cfgDeploysList = [];
+    cfgDeployPreviewIdx = null;
 }
 
 function backToClients() {
@@ -129,6 +137,7 @@ async function openClientConfig(id, mode) {
             cfgPaymentsByEnv.prod = (infra.payments && infra.payments.prod) ? { ...infra.payments.prod } : {};
             cfgOssByEnv.test = (infra.oss && infra.oss.test) ? { ...infra.oss.test } : {};
             cfgOssByEnv.prod = (infra.oss && infra.oss.prod) ? { ...infra.oss.prod } : {};
+            cfgDeploysList = (infra.deploys || []).map(d => ({ ...d }));
         } catch (error) {
             showToast(error.message, 'error');
             return;
@@ -180,6 +189,7 @@ function wizardRenderStepContent(stepIndex) {
         case 5: wizardRenderDatabaseStep(isView); break;
         case 6: wizardRenderPaymentStep(isView); break;
         case 7: wizardRenderOssStep(isView); break;
+        case 8: wizardRenderDeployStep(isView); break;
     }
 }
 
@@ -197,6 +207,7 @@ function wizardSyncCurrentStepFromDOM(stepIndex) {
         case 4: wizardSyncDomainsFromDOM(); break;
         case 6: wizardSyncPaymentFromDOM(); break;
         case 7: wizardSyncOssFromDOM(); break;
+        case 8: wizardSyncDeploysFromDOM(); break;
     }
 }
 
@@ -239,6 +250,14 @@ async function wizardSaveAll() {
     // 构建环境变量数据
     const envVars = cfgEnvVars.map(ev => ({ key: (ev.key || '').trim(), value: (ev.value == null ? '' : String(ev.value)) }));
 
+    // 构建部署配置
+    const deploys = cfgDeploysList.map(d => ({
+        id: d.id || undefined,
+        startup_command: (d.startup_command || '').trim(),
+        official_configs: d.official_configs || [],
+        custom_config: d.custom_config || '',
+    }));
+
     // 构建基础设施配置
     const infrastructure = {
         servers: cfgServersByEnv,
@@ -246,6 +265,7 @@ async function wizardSaveAll() {
         databases: cfgDatabasesByEnv,
         payments: cfgPaymentsByEnv,
         oss: cfgOssByEnv,
+        deploys: deploys,
     };
 
     try {
@@ -740,4 +760,164 @@ function wizardSyncOssFromDOM() {
         bucket: document.getElementById('cfg-oss-bucket').value.trim(),
         base_url: document.getElementById('cfg-oss-base-url').value.trim(),
     };
+}
+
+
+// ---- Step 8: 部署 ----
+
+const DEPLOY_OFFICIAL_OPTIONS = [
+    { key: 'app_name', label: '应用名' },
+    { key: 'domain', label: '域名' },
+    { key: 'database', label: '数据库' },
+    { key: 'payment', label: '支付' },
+    { key: 'oss', label: '对象存储' },
+];
+
+function wizardRenderDeployStep(isView) {
+    const addBtn = document.getElementById('add-deploy-btn');
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            cfgDeploysList.push({ startup_command: '', official_configs: [], custom_config: '' });
+            wizardRenderDeployList();
+        };
+    }
+    wizardRenderDeployList();
+}
+
+function wizardSyncDeploysFromDOM() {
+    const list = document.getElementById('deploys-list');
+    if (!list) return;
+    list.querySelectorAll('.deploy-card').forEach((card, idx) => {
+        if (idx >= cfgDeploysList.length) return;
+        const d = cfgDeploysList[idx];
+        const cmdInput = card.querySelector('.deploy-cmd-input');
+        if (cmdInput) d.startup_command = cmdInput.value;
+        const customInput = card.querySelector('.deploy-custom-input');
+        if (customInput) d.custom_config = customInput.value;
+        // 官方配置从 checkbox 同步
+        const checks = card.querySelectorAll('.deploy-official-check');
+        const selected = [];
+        checks.forEach(cb => { if (cb.checked) selected.push(cb.value); });
+        d.official_configs = selected;
+    });
+}
+
+function wizardRenderDeployList() {
+    const list = document.getElementById('deploys-list');
+    const empty = document.getElementById('deploys-empty');
+    if (!list) return;
+    const isView = (cfgClientMode === 'view');
+
+    if (cfgDeploysList.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    const disAttr = isView ? 'disabled' : '';
+
+    list.innerHTML = cfgDeploysList.map((d, idx) => {
+        const uuidDisplay = d.uuid ? `<span class="deploy-uuid-badge">${escapeHtml(d.uuid)}</span>` : '<span class="deploy-uuid-badge" style="color:var(--text-tertiary);">保存后生成</span>';
+        const officialChecks = DEPLOY_OFFICIAL_OPTIONS.map(opt => {
+            const checked = (d.official_configs || []).includes(opt.key) ? 'checked' : '';
+            return `<label class="deploy-official-label"><input type="checkbox" class="deploy-official-check" value="${opt.key}" ${checked} ${disAttr}><span>${opt.label}</span></label>`;
+        }).join('');
+        const deleteBtn = isView ? '' : `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteDeploy(${idx})">删除</button>`;
+        const previewBtn = cfgClientId ? `<button type="button" class="btn-action btn-preview" onclick="cfgPreviewDeploy(${idx})">预览</button>` : '';
+        const executeBtn = (cfgClientId && d.id && !isView) ? `<button type="button" class="btn-action btn-deploy" onclick="cfgExecuteDeploy(${idx})">部署</button>` : '';
+
+        return `
+        <div class="deploy-card infra-card" data-deploy-idx="${idx}">
+            <div class="infra-card-header">
+                <span class="infra-card-label">#${idx + 1} ${uuidDisplay}</span>
+                <div style="display:flex;gap:8px;align-items:center;">${previewBtn}${executeBtn}${deleteBtn}</div>
+            </div>
+            <div class="form-group">
+                <label>启动命令</label>
+                <input type="text" class="deploy-cmd-input" value="${escapeHtml(d.startup_command || '')}" placeholder="如 gunicorn ... main:app" ${disAttr}>
+            </div>
+            <div class="deploy-official-row">
+                <label class="deploy-official-row-label">官方配置</label>
+                <div class="deploy-official-group">${officialChecks}</div>
+            </div>
+            <div class="form-group">
+                <label>自定义配置（TOML 格式）</label>
+                <textarea class="deploy-custom-input" rows="4" placeholder="在此输入 TOML 格式的自定义配置，会与官方配置合并（冲突时保留自定义）" ${disAttr}>${escapeHtml(d.custom_config || '')}</textarea>
+            </div>
+        </div>`;
+    }).join('');
+
+    // 绑定输入事件
+    list.querySelectorAll('.deploy-card').forEach((card, idx) => {
+        card.addEventListener('input', () => {
+            if (idx >= cfgDeploysList.length) return;
+            const d = cfgDeploysList[idx];
+            const cmdInput = card.querySelector('.deploy-cmd-input');
+            if (cmdInput) d.startup_command = cmdInput.value;
+            const customInput = card.querySelector('.deploy-custom-input');
+            if (customInput) d.custom_config = customInput.value;
+        });
+        card.querySelectorAll('.deploy-official-check').forEach(cb => {
+            cb.addEventListener('change', () => {
+                if (idx >= cfgDeploysList.length) return;
+                const selected = [];
+                card.querySelectorAll('.deploy-official-check').forEach(c => { if (c.checked) selected.push(c.value); });
+                cfgDeploysList[idx].official_configs = selected;
+            });
+        });
+    });
+}
+
+function cfgDeleteDeploy(idx) {
+    cfgDeploysList.splice(idx, 1);
+    wizardRenderDeployList();
+}
+
+async function cfgPreviewDeploy(idx) {
+    if (!cfgClientId) { showToast('请先保存应用后再预览', 'error'); return; }
+    wizardSyncDeploysFromDOM();
+    const d = cfgDeploysList[idx];
+    if (!d) return;
+    cfgDeployPreviewIdx = idx;
+    const modal = document.getElementById('deploy-preview-modal');
+    if (modal) modal.style.display = 'flex';
+    await refreshDeployPreview();
+}
+
+async function refreshDeployPreview() {
+    if (cfgDeployPreviewIdx === null || cfgDeployPreviewIdx >= cfgDeploysList.length) return;
+    const d = cfgDeploysList[cfgDeployPreviewIdx];
+    const env = document.getElementById('deploy-preview-env').value || 'prod';
+    const contentEl = document.getElementById('deploy-preview-content');
+    contentEl.textContent = '加载中...';
+    try {
+        const result = await activeClientAPI.deployPreview(cfgClientId, {
+            official_configs: d.official_configs || [],
+            custom_config: d.custom_config || '',
+            env: env,
+        });
+        contentEl.textContent = result.data.toml_content || '（空配置）';
+    } catch (e) {
+        contentEl.textContent = '预览失败：' + (e.message || '未知错误');
+    }
+}
+
+function closeDeployPreviewModal() {
+    const modal = document.getElementById('deploy-preview-modal');
+    if (modal) modal.style.display = 'none';
+    cfgDeployPreviewIdx = null;
+}
+
+async function cfgExecuteDeploy(idx) {
+    if (!cfgClientId) { showToast('请先保存应用', 'error'); return; }
+    const d = cfgDeploysList[idx];
+    if (!d || !d.id) { showToast('请先保存配置后再执行部署', 'error'); return; }
+    if (!confirm('确认执行部署？将通过 SSH 写入配置文件到远程服务器。')) return;
+    try {
+        const result = await activeClientAPI.deployExecute(cfgClientId, d.id);
+        showToast(result.message || '部署完成', 'success');
+    } catch (e) {
+        showToast(e.message || '部署失败', 'error');
+    }
 }

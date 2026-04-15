@@ -163,7 +163,49 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
             env, selected.name, selected.id,
         )
 
+    # 为 web 类型应用创建默认部署配置
+    if 'web' in app_types:
+        _create_default_deploys(user_id=user_id, client_id=client_id)
+
     return client_id
+
+
+def _create_default_deploys(user_id: int, client_id: int) -> None:
+    """
+    为默认应用创建两条 deploy 配置：
+    1. apiserver：gunicorn 启动命令，官方配置全选
+    2. web：nginx 启动命令，官方配置仅选"应用名"
+    """
+    from dao.client_dao import add_client_deploy
+    from service.deploy_service import _generate_unique_uuid
+
+    # apiserver deploy
+    apiserver_uuid = _generate_unique_uuid()
+    apiserver_command = 'gunicorn --worker-class gevent --workers 4 --worker-connections 1000 --bind 0.0.0.0:8080 --timeout 60 --keep-alive 5 --access-logfile - --error-logfile - main:app'
+    add_client_deploy(
+        client_id=client_id, user_id=user_id, uuid=apiserver_uuid,
+        startup_command=apiserver_command,
+        official_configs=['app_name', 'domain', 'database', 'payment', 'oss'],
+        custom_config='',
+    )
+    logger.info(
+        "_create_default_deploys: apiserver deploy created, client_id=%s, uuid=%s",
+        client_id, apiserver_uuid,
+    )
+
+    # web deploy
+    web_uuid = _generate_unique_uuid()
+    web_command = "nginx -g 'daemon off;'"
+    add_client_deploy(
+        client_id=client_id, user_id=user_id, uuid=web_uuid,
+        startup_command=web_command,
+        official_configs=['app_name'],
+        custom_config='',
+    )
+    logger.info(
+        "_create_default_deploys: web deploy created, client_id=%s, uuid=%s",
+        client_id, web_uuid,
+    )
 
 
 def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:

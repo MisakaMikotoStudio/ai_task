@@ -700,6 +700,42 @@ class ClientOss(Base):
         }
 
 
+class ClientDeploy(Base):
+    """客户端部署配置表（不区分环境）"""
+    __tablename__ = 'ai_task_client_deploys'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    uuid = Column(String(6), nullable=False, unique=True, comment='6位随机数字唯一标识')
+    startup_command = Column(Text, nullable=False, default='', comment='启动命令')
+    official_configs = Column(JSON, nullable=False, comment='官方配置选项列表，如 ["app_name","domain","database","payment","oss"]')
+    custom_config = Column(Text, nullable=True, comment='用户自定义 TOML 配置')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database', 'payment', 'oss']
+
+    __table_args__ = (
+        Index('idx_client_deploys_client', 'client_id'),
+        Index('idx_client_deploys_user', 'user_id'),
+        Index('uk_client_deploys_uuid', 'uuid', unique=True),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'uuid': self.uuid or '',
+            'startup_command': self.startup_command or '',
+            'official_configs': self.official_configs or [],
+            'custom_config': self.custom_config or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
 class PermissionConfig(Base):
     """权限配置表"""
     __tablename__ = 'ai_task_permission_configs'

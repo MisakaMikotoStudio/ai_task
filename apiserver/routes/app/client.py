@@ -22,6 +22,9 @@ from service.client_service import (
     save_client,
     ClientSaveError,
     create_client_from_template,
+    DeployConfigError,
+    execute_deploy,
+    generate_deploy_toml,
 )
 from dao.heartbeat_dao import get_heartbeats_by_user
 
@@ -48,7 +51,7 @@ def create_client_api():
             data=data,
             client_id=None,
         )
-    except ClientSaveError as e:
+    except (ClientSaveError, DeployConfigError) as e:
         return jsonify({'code': 400, 'message': str(e)}), 400
     response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
@@ -119,7 +122,7 @@ def update_client_api(client_id):
 
     try:
         save_client(user_id=request.user_info.user_id, data=data, client_id=client_id)
-    except ClientSaveError as e:
+    except (ClientSaveError, DeployConfigError) as e:
         return jsonify({'code': 400, 'message': str(e)}), 400
     response_data = get_client_detail(client_id=client_id, user_id=request.user_info.user_id)
     if not response_data:
@@ -184,3 +187,44 @@ def get_client_config_api(client_id):
             'env_vars': [ev.to_dict() for ev in env_vars],
         }
     })
+
+
+@client_bp.route('/<int:client_id>/deploy-preview', methods=['POST'])
+def deploy_preview_api(client_id):
+    """预览部署配置生成的 TOML 内容"""
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id, user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在'}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'code': 400, 'message': '请求数据为空'}), 400
+
+    official_configs = data.get('official_configs', [])
+    custom_config = data.get('custom_config', '')
+    env = data.get('env', 'prod')
+
+    try:
+        toml_content = generate_deploy_toml(
+            client_id=client_id, user_id=user_id,
+            official_configs=official_configs, custom_config=custom_config, env=env,
+        )
+        return jsonify({'code': 200, 'data': {'toml_content': toml_content}})
+    except DeployConfigError as e:
+        return jsonify({'code': 400, 'message': e.message}), 400
+
+
+@client_bp.route('/<int:client_id>/deploy/<int:deploy_id>/execute', methods=['POST'])
+def deploy_execute_api(client_id, deploy_id):
+    """执行部署：SSH 远程写入 TOML 配置文件"""
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id, user_id)
+    if not client:
+        return jsonify({'code': 400, 'message': '客户端不存在'}), 400
+
+    try:
+        result = execute_deploy(client_id=client_id, user_id=user_id, deploy_id=deploy_id)
+        return jsonify({'code': 200, 'message': result})
+    except DeployConfigError as e:
+        return jsonify({'code': 400, 'message': e.message}), 400
