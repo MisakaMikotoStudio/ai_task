@@ -129,8 +129,19 @@ def create_app(config: AppConfig) -> Flask:
     return app
 
 
+# Gunicorn 入口：gunicorn "main:app" 时读取环境变量 API_CONFIG 指定配置文件路径
+_config_path = os.environ.get('API_CONFIG', 'config.toml')
+if os.path.exists(_config_path):
+    _config = AppConfig.from_toml(_config_path)
+    init_database(_config.database)
+    app = create_app(_config)
+else:
+    # 未找到配置文件时创建空 app，避免 import 报错；main() 会校验
+    app = Flask(__name__)
+
+
 def create_app_for_gunicorn():
-    """gunicorn WSGI 入口，通过环境变量 API_CONFIG 指定配置文件路径"""
+    """gunicorn WSGI 工厂入口（兼容 main:create_app_for_gunicorn 启动方式）"""
     config_path = os.environ.get('API_CONFIG', 'config.toml')
     if not os.path.exists(config_path):
         raise RuntimeError(f"Config file not found: {config_path}")
