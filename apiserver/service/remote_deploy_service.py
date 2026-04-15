@@ -10,6 +10,7 @@
 """
 
 import logging
+import os
 from collections import defaultdict
 
 from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
@@ -21,6 +22,7 @@ from utils.git_utils import parse_github_url, get_branch_latest_commit
 logger = logging.getLogger(__name__)
 
 SSH_CONNECT_TIMEOUT = 10
+_ENV_INIT_SCRIPT_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils', 'server_env_init.sh'))
 
 
 class RemoteDeployError(Exception):
@@ -70,6 +72,26 @@ def _ssh_write_file(ssh, remote_dir: str, remote_path: str, content: str) -> Non
             f.write(content)
     finally:
         sftp.close()
+
+
+# ============================================================
+# 环境初始化
+# ============================================================
+
+def _init_server_env(ssh):
+    """传输并执行服务器环境初始化脚本（安装 git、docker、nginx、certbot）"""
+    try:
+        with open(_ENV_INIT_SCRIPT_PATH, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+    except FileNotFoundError:
+        raise RemoteDeployError(f"环境初始化脚本不存在: {_ENV_INIT_SCRIPT_PATH}")
+
+    remote_path = '/tmp/server_env_init.sh'
+    _ssh_write_file(ssh=ssh, remote_dir='/tmp', remote_path=remote_path, content=script_content)
+    _ssh_exec(ssh=ssh, command=f'chmod +x {remote_path}')
+    logger.info("Executing server env init script on remote server")
+    _ssh_exec(ssh=ssh, command=f'bash {remote_path}')
+    logger.info("Server env init completed successfully")
 
 
 # ============================================================
@@ -169,6 +191,9 @@ def _execute_prod_deploy(record):
         ssh = _create_ssh_client(ip=ip, username=username, password=password)
         try:
             logger.info("SSH connected: record_id=%s, ip=%s", record_id, ip)
+
+            # 环境初始化：传输并执行 server_env_init.sh
+            _init_server_env(ssh=ssh)
 
             # 3.3 目录文件检查
             _setup_directories(ssh=ssh, username=username, client_id=client_id, repos=repos, repo_auth=repo_auth)
