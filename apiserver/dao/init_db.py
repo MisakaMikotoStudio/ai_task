@@ -23,6 +23,18 @@ def _run_migrations(engine):
         ADD COLUMN IF NOT EXISTS `env` VARCHAR(16) NULL DEFAULT NULL
         COMMENT '环境标识：test/prod，NULL表示通用'
         """,
+        # ClientDeploy 表增加 repo_id 字段
+        """
+        ALTER TABLE ai_task_client_deploys
+        ADD COLUMN IF NOT EXISTS `repo_id` INT NULL
+        COMMENT '关联仓库ID（ai_task_client_repos.id）'
+        """,
+        # ClientDeploy 表增加 work_dir 字段
+        """
+        ALTER TABLE ai_task_client_deploys
+        ADD COLUMN IF NOT EXISTS `work_dir` VARCHAR(512) NULL DEFAULT ''
+        COMMENT '工作目录路径，启动命令在此目录下运行'
+        """,
     ]
     with engine.connect() as conn:
         for sql in migrations:

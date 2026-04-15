@@ -1007,23 +1007,20 @@ def is_deploy_uuid_exists(uuid: str) -> bool:
         return count > 0
 
 
-def add_client_deploy(client_id: int, user_id: int, uuid: str, startup_command: str, official_configs: list, custom_config: str = '') -> int:
+def add_client_deploy(client_id: int, user_id: int, uuid: str, startup_command: str, official_configs: list, custom_config: str = '', repo_id: int = None, work_dir: str = '') -> int:
     """新增一条部署配置，返回新记录 ID"""
     with get_db_session() as session:
         record = ClientDeploy(
-            client_id=client_id,
-            user_id=user_id,
-            uuid=uuid,
-            startup_command=startup_command,
-            official_configs=official_configs,
-            custom_config=custom_config or '',
+            client_id=client_id, user_id=user_id, uuid=uuid,
+            repo_id=repo_id, work_dir=work_dir or '',
+            startup_command=startup_command, official_configs=official_configs, custom_config=custom_config or '',
         )
         session.add(record)
         session.flush()
         return record.id
 
 
-def update_client_deploy(deploy_id: int, client_id: int, user_id: int, startup_command: str, official_configs: list, custom_config: str = '') -> bool:
+def update_client_deploy(deploy_id: int, client_id: int, user_id: int, startup_command: str, official_configs: list, custom_config: str = '', repo_id: int = None, work_dir: str = '') -> bool:
     """更新部署配置（uuid 不可更改）"""
     now = datetime.now(timezone.utc)
     with get_db_session() as session:
@@ -1033,6 +1030,8 @@ def update_client_deploy(deploy_id: int, client_id: int, user_id: int, startup_c
             ClientDeploy.user_id == user_id,
             ClientDeploy.deleted_at.is_(None),
         ).update({
+            ClientDeploy.repo_id: repo_id,
+            ClientDeploy.work_dir: work_dir or '',
             ClientDeploy.startup_command: startup_command,
             ClientDeploy.official_configs: official_configs,
             ClientDeploy.custom_config: custom_config or '',

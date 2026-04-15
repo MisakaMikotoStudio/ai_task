@@ -253,6 +253,8 @@ async function wizardSaveAll() {
     // 构建部署配置
     const deploys = cfgDeploysList.map(d => ({
         id: d.id || undefined,
+        repo_id: d.repo_id || null,
+        work_dir: (d.work_dir || '').trim(),
         startup_command: (d.startup_command || '').trim(),
         official_configs: d.official_configs || [],
         custom_config: d.custom_config || '',
@@ -778,7 +780,8 @@ function wizardRenderDeployStep(isView) {
     if (addBtn) {
         addBtn.style.display = isView ? 'none' : '';
         addBtn.onclick = () => {
-            cfgDeploysList.push({ startup_command: '', official_configs: [], custom_config: '' });
+            const defaultRepo = cfgReposList.find(r => !r.docs_repo);
+            cfgDeploysList.push({ startup_command: '', official_configs: [], custom_config: '', repo_id: defaultRepo ? (defaultRepo.id || null) : null, work_dir: '' });
             wizardRenderDeployList();
         };
     }
@@ -791,6 +794,10 @@ function wizardSyncDeploysFromDOM() {
     list.querySelectorAll('.deploy-card').forEach((card, idx) => {
         if (idx >= cfgDeploysList.length) return;
         const d = cfgDeploysList[idx];
+        const repoSelect = card.querySelector('.deploy-repo-select');
+        if (repoSelect) d.repo_id = repoSelect.value ? parseInt(repoSelect.value, 10) : null;
+        const workdirInput = card.querySelector('.deploy-workdir-input');
+        if (workdirInput) d.work_dir = workdirInput.value;
         const cmdInput = card.querySelector('.deploy-cmd-input');
         if (cmdInput) d.startup_command = cmdInput.value;
         const customInput = card.querySelector('.deploy-custom-input');
@@ -827,11 +834,28 @@ function wizardRenderDeployList() {
         const previewBtn = cfgClientId ? `<button type="button" class="btn-action btn-preview" onclick="cfgPreviewDeploy(${idx})">预览</button>` : '';
         const executeBtn = (cfgClientId && d.id && !isView) ? `<button type="button" class="btn-action btn-deploy" onclick="cfgExecuteDeploy(${idx})">部署</button>` : '';
 
+        // 仓库下拉选项：优先非文档仓库排在前面
+        const repoOptions = cfgReposList.map(r => {
+            const label = r.docs_repo ? `${escapeHtml(r.desc || r.url)}（文档仓库）` : escapeHtml(r.desc || r.url);
+            const selected = (d.repo_id != null && r.id === d.repo_id) ? 'selected' : '';
+            return `<option value="${r.id || ''}" ${selected}>${label}</option>`;
+        }).join('');
+
         return `
         <div class="deploy-card infra-card" data-deploy-idx="${idx}">
             <div class="infra-card-header">
                 <span class="infra-card-label">#${idx + 1} ${uuidDisplay}</span>
                 <div style="display:flex;gap:8px;align-items:center;">${previewBtn}${executeBtn}${deleteBtn}</div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:flex-start;">
+                <div class="form-group" style="flex:1;">
+                    <label>代码仓库</label>
+                    <select class="deploy-repo-select" ${disAttr}><option value="">不选择</option>${repoOptions}</select>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>工作目录</label>
+                    <input type="text" class="deploy-workdir-input" value="${escapeHtml(d.work_dir || '')}" placeholder="如 src/server" ${disAttr}>
+                </div>
             </div>
             <div class="form-group">
                 <label>启动命令</label>
@@ -857,7 +881,16 @@ function wizardRenderDeployList() {
             if (cmdInput) d.startup_command = cmdInput.value;
             const customInput = card.querySelector('.deploy-custom-input');
             if (customInput) d.custom_config = customInput.value;
+            const workdirInput = card.querySelector('.deploy-workdir-input');
+            if (workdirInput) d.work_dir = workdirInput.value;
         });
+        const repoSelect = card.querySelector('.deploy-repo-select');
+        if (repoSelect) {
+            repoSelect.addEventListener('change', () => {
+                if (idx >= cfgDeploysList.length) return;
+                cfgDeploysList[idx].repo_id = repoSelect.value ? parseInt(repoSelect.value, 10) : null;
+            });
+        }
         card.querySelectorAll('.deploy-official-check').forEach(cb => {
             cb.addEventListener('change', () => {
                 if (idx >= cfgDeploysList.length) return;

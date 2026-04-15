@@ -266,6 +266,15 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
         startup_command = (deploy.get('startup_command') or '').strip()
         official_configs = deploy.get('official_configs', [])
         custom_config = deploy.get('custom_config') or ''
+        repo_id = deploy.get('repo_id') or None
+        work_dir = (deploy.get('work_dir') or '').strip()
+
+        # repo_id 转为 int 或 None
+        if repo_id is not None:
+            try:
+                repo_id = int(repo_id)
+            except (ValueError, TypeError):
+                raise DeployConfigError(f'部署配置 #{num} 代码仓库 ID 无效')
 
         if not isinstance(official_configs, list):
             raise DeployConfigError(f'部署配置 #{num} 官方配置必须是数组')
@@ -282,6 +291,7 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
             update_client_deploy(
                 deploy_id=deploy_id, client_id=client_id, user_id=user_id,
                 startup_command=startup_command, official_configs=official_configs, custom_config=custom_config,
+                repo_id=repo_id, work_dir=work_dir,
             )
             keep_ids.append(deploy_id)
         else:
@@ -290,6 +300,7 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
             new_id = add_client_deploy(
                 client_id=client_id, user_id=user_id, uuid=uuid,
                 startup_command=startup_command, official_configs=official_configs, custom_config=custom_config,
+                repo_id=repo_id, work_dir=work_dir,
             )
             keep_ids.append(new_id)
 
