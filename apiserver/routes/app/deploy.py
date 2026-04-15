@@ -84,7 +84,7 @@ def cancel_deploy_record_api(record_id):
 
 @deploy_bp.route('/records/<int:record_id>/retry', methods=['PATCH'])
 def retry_deploy_record_api(record_id):
-    """重试发布记录（仅限失败状态），将状态重置为 pending"""
+    """重试发布记录（失败或取消状态），将状态重置为 pending"""
     user_id = request.user_info.user_id
     success = retry_deploy_record(user_id=user_id, record_id=record_id)
     if not success:
