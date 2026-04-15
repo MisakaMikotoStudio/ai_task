@@ -116,6 +116,7 @@ function renderClientRow(client) {
         actionsHtml = `<div class="client-actions">
             <button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
             <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
+            <button class="btn-action btn-deploy" onclick="openDeployDetails(${client.id})">发布详情</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>
         </div>`;
     } else {
@@ -263,6 +264,11 @@ function showAddClientModal() {
             }
         }
     });
+}
+
+// ===== 发布详情 =====
+function openDeployDetails(clientId) {
+    window.open(`deploy-details.html?client_id=${clientId}`, '_blank');
 }
 
 // 兼容旧代码的 showAddTaskModal 别名
