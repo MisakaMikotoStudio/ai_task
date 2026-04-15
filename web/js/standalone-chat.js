@@ -382,6 +382,7 @@ function scRenderFeed() {
             <div class="sc-msg-body">
                 <div class="sc-msg-header">
                     <span class="sc-msg-role">You</span>
+                    <span class="sc-msg-id">#${msg.id}</span>
                     <span class="sc-msg-time">${scFormatTime(msg.created_at)}</span>
                 </div>
                 <div class="sc-msg-text">${escapeHtml(msg.input)}</div>
@@ -422,6 +423,7 @@ function scRenderFeed() {
             <div class="sc-msg-body">
                 <div class="sc-msg-header">
                     <span class="sc-msg-role">Agent</span>
+                    <span class="sc-msg-id">#${msg.id}</span>
                     <span class="sc-msg-time">${scFormatTime(msg.updated_at)}</span>
                 </div>
                 ${outputHtml}

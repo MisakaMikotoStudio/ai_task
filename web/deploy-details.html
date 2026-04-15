@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发布详情</title>
+    <link rel="stylesheet" href="css/style.css?v=24">
+    <style>
+        body { overflow: auto; }
+
+        .deploy-page {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        .deploy-page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .deploy-page-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .deploy-filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .deploy-filter-bar label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .deploy-filter-bar select {
+            padding: 6px 12px;
+            font-size: 13px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            outline: none;
+        }
+
+        .deploy-filter-bar select:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .deploy-table-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius-lg);
+            overflow: hidden;
+        }
+
+        .deploy-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .deploy-table th {
+            text-align: left;
+            padding: 12px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .deploy-table td {
+            padding: 10px 14px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .deploy-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .deploy-table .deploy-desc-cell {
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .deploy-table .deploy-detail-cell {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .deploy-table .time-cell {
+            white-space: nowrap;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        /* Pagination */
+        .deploy-pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+        }
+
+        .deploy-pagination-info {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .deploy-pagination-btns {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .deploy-pagination-btns button {
+            padding: 4px 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .deploy-pagination-btns button:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .deploy-pagination-btns button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .deploy-pagination-btns .page-current {
+            background: var(--accent-primary);
+            color: #fff;
+            border-color: var(--accent-primary);
+        }
+
+        /* Empty & Loading */
+        .deploy-empty, .deploy-loading {
+            text-align: center;
+            padding: 48px 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Toast container (for standalone page) */
+        #toast-container {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+        }
+
+        @media (max-width: 768px) {
+            .deploy-page { padding: 16px; }
+            .deploy-page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+            .deploy-table-wrap { overflow-x: auto; }
+        }
+    </style>
+</head>
+<body>
+    <div id="toast-container"></div>
+    <div class="deploy-page">
+        <div class="deploy-page-header">
+            <h1 class="deploy-page-title">发布详情</h1>
+            <div class="deploy-filter-bar">
+                <label for="status-filter">状态筛选</label>
+                <select id="status-filter">
+                    <option value="">全部</option>
+                    <option value="pending">等待发布</option>
+                    <option value="publishing">发布中</option>
+                    <option value="failed">失败</option>
+                    <option value="success">成功</option>
+                    <option value="cancel">取消</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="deploy-table-wrap">
+            <div id="deploy-loading" class="deploy-loading">加载中...</div>
+            <div id="deploy-content" style="display:none">
+                <table class="deploy-table">
+                    <thead>
+                        <tr>
+                            <th>环境</th>
+                            <th>描述</th>
+                            <th>状态</th>
+                            <th>详情</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deploy-tbody"></tbody>
+                </table>
+                <div id="deploy-empty" class="deploy-empty" style="display:none">暂无发布记录</div>
+                <div id="deploy-pagination" class="deploy-pagination" style="display:none">
+                    <span id="deploy-page-info" class="deploy-pagination-info"></span>
+                    <div id="deploy-page-btns" class="deploy-pagination-btns"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/utils.js?v=3"></script>
+    <script src="js/api.js?v=16"></script>
+    <script>
+    (function() {
+        const DEPLOY_STATUS_CLASS = {
+            'pending': 'status-pending',
+            'publishing': 'status-publishing',
+            'failed': 'status-failed',
+            'success': 'status-success',
+            'cancel': 'status-cancel',
+        };
+
+        const PAGE_SIZE = 20;
+        let currentPage = 1;
+        let clientId = null;
+
+        const params = new URLSearchParams(window.location.search);
+        clientId = parseInt(params.get('client_id'), 10);
+        if (!clientId) {
+            document.getElementById('deploy-loading').textContent = '缺少 client_id 参数';
+            return;
+        }
+
+        document.title = `发布详情 - 应用 #${clientId}`;
+
+        const statusFilter = document.getElementById('status-filter');
+        statusFilter.addEventListener('change', function() {
+            currentPage = 1;
+            loadRecords();
+        });
+
+        async function loadRecords() {
+            const loadingEl = document.getElementById('deploy-loading');
+            const contentEl = document.getElementById('deploy-content');
+            const tbody = document.getElementById('deploy-tbody');
+            const emptyEl = document.getElementById('deploy-empty');
+            const paginationEl = document.getElementById('deploy-pagination');
+
+            loadingEl.style.display = 'block';
+            contentEl.style.display = 'none';
+
+            try {
+                await initAPIConfig();
+                const status = statusFilter.value;
+                const res = await deployAPI.listRecords(clientId, { page: currentPage, page_size: PAGE_SIZE, status: status });
+                const data = res.data || {};
+                const records = data.records || [];
+                const total = data.total || 0;
+
+                loadingEl.style.display = 'none';
+                contentEl.style.display = 'block';
+
+                if (records.length === 0) {
+                    tbody.innerHTML = '';
+                    emptyEl.style.display = 'block';
+                    paginationEl.style.display = 'none';
+                    return;
+                }
+
+                emptyEl.style.display = 'none';
+                tbody.innerHTML = records.map(r => renderRow(r)).join('');
+
+                const totalPages = Math.ceil(total / PAGE_SIZE);
+                if (totalPages > 1) {
+                    paginationEl.style.display = 'flex';
+                    document.getElementById('deploy-page-info').textContent = `共 ${total} 条，第 ${currentPage}/${totalPages} 页`;
+                    renderPagination(totalPages);
+                } else {
+                    paginationEl.style.display = 'flex';
+                    document.getElementById('deploy-page-info').textContent = `共 ${total} 条`;
+                    document.getElementById('deploy-page-btns').innerHTML = '';
+                }
+            } catch (e) {
+                loadingEl.textContent = '加载失败: ' + e.message;
+            }
+        }
+
+        function renderRow(record) {
+            const envLabel = record.env === 'prod' ? '生产' : '测试';
+            const statusClass = DEPLOY_STATUS_CLASS[record.status] || '';
+            const detail = record.detail || {};
+            const detailStr = Object.keys(detail).length > 0 ? `task:${detail.task_id || '-'} chat:${detail.chat_id || '-'} msg:${detail.msg_id || '-'}` : '-';
+            const canCancel = record.status === 'pending' || record.status === 'publishing';
+            const cancelBtn = canCancel ? `<button class="btn-action btn-cancel" onclick="cancelRecord(${record.id})">取消</button>` : '<span style="color:var(--text-muted)">-</span>';
+            return `<tr>
+                <td><span class="env-badge env-${record.env}">${envLabel}</span></td>
+                <td class="deploy-desc-cell" title="${escapeHtml(record.description)}">${escapeHtml(record.description)}</td>
+                <td><span class="deploy-status-chip ${statusClass}">${escapeHtml(record.status_text)}</span></td>
+                <td class="deploy-detail-cell">${escapeHtml(detailStr)}</td>
+                <td class="time-cell">${formatDateTime(record.created_at)}</td>
+                <td>${cancelBtn}</td>
+            </tr>`;
+        }
+
+        function renderPagination(totalPages) {
+            const container = document.getElementById('deploy-page-btns');
+            let html = '';
+            html += `<button ${currentPage <= 1 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">上一页</button>`;
+
+            const maxVisible = 5;
+            let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+            let end = Math.min(totalPages, start + maxVisible - 1);
+            if (end - start < maxVisible - 1) start = Math.max(1, end - maxVisible + 1);
+
+            if (start > 1) {
+                html += `<button onclick="goToPage(1)">1</button>`;
+                if (start > 2) html += `<span style="color:var(--text-muted);padding:0 4px">...</span>`;
+            }
+            for (let i = start; i <= end; i++) {
+                const cls = i === currentPage ? 'page-current' : '';
+                html += `<button class="${cls}" onclick="goToPage(${i})">${i}</button>`;
+            }
+            if (end < totalPages) {
+                if (end < totalPages - 1) html += `<span style="color:var(--text-muted);padding:0 4px">...</span>`;
+                html += `<button onclick="goToPage(${totalPages})">${totalPages}</button>`;
+            }
+
+            html += `<button ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">下一页</button>`;
+            container.innerHTML = html;
+        }
+
+        window.goToPage = function(page) {
+            currentPage = page;
+            loadRecords();
+        };
+
+        window.cancelRecord = async function(recordId) {
+            if (!confirm('确定要取消这条发布记录吗？')) return;
+            try {
+                await deployAPI.cancelRecord(recordId);
+                showToast('发布记录已取消', 'success');
+                loadRecords();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        };
+
+        // Check login
+        if (!isLoggedIn()) {
+            document.getElementById('deploy-loading').textContent = '请先登录';
+            return;
+        }
+
+        loadRecords();
+    })();
+    </script>
+</body>
+</html>

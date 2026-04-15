@@ -286,6 +286,7 @@ function renderFeed() {
             <div class="msg-body">
                 <div class="msg-header">
                     <span class="msg-role">You</span>
+                    <span class="msg-id">#${msg.id}</span>
                     <span class="msg-time">${formatTime(msg.created_at)}</span>
                 </div>
                 <div class="msg-text">${escapeHtml(msg.input)}</div>
@@ -327,6 +328,7 @@ function renderFeed() {
             <div class="msg-body">
                 <div class="msg-header">
                     <span class="msg-role">Agent</span>
+                    <span class="msg-id">#${msg.id}</span>
                     <span class="msg-time">${formatTime(msg.updated_at)}</span>
                 </div>
                 ${outputHtml}

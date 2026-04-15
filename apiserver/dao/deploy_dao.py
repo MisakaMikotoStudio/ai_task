@@ -29,15 +29,20 @@ def create_deploy_record(user_id: int, client_id: int, env: str, description: st
         return record.id
 
 
-def get_deploy_records_by_client(user_id: int, client_id: int) -> List[dict]:
-    """获取指定客户端的发布记录列表（按创建时间倒序）"""
+def get_deploy_records_by_client(user_id: int, client_id: int, status: str = None, page: int = 1, page_size: int = 20) -> dict:
+    """获取指定客户端的发布记录列表（按创建时间倒序，支持分页和状态筛选）"""
     with get_db_session() as session:
-        records = session.query(DeployRecord).filter(
+        query = session.query(DeployRecord).filter(
             DeployRecord.user_id == user_id,
             DeployRecord.client_id == client_id,
             DeployRecord.deleted_at.is_(None),
-        ).order_by(DeployRecord.created_at.desc()).all()
-        return [r.to_dict() for r in records]
+        )
+        if status:
+            query = query.filter(DeployRecord.status == status)
+        total = query.count()
+        offset = (page - 1) * page_size
+        records = query.order_by(DeployRecord.created_at.desc()).offset(offset).limit(page_size).all()
+        return {'records': [r.to_dict() for r in records], 'total': total, 'page': page, 'page_size': page_size}
 
 
 def cancel_deploy_record(user_id: int, record_id: int) -> bool:

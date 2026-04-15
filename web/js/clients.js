@@ -116,7 +116,7 @@ function renderClientRow(client) {
         actionsHtml = `<div class="client-actions">
             <button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
             <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
-            <button class="btn-action btn-deploy" onclick="showDeployRecords(${client.id})">发布详情</button>
+            <button class="btn-action btn-deploy" onclick="openDeployDetails(${client.id})">发布详情</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>
         </div>`;
     } else {
@@ -267,90 +267,8 @@ function showAddClientModal() {
 }
 
 // ===== 发布详情 =====
-const DEPLOY_STATUS_CLASS = {
-    'pending': 'status-pending',
-    'publishing': 'status-publishing',
-    'failed': 'status-failed',
-    'success': 'status-success',
-    'cancel': 'status-cancel',
-};
-
-async function showDeployRecords(clientId) {
-    const content = `
-        <div class="deploy-records-container">
-            <div id="deploy-records-loading" style="text-align:center;padding:20px;color:var(--text-muted)">加载中...</div>
-            <div id="deploy-records-content" style="display:none">
-                <table class="data-table deploy-records-table">
-                    <thead>
-                        <tr>
-                            <th>环境</th>
-                            <th>描述</th>
-                            <th>状态</th>
-                            <th>详情</th>
-                            <th>创建时间</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="deploy-records-body"></tbody>
-                </table>
-                <div id="deploy-records-empty" class="empty-state" style="display:none">
-                    <p>暂无发布记录</p>
-                </div>
-            </div>
-        </div>`;
-    openModal('发布详情', content);
-    await loadDeployRecords(clientId);
-}
-
-async function loadDeployRecords(clientId) {
-    const loading = document.getElementById('deploy-records-loading');
-    const contentEl = document.getElementById('deploy-records-content');
-    const tbody = document.getElementById('deploy-records-body');
-    const emptyEl = document.getElementById('deploy-records-empty');
-    try {
-        const res = await deployAPI.listRecords(clientId);
-        const records = res.data || [];
-        if (loading) loading.style.display = 'none';
-        if (contentEl) contentEl.style.display = 'block';
-
-        if (records.length === 0) {
-            tbody.innerHTML = '';
-            if (emptyEl) emptyEl.style.display = 'block';
-            return;
-        }
-        if (emptyEl) emptyEl.style.display = 'none';
-        tbody.innerHTML = records.map(r => renderDeployRecordRow(r, clientId)).join('');
-    } catch (e) {
-        if (loading) loading.textContent = '加载失败: ' + e.message;
-    }
-}
-
-function renderDeployRecordRow(record, clientId) {
-    const envLabel = record.env === 'prod' ? '生产' : '测试';
-    const statusClass = DEPLOY_STATUS_CLASS[record.status] || '';
-    const detail = record.detail || {};
-    const detailStr = Object.keys(detail).length > 0 ? `task:${detail.task_id || '-'} chat:${detail.chat_id || '-'} msg:${detail.msg_id || '-'}` : '-';
-    const canCancel = record.status === 'pending' || record.status === 'publishing';
-    const cancelBtn = canCancel ? `<button class="btn-action btn-cancel" onclick="cancelDeployRecord(${record.id}, ${clientId})">取消</button>` : '<span class="text-muted">-</span>';
-    return `<tr>
-        <td><span class="env-badge env-${record.env}">${envLabel}</span></td>
-        <td class="deploy-desc-cell" title="${escapeHtml(record.description)}">${escapeHtml(record.description)}</td>
-        <td><span class="deploy-status-chip ${statusClass}">${escapeHtml(record.status_text)}</span></td>
-        <td class="deploy-detail-cell">${escapeHtml(detailStr)}</td>
-        <td class="time-display">${formatDateTime(record.created_at)}</td>
-        <td>${cancelBtn}</td>
-    </tr>`;
-}
-
-async function cancelDeployRecord(recordId, clientId) {
-    if (!confirm('确定要取消这条发布记录吗？')) return;
-    try {
-        await deployAPI.cancelRecord(recordId);
-        showToast('发布记录已取消', 'success');
-        await loadDeployRecords(clientId);
-    } catch (e) {
-        showToast(e.message, 'error');
-    }
+function openDeployDetails(clientId) {
+    window.open(`deploy-details.html?client_id=${clientId}`, '_blank');
 }
 
 // 兼容旧代码的 showAddTaskModal 别名

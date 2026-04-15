@@ -554,8 +554,10 @@ const chatAPI = {
 
 // 发布记录 API
 const deployAPI = {
-    async listRecords(clientId) {
-        return request(`/app/deploy/client/${clientId}/records`);
+    async listRecords(clientId, { page = 1, page_size = 20, status = '' } = {}) {
+        const params = new URLSearchParams({ page, page_size });
+        if (status) params.set('status', status);
+        return request(`/app/deploy/client/${clientId}/records?${params.toString()}`);
     },
     async createRecord(clientId, env, description, status, detail) {
         const body = JSON.stringify({ env, description, status, detail });

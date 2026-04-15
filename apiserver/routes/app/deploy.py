@@ -19,14 +19,24 @@ deploy_bp = Blueprint('app_deploy', __name__)
 
 @deploy_bp.route('/client/<int:client_id>/records', methods=['GET'])
 def list_deploy_records(client_id):
-    """获取指定客户端的发布记录列表"""
+    """获取指定客户端的发布记录列表（支持分页和状态筛选）"""
     user_id = request.user_info.user_id
     client = get_client_by_id(client_id, user_id)
     if not client:
         return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
 
-    records = get_deploy_records_by_client(user_id=user_id, client_id=client_id)
-    return jsonify({'code': 200, 'data': records})
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 20, type=int)
+    status = request.args.get('status', '', type=str).strip() or None
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 100:
+        page_size = 20
+    if status and status not in DeployRecord.VALID_STATUSES:
+        return jsonify({'code': 400, 'message': f'无效的状态筛选，可选值: {", ".join(DeployRecord.VALID_STATUSES)}'}), 400
+
+    result = get_deploy_records_by_client(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
+    return jsonify({'code': 200, 'data': result})
 
 
 @deploy_bp.route('/client/<int:client_id>/records', methods=['POST'])
