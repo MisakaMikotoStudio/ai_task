@@ -552,6 +552,22 @@ const chatAPI = {
     },
 };
 
+// 发布记录 API
+const deployAPI = {
+    async listRecords(clientId, { page = 1, page_size = 20, status = '' } = {}) {
+        const params = new URLSearchParams({ page, page_size });
+        if (status) params.set('status', status);
+        return request(`/app/deploy/client/${clientId}/records?${params.toString()}`);
+    },
+    async createRecord(clientId, env, description, status, detail) {
+        const body = JSON.stringify({ env, description, status, detail });
+        return request(`/app/deploy/client/${clientId}/records`, { method: 'POST', body });
+    },
+    async cancelRecord(recordId) {
+        return request(`/app/deploy/records/${recordId}/cancel`, { method: 'PATCH' });
+    }
+};
+
 // 商业化 API（商品列表、购买）
 const commercialAPI = {
     // 获取商品列表（公开，无需登录）
