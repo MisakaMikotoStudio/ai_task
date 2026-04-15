@@ -708,7 +708,7 @@ class ClientDeploy(Base):
     user_id = Column(Integer, nullable=False, comment='用户ID')
     client_id = Column(Integer, nullable=False, comment='关联客户端ID')
     uuid = Column(String(6), nullable=False, unique=True, comment='6位随机数字唯一标识')
-    startup_command = Column(Text, nullable=False, server_default='', comment='启动命令')
+    startup_command = Column(Text, nullable=False, default='', comment='启动命令')
     official_configs = Column(JSON, nullable=False, comment='官方配置选项列表，如 ["app_name","domain","database","payment","oss"]')
     custom_config = Column(Text, nullable=True, comment='用户自定义 TOML 配置')
     deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
