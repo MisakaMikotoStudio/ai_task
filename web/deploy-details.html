@@ -303,14 +303,17 @@
             const detail = record.detail || {};
             const detailStr = Object.keys(detail).length > 0 ? `task:${detail.task_id || '-'} chat:${detail.chat_id || '-'} msg:${detail.msg_id || '-'}` : '-';
             const canCancel = record.status === 'pending' || record.status === 'publishing';
-            const cancelBtn = canCancel ? `<button class="btn-action btn-cancel" onclick="cancelRecord(${record.id})">取消</button>` : '<span style="color:var(--text-muted)">-</span>';
+            const canRetry = record.status === 'failed';
+            let actionHtml = '<span style="color:var(--text-muted)">-</span>';
+            if (canCancel) actionHtml = `<button class="btn-action btn-cancel" onclick="cancelRecord(${record.id})">取消</button>`;
+            if (canRetry) actionHtml = `<button class="btn-action btn-retry" onclick="retryRecord(${record.id})">重试</button>`;
             return `<tr>
                 <td><span class="env-badge env-${record.env}">${envLabel}</span></td>
                 <td class="deploy-desc-cell" title="${escapeHtml(record.description)}">${escapeHtml(record.description)}</td>
                 <td><span class="deploy-status-chip ${statusClass}">${escapeHtml(record.status_text)}</span></td>
                 <td class="deploy-detail-cell">${escapeHtml(detailStr)}</td>
                 <td class="time-cell">${formatDateTime(record.created_at)}</td>
-                <td>${cancelBtn}</td>
+                <td>${actionHtml}</td>
             </tr>`;
         }
 
@@ -351,6 +354,17 @@
             try {
                 await deployAPI.cancelRecord(recordId);
                 showToast('发布记录已取消', 'success');
+                loadRecords();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        };
+
+        window.retryRecord = async function(recordId) {
+            if (!confirm('确定要重试这条发布记录吗？')) return;
+            try {
+                await deployAPI.retryRecord(recordId);
+                showToast('发布记录已重置为等待发布', 'success');
                 loadRecords();
             } catch (e) {
                 showToast(e.message, 'error');

@@ -8,7 +8,7 @@ import logging
 
 from flask import Blueprint, request, jsonify
 
-from dao.deploy_dao import create_deploy_record, get_deploy_records_by_client, cancel_deploy_record
+from dao.deploy_dao import create_deploy_record, get_deploy_records_by_client, cancel_deploy_record, retry_deploy_record
 from dao.client_dao import get_client_by_id
 from dao.models import DeployRecord
 
@@ -80,3 +80,14 @@ def cancel_deploy_record_api(record_id):
         return jsonify({'code': 400, 'message': '记录不存在、无权限或状态不允许取消'}), 400
 
     return jsonify({'code': 200, 'message': '发布记录已取消'})
+
+
+@deploy_bp.route('/records/<int:record_id>/retry', methods=['PATCH'])
+def retry_deploy_record_api(record_id):
+    """重试发布记录（仅限失败状态），将状态重置为 pending"""
+    user_id = request.user_info.user_id
+    success = retry_deploy_record(user_id=user_id, record_id=record_id)
+    if not success:
+        return jsonify({'code': 400, 'message': '记录不存在、无权限或状态不允许重试'}), 400
+
+    return jsonify({'code': 200, 'message': '发布记录已重置为等待发布'})

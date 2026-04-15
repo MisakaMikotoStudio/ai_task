@@ -565,6 +565,9 @@ const deployAPI = {
     },
     async cancelRecord(recordId) {
         return request(`/app/deploy/records/${recordId}/cancel`, { method: 'PATCH' });
+    },
+    async retryRecord(recordId) {
+        return request(`/app/deploy/records/${recordId}/retry`, { method: 'PATCH' });
     }
 };
 
