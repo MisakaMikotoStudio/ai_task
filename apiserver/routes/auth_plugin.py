@@ -266,7 +266,14 @@ def _auth_open(trace_id: str):
 # ===================== 全局鉴权注册 =====================
 
 def register_global_auth(app, api_prefix: str = '/api'):
-    """注册全局鉴权 before_request。"""
+    """注册全局鉴权 before_request 和响应 traceId 注入 after_request。"""
+
+    @app.after_request
+    def _inject_trace_id(response):
+        trace_id = getattr(request, 'trace_id', None)
+        if trace_id:
+            response.headers['traceId'] = trace_id
+        return response
 
     @app.before_request
     def _global_auth_guard():
