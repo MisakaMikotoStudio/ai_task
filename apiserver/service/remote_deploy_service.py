@@ -11,6 +11,7 @@
 
 import logging
 import os
+import uuid
 from collections import defaultdict
 
 from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
@@ -165,10 +166,14 @@ def _execute_prod_deploy(record):
     user_id = record.user_id
     detail = dict(record.detail or {})
 
+    # 生成 traceId 用于追踪本次部署全链路
+    trace_id = str(uuid.uuid4())
+    detail['trace_id'] = trace_id
+
     try:
         # 标记为 publishing
         update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
-        logger.info("Start prod deploy: record_id=%s, client_id=%s", record_id, client_id)
+        logger.info("Start prod deploy: record_id=%s, client_id=%s, trace_id=%s", record_id, client_id, trace_id)
 
         # 3.1 补充 repo commit 信息
         repos = get_client_repos(client_id=client_id, user_id=user_id)
