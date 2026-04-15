@@ -99,7 +99,7 @@ def cancel_deploy_record(user_id: int, record_id: int) -> bool:
 
 
 def retry_deploy_record(user_id: int, record_id: int) -> bool:
-    """重试发布记录（仅限失败状态），将状态重置为 pending，返回是否成功"""
+    """重试发布记录（失败或取消状态），将状态重置为 pending，返回是否成功"""
     with get_db_session() as session:
         record = session.query(DeployRecord).filter(
             DeployRecord.id == record_id,
@@ -108,7 +108,7 @@ def retry_deploy_record(user_id: int, record_id: int) -> bool:
         ).first()
         if not record:
             return False
-        if record.status != DeployRecord.STATUS_FAILED:
+        if record.status not in (DeployRecord.STATUS_FAILED, DeployRecord.STATUS_CANCEL):
             return False
         record.status = DeployRecord.STATUS_PENDING
         return True
