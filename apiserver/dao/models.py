@@ -834,6 +834,57 @@ class Resource(Base):
         return self.extra or {}
 
 
+class DeployRecord(Base):
+    """发布记录表"""
+    __tablename__ = 'ai_task_deploy_records'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='所属用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
+    description = Column(String(255), nullable=False, default='', comment='发布描述')
+    status = Column(String(20), nullable=False, default='pending', comment='发布状态：pending/publishing/failed/success/cancel')
+    detail = Column(JSON, default=dict, comment='发布详情（task_id, chat_id, msg_id 等）')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_deploy_records_user_client', 'user_id', 'client_id'),
+        Index('idx_deploy_records_client_env', 'client_id', 'env'),
+    )
+
+    STATUS_PENDING = 'pending'
+    STATUS_PUBLISHING = 'publishing'
+    STATUS_FAILED = 'failed'
+    STATUS_SUCCESS = 'success'
+    STATUS_CANCEL = 'cancel'
+
+    VALID_STATUSES = [STATUS_PENDING, STATUS_PUBLISHING, STATUS_FAILED, STATUS_SUCCESS, STATUS_CANCEL]
+    VALID_ENVS = ['test', 'prod']
+
+    STATUS_TEXT = {
+        'pending': '等待发布',
+        'publishing': '发布中',
+        'failed': '失败',
+        'success': '成功',
+        'cancel': '取消',
+    }
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'env': self.env,
+            'description': self.description or '',
+            'status': self.status,
+            'status_text': self.STATUS_TEXT.get(self.status, self.status),
+            'detail': self.detail or {},
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
 class ChatMessage(Base):
     """Chat消息表"""
     __tablename__ = 'ai_task_chat_message'

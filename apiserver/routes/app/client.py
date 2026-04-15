@@ -15,6 +15,7 @@ from dao.client_dao import (
     delete_client,
     get_client_repos,
     get_client_env_vars,
+    get_client_domains,
 )
 from service.client_service import (
     AVAILABLE_AGENTS,
@@ -175,6 +176,10 @@ def get_client_config_api(client_id):
 
     repos = get_client_repos(client_id, request.user_info.user_id)
     env_vars = get_client_env_vars(client_id, request.user_info.user_id)
+    domain_rows = get_client_domains(client_id, request.user_info.user_id)
+    domains_result = {}
+    for dom in domain_rows:
+        domains_result.setdefault(dom.env, []).append(dom.domain)
 
     return jsonify({
         'code': 200,
@@ -185,6 +190,7 @@ def get_client_config_api(client_id):
             'agent': client.agent,
             'repos': [repo.to_dict() for repo in repos],
             'env_vars': [ev.to_dict() for ev in env_vars],
+            'domains': domains_result,
         }
     })
 

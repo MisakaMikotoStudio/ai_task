@@ -175,6 +175,16 @@ function initStandaloneChatPanel() {
         mergeDefaultBtn.addEventListener('click', () => scMergeToDefaultBranch());
     }
 
+    // Preview & Publish
+    const scPreviewBtnEl = document.getElementById('sc-preview-btn');
+    if (scPreviewBtnEl) {
+        scPreviewBtnEl.addEventListener('click', () => scPreviewApp());
+    }
+    const scPublishBtnEl = document.getElementById('sc-publish-btn');
+    if (scPublishBtnEl) {
+        scPublishBtnEl.addEventListener('click', () => scPublishApp());
+    }
+
     // Merge request modal: click overlay to close
     const mergeModal = document.getElementById('sc-merge-modal');
     if (mergeModal) {
@@ -441,6 +451,8 @@ function scUpdateComposerState() {
     const hintEl = document.getElementById('sc-detail-hint');
     const hintText = document.getElementById('sc-detail-hint-text');
     const mergeDefaultBtn = document.getElementById('sc-merge-default-btn');
+    const scPreviewBtn = document.getElementById('sc-preview-btn');
+    const scPublishBtn = document.getElementById('sc-publish-btn');
     const showMerge = !!scClientConfigCache;
 
     if (scRunningMessageId) {
@@ -448,6 +460,8 @@ function scUpdateComposerState() {
         input.disabled = true;
         sendBtn.style.display = 'none';
         if (mergeDefaultBtn) mergeDefaultBtn.style.display = 'none';
+        if (scPreviewBtn) scPreviewBtn.style.display = 'none';
+        if (scPublishBtn) scPublishBtn.style.display = 'none';
         stopBtn.style.display = 'flex';
         hintEl.className = 'sc-detail-hint warn';
         hintText.textContent = '当前有消息正在执行，无法输入新消息';
@@ -457,6 +471,8 @@ function scUpdateComposerState() {
         input.disabled = false;
         sendBtn.style.display = 'flex';
         if (mergeDefaultBtn) mergeDefaultBtn.style.display = showMerge ? 'flex' : 'none';
+        if (scPreviewBtn) scPreviewBtn.style.display = showMerge ? 'flex' : 'none';
+        if (scPublishBtn) scPublishBtn.style.display = showMerge ? 'flex' : 'none';
         stopBtn.style.display = 'none';
         hintEl.className = 'sc-detail-hint';
         hintText.textContent = '尽管问，带图也行';
@@ -827,4 +843,59 @@ function scShowMergeRequestModal(storeKey) {
 
 function scCloseMergeRequestModal() {
     document.getElementById('sc-merge-modal').classList.remove('active');
+}
+
+// ── Preview & Publish ──
+function _scGetLatestCompletedMsgId() {
+    for (let i = scMessagesCache.length - 1; i >= 0; i--) {
+        if (scMessagesCache[i].status === 'completed') return scMessagesCache[i].id;
+    }
+    return scMessagesCache.length > 0 ? scMessagesCache[scMessagesCache.length - 1].id : null;
+}
+
+function _scGetTestDomain() {
+    if (!scClientConfigCache || !scClientConfigCache.domains) return null;
+    const testDomains = scClientConfigCache.domains.test || [];
+    return testDomains.length > 0 ? testDomains[0] : null;
+}
+
+function scPreviewApp() {
+    if (!scSelectedChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
+    const msgId = _scGetLatestCompletedMsgId();
+    if (!msgId) { showToast('当前 Chat 暂无消息', 'error'); return; }
+    const testDomain = _scGetTestDomain();
+    if (!testDomain) { showToast('未配置应用测试环境域名', 'error'); return; }
+    const taskId = 0;
+    const previewUrl = `http://task${taskId}chat${scSelectedChatId}msg${msgId}.${testDomain}`;
+    window.open(previewUrl, '_blank');
+}
+
+async function scPublishApp() {
+    if (!scSelectedChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
+
+    const prompt = _scBuildMergeToDefaultBranchPrompt();
+    if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
+
+    const clientId = scSelectedClientId;
+    if (!clientId) { showToast('未找到关联的应用', 'error'); return; }
+
+    const chat = scChatList.find(c => c.id === scSelectedChatId);
+    const chatTitle = chat ? chat.title : `Chat ${scSelectedChatId}`;
+
+    const btn = document.getElementById('sc-publish-btn');
+    btn.disabled = true;
+    try {
+        const res = await chatAPI.createMessage(0, scSelectedChatId, prompt);
+        const msgId = res.data ? res.data.id : null;
+        await deployAPI.createRecord(clientId, 'prod', chatTitle, 'pending', {task_id: 0, chat_id: scSelectedChatId, msg_id: msgId});
+        showToast('发布记录已创建', 'success');
+        await scLoadMessages(scSelectedChatId);
+        scCurrentPage = 1;
+        scChatList = [];
+        await loadStandaloneChatList();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
 }

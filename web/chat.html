@@ -1092,6 +1092,18 @@
         }
         .merge-btn:hover { background: rgba(43, 147, 213, 0.20); }
         .merge-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .merge-btn.preview-btn {
+            background: rgba(63, 185, 80, 0.10);
+            color: var(--accent-success);
+            border-color: rgba(63, 185, 80, 0.25);
+        }
+        .merge-btn.preview-btn:hover { background: rgba(63, 185, 80, 0.20); }
+        .merge-btn.publish-btn {
+            background: rgba(163, 113, 247, 0.10);
+            color: var(--accent-purple);
+            border-color: rgba(163, 113, 247, 0.25);
+        }
+        .merge-btn.publish-btn:hover { background: rgba(163, 113, 247, 0.20); }
 
         /* Image attachment button */
         .attach-btn {
@@ -1465,6 +1477,8 @@
                         <span class="composer-hint-inline">Ctrl+Enter 发送</span>
                         <button class="merge-btn" id="merge-to-task-btn" onclick="mergeToTask()">合并到 Task</button>
                         <button class="merge-btn" id="merge-to-default-btn" onclick="mergeToDefaultBranch()">合并到默认分支</button>
+                        <button class="merge-btn preview-btn" id="preview-btn" onclick="previewApp()">预览</button>
+                        <button class="merge-btn publish-btn" id="publish-btn" onclick="publishApp()">发布</button>
                         <button class="send-btn" id="send-btn" onclick="sendMessage()">
                             <span>↑</span> 发送
                         </button>
