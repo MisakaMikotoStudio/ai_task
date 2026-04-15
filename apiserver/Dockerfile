@@ -22,5 +22,7 @@ RUN pip install  --retries 10 "sqlalchemy>=2.0.0"
 RUN pip install  --retries 10 "tomli>=2.0.0"
 RUN pip install  --retries 10 "cryptography>=42.0.0"
 RUN pip install  --retries 10 "cos-python-sdk-v5"
+RUN pip install  --retries 10 "gunicorn>=21.2.0"
+RUN pip install  --retries 10 "gevent>=23.0.0"
 
 COPY . /app
