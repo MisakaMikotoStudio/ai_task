@@ -299,7 +299,7 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
 
 def execute_deploy(client_id: int, user_id: int, deploy_id: int) -> str:
     """
-    执行部署：SSH 连接到已配置的云服务器，将生成的 TOML 配置写入 /config{uuid}/config.toml。
+    执行部署：SSH 连接到已配置的云服务器，将生成的 TOML 配置写入 /home/{username}/config{uuid}/config.toml。
 
     对所有已配置的服务器（test/prod）逐一部署，使用对应环境的配置生成 TOML。
 
@@ -337,8 +337,8 @@ def execute_deploy(client_id: int, user_id: int, deploy_id: int) -> str:
             env=env,
         )
 
-        # SSH 写入配置文件
-        config_dir = f'/config{deploy.uuid}'
+        # SSH 写入配置文件（放在用户 home 目录下，避免根目录权限问题）
+        config_dir = f'/home/{username}/config{deploy.uuid}'
         config_path = f'{config_dir}/config.toml'
 
         try:
