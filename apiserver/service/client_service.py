@@ -342,3 +342,9 @@ from service.client_config_service import (  # noqa: E402, F401
     save_client_env_vars,
     save_client_repos,
 )
+from service.deploy_service import (  # noqa: E402, F401
+    DeployConfigError,
+    execute_deploy,
+    generate_deploy_toml,
+    save_deploy_configs,
+)
