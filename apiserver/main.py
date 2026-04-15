@@ -129,6 +129,16 @@ def create_app(config: AppConfig) -> Flask:
     return app
 
 
+def create_app_for_gunicorn():
+    """gunicorn WSGI 入口，通过环境变量 API_CONFIG 指定配置文件路径"""
+    config_path = os.environ.get('API_CONFIG', 'config.toml')
+    if not os.path.exists(config_path):
+        raise RuntimeError(f"Config file not found: {config_path}")
+    config = AppConfig.from_toml(config_path)
+    init_database(config.database)
+    return create_app(config)
+
+
 def main():
     parser = argparse.ArgumentParser(description='AI Task Management API Server')
     parser.add_argument('--config', '-c', type=str, default='config.toml',
