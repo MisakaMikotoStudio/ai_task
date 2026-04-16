@@ -735,6 +735,94 @@ def _render_inner_nginx_conf(primary_container: str) -> str:
     )
 
 
+def _ensure_certbot_ready(ssh, trace_id: str) -> None:
+    """确保 certbot 与 nginx 插件可用，并初始化 letsencrypt 附加文件。"""
+    _ssh_exec(
+        ssh=ssh,
+        command=(
+            'if ! command -v certbot >/dev/null 2>&1; then '
+            'if command -v apt-get >/dev/null 2>&1; then '
+            'sudo apt-get update -y && sudo apt-get install -y certbot python3-certbot-nginx; '
+            'elif command -v dnf >/dev/null 2>&1; then '
+            'sudo dnf install -y certbot python3-certbot-nginx; '
+            'elif command -v yum >/dev/null 2>&1; then '
+            'sudo yum install -y epel-release && sudo yum install -y certbot python3-certbot-nginx; '
+            'else '
+            'echo "unsupported package manager" >&2; exit 1; '
+            'fi; '
+            'fi'
+        ),
+    )
+    _ssh_exec(ssh=ssh, command='sudo mkdir -p /var/www/certbot')
+    _ssh_exec(
+        ssh=ssh,
+        command=(
+            'if [ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]; then '
+            'sudo mkdir -p /etc/letsencrypt && '
+            'printf "%s\n" '
+            '"ssl_session_cache shared:le_nginx_SSL:10m;" '
+            '"ssl_session_timeout 1d;" '
+            '"ssl_session_tickets off;" '
+            '"ssl_protocols TLSv1.2 TLSv1.3;" '
+            '"ssl_prefer_server_ciphers off;" '
+            '"ssl_ciphers HIGH:!aNULL:!MD5;" '
+            '"add_header Strict-Transport-Security \\"max-age=31536000\\" always;" '
+            ' | sudo tee /etc/letsencrypt/options-ssl-nginx.conf >/dev/null; '
+            'fi'
+        ),
+    )
+    _ssh_exec(
+        ssh=ssh,
+        command=(
+            'if [ ! -f /etc/letsencrypt/ssl-dhparams.pem ]; then '
+            'sudo openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048; '
+            'fi'
+        ),
+        timeout=600,
+    )
+    logger.info("Certbot runtime ready on host, trace_id=%s", trace_id)
+
+
+def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
+    """确保 server_names 首个域名对应证书存在，不存在则尝试签发。"""
+    primary = server_names.split()[0]
+    cert_base = f'/etc/letsencrypt/live/{primary}'
+    crt = f'{cert_base}/fullchain.pem'
+    key = f'{cert_base}/privkey.pem'
+
+    cert_exists = _ssh_exec_ignore_error(
+        ssh=ssh,
+        command=f'test -f {crt} -a -f {key} && echo "yes" || echo "no"',
+    )
+    if 'yes' in cert_exists:
+        return primary
+
+    domain_flags = ' '.join(f'-d {d}' for d in server_names.split() if d)
+    if not domain_flags:
+        raise RemoteDeployError('证书签发失败：server_name 为空')
+
+    # 使用 webroot 模式，依赖 80 端口可达与 DNS 正确。
+    _ssh_exec(
+        ssh=ssh,
+        command=(
+            f'sudo certbot certonly --webroot -w /var/www/certbot '
+            f'--register-unsafely-without-email --agree-tos -n {domain_flags}'
+        ),
+        timeout=180,
+    )
+
+    cert_exists_after = _ssh_exec_ignore_error(
+        ssh=ssh,
+        command=f'test -f {crt} -a -f {key} && echo "yes" || echo "no"',
+    )
+    if 'yes' not in cert_exists_after:
+        raise RemoteDeployError(
+            f'证书签发后仍未找到证书文件: {crt} / {key}，请检查 DNS 与 80 端口可达性'
+        )
+    logger.info("Certificate ensured for domains=%s trace_id=%s", server_names, trace_id)
+    return primary
+
+
 def _render_host_nginx_vhost(server_names: str, upstream_port: str, primary_for_cert: str) -> str:
     """宿主机 nginx：HTTP 跳转 HTTPS + ACME；HTTPS 反代到本机 Docker 映射端口"""
     cert_base = f'/etc/letsencrypt/live/{primary_for_cert}'
@@ -832,7 +920,8 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
         host_conf_basename = 'default.conf'
         inner_segment = 'default'
 
-    primary_for_cert = server_names.split()[0]
+    _ensure_certbot_ready(ssh=ssh, trace_id=trace_id)
+    primary_for_cert = _ensure_domain_certificate(ssh=ssh, server_names=server_names, trace_id=trace_id)
 
     primary_container = container_names[0]
     inner_conf_dir = f'{base_dir}/nginx/container/{inner_segment}'
