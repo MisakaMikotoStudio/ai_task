@@ -784,12 +784,20 @@ def _ensure_certbot_ready(ssh, trace_id: str) -> None:
 
 
 def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
-    """解析 certbot 实际 lineage 名称（可能是 domain 或 domain-0001）。"""
+    """解析 certbot 实际 lineage 名称（可能是 domain 或 domain-0001）。
+
+    /etc/letsencrypt/live 通常为 root:750，必须用 sudo 探测，否则永远判为不存在。
+    """
+    pd = (primary_domain or '').strip()
+    if not pd or not re.match(r'^[a-zA-Z0-9.-]+$', pd):
+        return ''
+
     exact = _ssh_exec_ignore_error(
         ssh=ssh,
         command=(
-            f'test -f /etc/letsencrypt/live/{primary_domain}/fullchain.pem '
-            f'-a -f /etc/letsencrypt/live/{primary_domain}/privkey.pem && echo "{primary_domain}" || true'
+            f"sudo test -f '/etc/letsencrypt/live/{pd}/fullchain.pem' "
+            f"&& sudo test -f '/etc/letsencrypt/live/{pd}/privkey.pem' "
+            f"&& echo '{pd}' || true"
         ),
     ).strip()
     if exact:
@@ -798,12 +806,13 @@ def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
     wildcard = _ssh_exec_ignore_error(
         ssh=ssh,
         command=(
-            f'for d in /etc/letsencrypt/live/{primary_domain}*; do '
-            f'[ -d "$d" ] || continue; '
-            f'[ -f "$d/fullchain.pem" ] || continue; '
-            f'[ -f "$d/privkey.pem" ] || continue; '
-            f'basename "$d"; break; '
-            f'done'
+            "sudo bash -c '"
+            f"for d in /etc/letsencrypt/live/{pd}*; do "
+            '[ -d "$d" ] || continue; '
+            '[ -f "$d/fullchain.pem" ] || continue; '
+            '[ -f "$d/privkey.pem" ] || continue; '
+            'basename "$d"; break; '
+            "done'"
         ),
     ).strip()
     return wildcard
@@ -819,13 +828,6 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
     cert_base = f'/etc/letsencrypt/live/{primary}'
     crt = f'{cert_base}/fullchain.pem'
     key = f'{cert_base}/privkey.pem'
-
-    cert_exists = _ssh_exec_ignore_error(
-        ssh=ssh,
-        command=f'test -f {crt} -a -f {key} && echo "yes" || echo "no"',
-    )
-    if 'yes' in cert_exists:
-        return primary
 
     domain_flags = ' '.join(f'-d {d}' for d in server_names.split() if d)
     if not domain_flags:
@@ -845,7 +847,8 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
     cert_lineage_after = _resolve_cert_lineage_name(ssh=ssh, primary_domain=primary)
     if not cert_lineage_after:
         raise RemoteDeployError(
-            f'证书签发后仍未找到证书文件: {crt} / {key}，请检查 DNS 与 80 端口可达性'
+            f'证书签发后仍未找到证书 lineage（期望路径之一含 {crt}）。'
+            f'请检查 DNS、80 端口，并在服务器执行: sudo certbot certificates; sudo ls -la /etc/letsencrypt/live/'
         )
     logger.info("Certificate ensured for domains=%s trace_id=%s", server_names, trace_id)
     return cert_lineage_after
