@@ -52,10 +52,6 @@ def get_image_tag() -> str:
 
 IMAGE_REPO = "ai_task.yuban.site.cloud"
 
-# docker 容器命名前缀（固定写死）,容器命名格式：{prefix}{image_tag}_{client_id}_{client_version}
-CLIENT_CONTAINER_PREFIX = f"ai_task_client_"
-
-
 def ensure_image(image_name: str, image_tag: str):
     """
     确保本地 Docker 镜像存在，若不存在则根据 Dockerfile 构建。
@@ -217,7 +213,7 @@ def fetch_client_configs(apiserver: str, secret: str, client_ids: list[int] | No
     return payload
 
 
-def get_existing_client_containers() -> dict[int, str]:
+def get_existing_client_containers(prefix: str) -> dict[int, str]:
     """
     扫描当前主机上已存在的客户端容器，仅解析形如 `{prefix}{client_id}_{client_version}` 的容器。
 
@@ -232,7 +228,7 @@ def get_existing_client_containers() -> dict[int, str]:
     result: dict[int, str] = {}
 
     for name in names:
-        if not name.startswith(CLIENT_CONTAINER_PREFIX):
+        if not name.startswith(prefix):
             continue
         splits = name.split('_')
         if len(splits) < 3:
@@ -264,10 +260,14 @@ def main():
                         help='宿主机工作目录根路径')
     parser.add_argument('--client_id', '-i', type=int, required=False, default=None,
                         help='指定启动的客户端ID，不指定则启动所有云客户端（仅admin账号才有这个权限）')
+    parser.add_argument('--env', type=str, required=False, default='default',
+                        help='环境标识（如 test/prod），用于容器名前缀区分环境')
     parser.add_argument('--log-level', '-l', type=str, required=False, default='INFO',
                         help='日志等级，例如 DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
     _configure_log_level(args.log_level)
+
+    container_prefix = f"{args.env}_ai_task_client_"
 
     os.makedirs(args.workspace, exist_ok=True)
     os.chmod(args.workspace, 0o777)
@@ -281,7 +281,7 @@ def main():
             # 初始化镜像：根据 Dockerfile 生成本地镜像，若已存在则跳过
             ensure_image(image_name, image_tag)
 
-            existing_client_containers = get_existing_client_containers()
+            existing_client_containers = get_existing_client_containers(container_prefix)
             logger.debug(f"当前环境已存在的客户端容器: {existing_client_containers}")
             query_client_ids = list(existing_client_containers.keys())
             if args.client_id:
@@ -299,7 +299,7 @@ def main():
             for config in payload.get('configs', []):
                 version = config.get('version')
                 client_id = config.get('client_id')
-                container_name = f"{CLIENT_CONTAINER_PREFIX}{image_tag}_{client_id}_{version}"
+                container_name = f"{container_prefix}{image_tag}_{client_id}_{version}"
                 if client_id in existing_client_containers:
                     if existing_client_containers[client_id].strip() == container_name.strip():
                         continue
