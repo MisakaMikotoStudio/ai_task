@@ -126,6 +126,10 @@ def save_client_repos(
             raise ClientRepoSaveError("提交的仓库列表中存在重复的仓库（由 URL 解析）：" + key)
         input_repos[key] = repo
 
+    for key, er in exist_repos.items():
+        if key not in input_repos:
+            delete_ids.append(er.id)
+
     updates: List[dict] = []
     inserts: List[dict] = []
 
