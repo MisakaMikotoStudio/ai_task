@@ -8,7 +8,7 @@ import logging
 from typing import List
 
 from .connection import get_db_session
-from .models import DeployRecord
+from .models import Client, DeployRecord
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +31,36 @@ def create_deploy_record(user_id: int, client_id: int, env: str, description: st
 
 def get_deploy_records_by_client(user_id: int, client_id: int, status: str = None, page: int = 1, page_size: int = 20) -> dict:
     """获取指定客户端的发布记录列表（按创建时间倒序，支持分页和状态筛选）"""
+    return _query_deploy_records(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
+
+
+def get_deploy_records_by_user(user_id: int, client_id: int = None, status: str = None, page: int = 1, page_size: int = 20) -> dict:
+    """获取指定用户的发布记录列表（可选按 client_id/status 过滤，附带 client_name）"""
+    return _query_deploy_records(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
+
+
+def _query_deploy_records(user_id: int, client_id: int = None, status: str = None, page: int = 1, page_size: int = 20) -> dict:
+    """发布记录通用查询：强制按 user_id 过滤，LEFT JOIN ai_task_clients 带出应用名称。"""
     with get_db_session() as session:
-        query = session.query(DeployRecord).filter(
+        query = session.query(DeployRecord, Client.name).outerjoin(
+            Client, Client.id == DeployRecord.client_id,
+        ).filter(
             DeployRecord.user_id == user_id,
-            DeployRecord.client_id == client_id,
             DeployRecord.deleted_at.is_(None),
         )
+        if client_id is not None:
+            query = query.filter(DeployRecord.client_id == client_id)
         if status:
             query = query.filter(DeployRecord.status == status)
         total = query.count()
         offset = (page - 1) * page_size
-        records = query.order_by(DeployRecord.created_at.desc()).offset(offset).limit(page_size).all()
-        return {'records': [r.to_dict() for r in records], 'total': total, 'page': page, 'page_size': page_size}
+        rows = query.order_by(DeployRecord.created_at.desc()).offset(offset).limit(page_size).all()
+        records = []
+        for record, client_name in rows:
+            record_dict = record.to_dict()
+            record_dict['client_name'] = client_name or ''
+            records.append(record_dict)
+        return {'records': records, 'total': total, 'page': page, 'page_size': page_size}
 
 
 def get_pending_prod_deploy_records() -> List[DeployRecord]:
