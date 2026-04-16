@@ -510,9 +510,11 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     tmp_repo_dir = f'{tmp_dir}/{repo_name}'
     full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
 
-    # 创建临时目录，拷贝仓库代码。
-    # 先尝试直接 checkout（命中本地对象时无需网络）；失败再显式刷新 origin 并抓取指定 commit。
+    # 创建临时目录并清理旧副本。
+    # 历史部署可能遗留 root 拥有文件，先用 sudo 清理并修复权限，避免 cp 权限错误。
     _ssh_exec(ssh=ssh, command=f'mkdir -p {tmp_dir}')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo rm -rf {tmp_repo_dir} || rm -rf {tmp_repo_dir}')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo chown -R {username}:{username} {tmp_dir} || true')
     _ssh_exec(ssh=ssh, command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
     checkout_cmd = (
         f'cd {tmp_repo_dir} && '
