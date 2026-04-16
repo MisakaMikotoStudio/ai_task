@@ -337,11 +337,7 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_dir}')
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_tmp_dir}')
 
-    _ssh_exec_ignore_error(ssh=ssh, command=(
-        'git config --global http.postBuffer 524288000 && '
-        'git config --global http.lowSpeedLimit 1000 && '
-        'git config --global http.lowSpeedTime 60'
-    ))
+    _ssh_exec_ignore_error(ssh=ssh, command='git config --global http.postBuffer 524288000')
 
     for repo in repos:
         repo_id_str = str(repo.id)
@@ -369,11 +365,9 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
                 repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
             )
         else:
-            logger.info("Updating repo: %s, trace_id=%s", repo_name, trace_id)
-            _ssh_exec(
-                ssh=ssh,
-                command=f'cd {target_path} && git remote set-url origin {auth_url} && git fetch origin',
-                timeout=_GIT_CLONE_TIMEOUT,
+            _fetch_repo_with_retry(
+                ssh=ssh, target_path=target_path, auth_url=auth_url,
+                repo_name=repo_name, trace_id=trace_id,
             )
 
 
@@ -400,6 +394,29 @@ def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_
             _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
 
     raise RemoteDeployError(f"仓库 {repo_name} 克隆失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
+
+
+def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str, trace_id: str):
+    """更新已有仓库（刷新 token + fetch），带重试"""
+    fetch_cmd = f'cd {target_path} && git remote set-url origin {auth_url} && git fetch origin'
+
+    last_err = None
+    for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
+        logger.info(
+            "Fetching repo (attempt %d/%d): %s, trace_id=%s",
+            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, trace_id,
+        )
+        try:
+            _ssh_exec(ssh=ssh, command=fetch_cmd, timeout=_GIT_CLONE_TIMEOUT)
+            return
+        except RemoteDeployError as e:
+            last_err = e
+            logger.warning(
+                "Fetch attempt %d failed: %s, repo=%s, trace_id=%s",
+                attempt, e.message[:200], repo_name, trace_id,
+            )
+
+    raise RemoteDeployError(f"仓库 {repo_name} fetch 失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
 
 
 # ============================================================
