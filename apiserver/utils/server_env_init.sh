@@ -84,12 +84,13 @@ update_pkg_index() {
 }
 
 # ---- 安装依赖工具 ----
+# 说明：jq 用于安全地合并 /etc/docker/daemon.json，避免覆盖用户已有配置
 install_prerequisites() {
     log_info "安装基础依赖..."
     case "$PKG_MANAGER" in
-        apt) $SUDO apt-get install -y ca-certificates curl gnupg lsb-release ;;
-        yum) $SUDO yum install -y ca-certificates curl yum-utils ;;
-        dnf) $SUDO dnf install -y ca-certificates curl dnf-plugins-core ;;
+        apt) $SUDO apt-get install -y ca-certificates curl gnupg lsb-release jq ;;
+        yum) $SUDO yum install -y ca-certificates curl yum-utils jq ;;
+        dnf) $SUDO dnf install -y ca-certificates curl dnf-plugins-core jq ;;
     esac
     log_ok "基础依赖安装完成"
 }
@@ -132,6 +133,7 @@ check_and_install_docker() {
             log_warn "Docker 当前版本 $docker_ver 与目标版本 $DOCKER_VERSION 不一致，跳过重新安装"
         fi
         grant_docker_access
+        configure_docker_mirrors
         return 0
     fi
 
@@ -145,9 +147,75 @@ check_and_install_docker() {
     if command -v docker &>/dev/null; then
         log_ok "Docker 安装成功，版本: $(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)"
         grant_docker_access
+        configure_docker_mirrors
     else
         log_error "Docker 安装失败"
         return 1
+    fi
+}
+
+# ---- 配置 Docker 镜像加速（解决 registry-1.docker.io DNS 污染 / 网络不通问题）----
+# 背景：大陆服务器直连 Docker Hub 时常因 DNS 污染或出站封锁而失败，
+#       表现为 docker build 拉镜像时报 `dial tcp X.X.X.X:443: i/o timeout`。
+# 做法：往 /etc/docker/daemon.json 中追加 registry-mirrors（保留既有配置），
+#       仅当配置实际发生变化时才重启 docker。
+configure_docker_mirrors() {
+    log_info "===== 配置 Docker 镜像加速 ====="
+
+    # 期望的镜像源列表（顺序即优先级）
+    # - mirror.ccs.tencentyun.com：腾讯云内网镜像（本机是腾讯云时内网直连，最快）
+    # - docker.m.daocloud.io     ：DaoCloud 公网镜像
+    # - hub-mirror.c.163.com     ：网易 163 镜像
+    local mirrors_json='["https://mirror.ccs.tencentyun.com","https://docker.m.daocloud.io","https://hub-mirror.c.163.com"]'
+    local daemon_json="/etc/docker/daemon.json"
+    local tmp_file="/tmp/daemon.json.new.$$"
+
+    $SUDO mkdir -p /etc/docker
+
+    # 确保 jq 可用（上面 install_prerequisites 已装，这里兜底）
+    if ! command -v jq &>/dev/null; then
+        log_warn "未检测到 jq，跳过 daemon.json 合并（避免破坏既有配置）"
+        return 0
+    fi
+
+    # 读取现有配置（不存在或为空则用 {} 起步）
+    local current_json="{}"
+    if [[ -f "$daemon_json" ]] && [[ -s "$daemon_json" ]]; then
+        if $SUDO jq empty "$daemon_json" 2>/dev/null; then
+            current_json=$($SUDO cat "$daemon_json")
+        else
+            log_warn "$daemon_json 非合法 JSON，已备份为 ${daemon_json}.bak 后重写"
+            $SUDO cp "$daemon_json" "${daemon_json}.bak"
+            current_json="{}"
+        fi
+    fi
+
+    # 合并 registry-mirrors：用期望列表覆盖（保持幂等，避免重复追加）
+    local new_json
+    new_json=$(echo "$current_json" | jq --argjson m "$mirrors_json" '. + {"registry-mirrors": $m}')
+
+    # 与现有配置按规范化形式比对，未变化则不重启
+    local current_norm new_norm
+    current_norm=$(echo "$current_json" | jq -S .)
+    new_norm=$(echo "$new_json" | jq -S .)
+
+    if [[ "$current_norm" == "$new_norm" ]]; then
+        log_ok "Docker 镜像加速配置已是最新，无需重启"
+        return 0
+    fi
+
+    # 写入并重启 docker
+    echo "$new_json" | jq -S . > "$tmp_file"
+    $SUDO mv "$tmp_file" "$daemon_json"
+    $SUDO chmod 0644 "$daemon_json"
+    log_ok "已写入镜像加速配置到 $daemon_json"
+
+    if systemctl is-active --quiet docker 2>/dev/null; then
+        log_info "重启 docker 使镜像加速生效..."
+        $SUDO systemctl restart docker
+        log_ok "docker 已重启"
+    else
+        log_info "docker 尚未运行，将在启动时加载新配置"
     fi
 }
 
