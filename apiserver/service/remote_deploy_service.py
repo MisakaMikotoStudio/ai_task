@@ -15,6 +15,7 @@ import re
 import traceback
 import uuid
 import time
+from urllib.parse import urlparse
 from collections import defaultdict
 
 from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
@@ -108,6 +109,19 @@ def _ssh_write_file(ssh, remote_dir: str, remote_path: str, content: str) -> Non
             f.write(content)
     finally:
         sftp.close()
+
+
+def _ssh_write_root_owned_file(ssh, remote_path: str, content: str) -> None:
+    """写入需 root 权限的路径（先写 /tmp 再 sudo mv）"""
+    tmp = f'/tmp/_ai_task_deploy_{uuid.uuid4().hex}'
+    _ssh_write_file(ssh=ssh, remote_dir='/tmp', remote_path=tmp, content=content)
+    _ssh_exec(
+        ssh=ssh,
+        command=(
+            f'sudo mv {tmp} {remote_path} && '
+            f'sudo chmod 644 {remote_path} && sudo chown root:root {remote_path}'
+        ),
+    )
 
 
 # ============================================================
@@ -654,35 +668,62 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
 # Nginx 容器路由
 # ============================================================
 
-def _setup_nginx_container(ssh, username: str, client_id: int, container_names: list, key: str, prod_domains: list, trace_id: str):
-    """
-    创建 Nginx 容器用于域名路由。
+def _normalize_client_domain(domain: str) -> str:
+    """从配置值中提取纯 hostname（去掉协议、路径、端口）"""
+    d = (domain or '').strip()
+    if not d:
+        return ''
+    d = d.split()[0]
+    if '://' in d or d.lower().startswith('//'):
+        parsed = urlparse(d if '://' in d else f'https:{d}')
+        return (parsed.hostname or '').strip()
+    return d.split('/')[0].split(':')[0].strip()
 
-    通过 Docker 网络内的容器名称实现反向代理：
-    域名 key.{host}（或 {host}）→ Nginx 容器 → 应用容器:8080
-    """
-    if not prod_domains or not container_names:
-        return
 
-    base_dir = f'/home/{username}/app{client_id}'
-    network_name = f'network_{client_id}_{key}' if key else f'network_{client_id}'
-    nginx_name = f'nginx_{client_id}_{key}' if key else f'nginx_{client_id}'
+def _normalize_prod_domains(prod_domains: list) -> list:
+    out = []
+    for raw in prod_domains or []:
+        h = _normalize_client_domain(raw)
+        if h and h not in out:
+            out.append(h)
+    return out
 
-    # 构建 server_name
-    if key:
-        server_names = ' '.join(f'{key}.{d}' for d in prod_domains)
-    else:
-        server_names = ' '.join(prod_domains)
 
-    # 生成 Nginx 配置（代理到第一个应用容器）
-    primary_container = container_names[0]
-    nginx_conf = (
+def _sanitize_key_for_nginx_filename(key: str) -> str:
+    """用于文件名与容器侧目录名，避免路径注入"""
+    k = (key or '').strip()
+    if not k:
+        return ''
+    k2 = re.sub(r'[^a-zA-Z0-9_.-]+', '_', k).strip('_.')
+    if not k2:
+        raise RemoteDeployError(f'发布 key 无法映射为安全文件名: {key!r}')
+    return k2[:80]
+
+
+def _ensure_host_nginx_includes_app_vhosts(ssh, username: str, client_id: int, trace_id: str) -> None:
+    """在宿主机 /etc/nginx/conf.d 下增加 include，加载 /home/{user}/app{id}/nginx/*.conf"""
+    base_nginx = f'/home/{username}/app{client_id}/nginx'
+    inc_path = f'/etc/nginx/conf.d/ai_task_app_{client_id}.conf'
+    content = (
+        f'# Managed by ai-task remote deploy (client_id={client_id}). Do not hand-edit.\n'
+        f'include {base_nginx}/*.conf;\n'
+    )
+    _ssh_write_root_owned_file(ssh=ssh, remote_path=inc_path, content=content)
+    _ssh_exec(ssh=ssh, command='sudo mkdir -p /var/www/certbot')
+    logger.info("Ensured host nginx include: path=%s trace_id=%s", inc_path, trace_id)
+
+
+def _render_inner_nginx_conf(primary_container: str) -> str:
+    """Docker 内 nginx：仅 HTTP，按容器名转发到应用"""
+    return (
         'server {\n'
         '    listen 80;\n'
-        f'    server_name {server_names};\n'
+        '    listen [::]:80;\n'
+        '    server_name _;\n'
         '\n'
         '    location / {\n'
         f'        proxy_pass http://{primary_container}:8080;\n'
+        '        proxy_http_version 1.1;\n'
         '        proxy_set_header Host $host;\n'
         '        proxy_set_header X-Real-IP $remote_addr;\n'
         '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
@@ -693,22 +734,137 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
         '}\n'
     )
 
-    # 写入 Nginx 配置文件
-    nginx_dir = f'{base_dir}/nginx_{key}' if key else f'{base_dir}/nginx'
-    nginx_conf_path = f'{nginx_dir}/default.conf'
-    _ssh_write_file(ssh=ssh, remote_dir=nginx_dir, remote_path=nginx_conf_path, content=nginx_conf)
 
-    # 停止并删除旧 Nginx 容器
+def _render_host_nginx_vhost(server_names: str, upstream_port: str, primary_for_cert: str) -> str:
+    """宿主机 nginx：HTTP 跳转 HTTPS + ACME；HTTPS 反代到本机 Docker 映射端口"""
+    cert_base = f'/etc/letsencrypt/live/{primary_for_cert}'
+    return (
+        f'# Managed by ai-task remote deploy — do not hand-edit\n'
+        f'# TLS 证书路径假定 certbot 已为「{primary_for_cert}」签发（与 server_name 首项一致）\n'
+        f'server {{\n'
+        f'    listen 80;\n'
+        f'    listen [::]:80;\n'
+        f'    server_name {server_names};\n'
+        f'\n'
+        f'    location /.well-known/acme-challenge/ {{\n'
+        f'        root /var/www/certbot;\n'
+        f'    }}\n'
+        f'\n'
+        f'    location / {{\n'
+        f'        return 301 https://$host$request_uri;\n'
+        f'    }}\n'
+        f'}}\n'
+        f'\n'
+        f'server {{\n'
+        f'    listen 443 ssl;\n'
+        f'    listen [::]:443 ssl;\n'
+        f'    server_name {server_names};\n'
+        f'\n'
+        f'    ssl_certificate {cert_base}/fullchain.pem;\n'
+        f'    ssl_certificate_key {cert_base}/privkey.pem;\n'
+        f'    include /etc/letsencrypt/options-ssl-nginx.conf;\n'
+        f'    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;\n'
+        f'\n'
+        f'    client_max_body_size 50m;\n'
+        f'\n'
+        f'    gzip on;\n'
+        f'    gzip_min_length 256;\n'
+        f'    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;\n'
+        f'    gzip_vary on;\n'
+        f'    gzip_proxied any;\n'
+        f'    gzip_comp_level 6;\n'
+        f'\n'
+        f'    location / {{\n'
+        f'        proxy_pass http://127.0.0.1:{upstream_port};\n'
+        f'        proxy_http_version 1.1;\n'
+        f'\n'
+        f'        proxy_set_header Host $host;\n'
+        f'        proxy_set_header X-Real-IP $remote_addr;\n'
+        f'        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
+        f'        proxy_set_header X-Forwarded-Proto $scheme;\n'
+        f'\n'
+        f'        proxy_read_timeout 3600;\n'
+        f'        proxy_send_timeout 3600;\n'
+        f'    }}\n'
+        f'}}\n'
+    )
+
+
+def _reload_host_nginx(ssh, trace_id: str) -> None:
+    _ssh_exec(ssh=ssh, command='sudo nginx -t && sudo systemctl reload nginx')
+    logger.info("Host nginx reloaded, trace_id=%s", trace_id)
+
+
+def _setup_nginx_container(ssh, username: str, client_id: int, container_names: list, key: str, prod_domains: list, trace_id: str):
+    """
+    创建 Nginx 容器用于 Docker 网络内路由，并在宿主机写入 HTTPS vhost + reload。
+
+    目录约定（均在 /home/{user}/app{client_id}/ 下）：
+    - nginx/{key}.conf 或 nginx/default.conf — 宿主机 nginx 加载（仅 *.conf，不含子目录）
+    - nginx/container/{inner}/default.conf — 挂载进容器，反代到应用容器:8080
+
+    宿主机通过 /etc/nginx/conf.d/ai_task_app_{client_id}.conf 包含 nginx/*.conf。
+    """
+    if not prod_domains or not container_names:
+        return
+
+    norm_domains = _normalize_prod_domains(prod_domains)
+    if not norm_domains:
+        raise RemoteDeployError('生产环境域名配置无效（无法解析为 hostname）')
+
+    base_dir = f'/home/{username}/app{client_id}'
+
+    # 与 _execute_single_deploy 中 Docker 网络/容器命名一致（沿用原始 key 的真值判断与插值）
+    if key:
+        network_name = f'network_{client_id}_{key}'
+        nginx_name = f'nginx_{client_id}_{key}'
+        key_stripped = (key or '').strip()
+        if not key_stripped:
+            raise RemoteDeployError('发布 key 无效（仅空白字符）')
+        key_fs = _sanitize_key_for_nginx_filename(key_stripped)
+        server_names = ' '.join(f'{key_stripped}.{d}' for d in norm_domains)
+        host_conf_basename = f'{key_fs}.conf'
+        inner_segment = key_fs
+    else:
+        network_name = f'network_{client_id}'
+        nginx_name = f'nginx_{client_id}'
+        server_names = ' '.join(norm_domains)
+        host_conf_basename = 'default.conf'
+        inner_segment = 'default'
+
+    primary_for_cert = server_names.split()[0]
+
+    primary_container = container_names[0]
+    inner_conf_dir = f'{base_dir}/nginx/container/{inner_segment}'
+    inner_conf_path = f'{inner_conf_dir}/default.conf'
+    inner_conf = _render_inner_nginx_conf(primary_container=primary_container)
+    _ssh_write_file(ssh=ssh, remote_dir=inner_conf_dir, remote_path=inner_conf_path, content=inner_conf)
+
+    nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1').strip()
+
+    host_conf_path = f'{base_dir}/nginx/{host_conf_basename}'
+    host_conf = _render_host_nginx_vhost(
+        server_names=server_names,
+        upstream_port=nginx_port,
+        primary_for_cert=primary_for_cert,
+    )
+    _ssh_write_file(ssh=ssh, remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=host_conf)
+
+    _ensure_host_nginx_includes_app_vhosts(
+        ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
+    )
+
     _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {nginx_name} 2>/dev/null')
 
-    # 生成随机端口
-    nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
-
-    # 启动 Nginx 容器
     _ssh_exec(ssh=ssh, command=(
         f'sudo docker run -d --name {nginx_name} --network {network_name} '
         f'-p {nginx_port}:80 '
-        f'-v {nginx_conf_path}:/etc/nginx/conf.d/default.conf:ro '
+        f'-v {inner_conf_path}:/etc/nginx/conf.d/default.conf:ro '
         f'nginx:alpine'
     ))
-    logger.info("Nginx container started: name=%s, port=%s, server_name=%s, trace_id=%s", nginx_name, nginx_port, server_names, trace_id)
+    logger.info(
+        "Nginx container started: name=%s, port=%s, server_name=%s, host_vhost=%s trace_id=%s",
+        nginx_name, nginx_port, server_names, host_conf_path, trace_id,
+    )
+
+    _reload_host_nginx(ssh=ssh, trace_id=trace_id)
