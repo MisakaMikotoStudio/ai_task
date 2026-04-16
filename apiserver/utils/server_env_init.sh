@@ -38,6 +38,22 @@ setup_sudo() {
     fi
 }
 
+# ---- 非交互式 apt 包装器 ----
+# 背景：Ubuntu 22.04+ 默认带 `needrestart`，在每次 apt install 后弹出 whiptail
+#       询问是否重启服务。SSH 非交互会话里该弹窗拿不到 stdin，apt 会退出 1。
+# 方案：通过 env 在 apt 前置环境变量（sudo 默认会 reset env，所以用 `env` 透传）：
+#   - DEBIAN_FRONTEND=noninteractive   关闭 debconf 交互
+#   - NEEDRESTART_MODE=a               needrestart 自动重启受影响服务
+#   - NEEDRESTART_SUSPEND=1            needrestart 完全跳过检查（双保险）
+#   - DPkg::Lock::Timeout=120          等待其他 apt 进程（如 unattended-upgrades）释放锁
+apt_get() {
+    $SUDO env \
+        DEBIAN_FRONTEND=noninteractive \
+        NEEDRESTART_MODE=a \
+        NEEDRESTART_SUSPEND=1 \
+        apt-get -o DPkg::Lock::Timeout=120 "$@"
+}
+
 # ---- 识别发行版 ----
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
@@ -76,7 +92,7 @@ detect_distro() {
 update_pkg_index() {
     log_info "更新包管理器索引..."
     case "$PKG_MANAGER" in
-        apt) $SUDO apt-get update -y ;;
+        apt) apt_get update -y ;;
         yum) $SUDO yum makecache -y ;;
         dnf) $SUDO dnf makecache -y ;;
     esac
@@ -88,7 +104,7 @@ update_pkg_index() {
 install_prerequisites() {
     log_info "安装基础依赖..."
     case "$PKG_MANAGER" in
-        apt) $SUDO apt-get install -y ca-certificates curl gnupg lsb-release jq ;;
+        apt) apt_get install -y ca-certificates curl gnupg lsb-release jq ;;
         yum) $SUDO yum install -y ca-certificates curl yum-utils jq ;;
         dnf) $SUDO dnf install -y ca-certificates curl dnf-plugins-core jq ;;
     esac
@@ -107,7 +123,7 @@ check_and_install_git() {
 
     log_warn "Git 未安装，开始安装..."
     case "$PKG_MANAGER" in
-        apt) $SUDO apt-get install -y git ;;
+        apt) apt_get install -y git ;;
         yum) $SUDO yum install -y git ;;
         dnf) $SUDO dnf install -y git ;;
     esac
@@ -240,7 +256,7 @@ grant_docker_access() {
 
 install_docker_debian() {
     # 移除旧版本
-    $SUDO apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    apt_get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
 
     # 添加 Docker 官方 GPG key
     $SUDO install -m 0755 -d /etc/apt/keyrings
@@ -252,7 +268,7 @@ install_docker_debian() {
 https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
 
-    $SUDO apt-get update -y
+    apt_get update -y
 
     # 查找并安装指定版本
     local docker_pkg_version
@@ -262,7 +278,7 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | $SUDO tee /etc/apt/so
         return 1
     fi
 
-    $SUDO apt-get install -y \
+    apt_get install -y \
         "docker-ce=$docker_pkg_version" \
         "docker-ce-cli=$docker_pkg_version" \
         containerd.io \
@@ -330,7 +346,7 @@ check_and_install_nginx() {
 
     log_warn "Nginx 未安装，开始安装..."
     case "$PKG_MANAGER" in
-        apt) $SUDO apt-get install -y nginx ;;
+        apt) apt_get install -y nginx ;;
         yum) $SUDO yum install -y epel-release && $SUDO yum install -y nginx ;;
         dnf) $SUDO dnf install -y nginx ;;
     esac
@@ -360,7 +376,7 @@ check_and_install_certbot() {
     log_warn "Certbot 未安装，开始安装..."
     case "$PKG_MANAGER" in
         apt)
-            $SUDO apt-get install -y certbot python3-certbot-nginx
+            apt_get install -y certbot python3-certbot-nginx
             ;;
         yum)
             $SUDO yum install -y epel-release 2>/dev/null || true
