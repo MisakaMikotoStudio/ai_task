@@ -599,7 +599,14 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
     if 'not_exists' in img_check:
         logger.info("Building image: %s from %s, trace_id=%s", image_full, full_work_dir, trace_id)
-        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && sudo docker build -t {image_full} .', timeout=600)
+        # BuildKit 在默认 progress=auto 下会以步骤为单位缓冲输出，失败时容易只剩 header 一行日志，真实错误丢失。
+        # 强制 --progress=plain + 2>&1 合流，确保失败原因在 stdout tail 中完整可见；sudo -E 保留 BUILDKIT 相关环境变量。
+        build_cmd = (
+            f'cd {full_work_dir} && '
+            f'BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 DOCKER_CLI_HINTS=false '
+            f'sudo -E docker build --progress=plain -t {image_full} . 2>&1'
+        )
+        _ssh_exec(ssh=ssh, command=build_cmd, timeout=600)
     else:
         logger.info("Image %s already exists, skip build, trace_id=%s", image_full, trace_id)
 
