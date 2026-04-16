@@ -357,6 +357,25 @@ def _refresh_repo_token(repo_url: str, repo_name: str, trace_id: str) -> str:
         raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
 
 
+def _is_git_auth_error(message: str) -> bool:
+    lower_msg = (message or "").lower()
+    return (
+        "authentication failed" in lower_msg
+        or "invalid username or token" in lower_msg
+        or "password authentication is not supported" in lower_msg
+    )
+
+
+def _refresh_repo_token(repo_url: str, repo_name: str, trace_id: str) -> str:
+    from service.git_service import refresh_repo_token_by_url
+
+    logger.info("Refreshing repo token: repo=%s, trace_id=%s", repo_name, trace_id)
+    try:
+        return refresh_repo_token_by_url(repo_url=repo_url)
+    except Exception as e:
+        raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
+
+
 def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
     """
     检查远程服务器目录结构并下载缺失的仓库。
