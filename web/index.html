@@ -1105,19 +1105,12 @@
                     <span class="logo-text">AI Task</span>
                 </div>
                 <nav class="sidebar-nav">
-                    <a href="#" class="nav-item" data-view="okr">
-                        <span class="nav-icon">🎯</span>
-                        <span>OKR</span>
-                    </a>
-                    <a href="#" class="nav-item active" data-view="todos">
-                        <span class="nav-icon">✅</span>
-                        <span>待办</span>
-                    </a>
+                    <!-- OKR / 待办 入口已移至 profile 页面 -->
                     <a href="#" class="nav-item" data-view="chats">
                         <span class="nav-icon">💬</span>
                         <span>Chat</span>
                     </a>
-                    <a href="#" class="nav-item" data-view="tasks">
+                    <a href="#" class="nav-item active" data-view="tasks">
                         <span class="nav-icon">📋</span>
                         <span>任务</span>
                     </a>
@@ -1161,7 +1154,7 @@
             <!-- 主内容区 -->
             <main class="main-content">
                 <!-- 待办视图 -->
-                <div id="todos-view" class="view active">
+                <div id="todos-view" class="view">
                     <div class="view-header">
                         <h2>待办</h2>
                         <div class="view-header-right">
@@ -2016,6 +2009,41 @@
                             <div class="profile-action-body">
                                 <div class="profile-action-title">秘钥管理</div>
                                 <div class="profile-action-desc">查看和管理您的 API 秘钥</div>
+                            </div>
+                            <div class="profile-action-arrow">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="9 18 15 12 9 6"/>
+                                </svg>
+                            </div>
+                        </a>
+                        <a href="#/okr" class="profile-action-card" id="profile-okr-entry">
+                            <div class="profile-action-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <circle cx="12" cy="12" r="6"/>
+                                    <circle cx="12" cy="12" r="2"/>
+                                </svg>
+                            </div>
+                            <div class="profile-action-body">
+                                <div class="profile-action-title">OKR</div>
+                                <div class="profile-action-desc">查看和管理个人 OKR 目标</div>
+                            </div>
+                            <div class="profile-action-arrow">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="9 18 15 12 9 6"/>
+                                </svg>
+                            </div>
+                        </a>
+                        <a href="#/todos" class="profile-action-card" id="profile-todos-entry">
+                            <div class="profile-action-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M9 11l3 3L22 4"/>
+                                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                                </svg>
+                            </div>
+                            <div class="profile-action-body">
+                                <div class="profile-action-title">待办</div>
+                                <div class="profile-action-desc">查看和管理待办事项</div>
                             </div>
                             <div class="profile-action-arrow">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
