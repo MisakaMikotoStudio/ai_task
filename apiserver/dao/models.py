@@ -934,3 +934,67 @@ class ChatMessage(Base):
             'created_at': to_iso_utc(self.created_at),
             'updated_at': to_iso_utc(self.updated_at)
         }
+
+
+class Team(Base):
+    """团队表"""
+    __tablename__ = 'ai_task_teams'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(32), nullable=False, comment='团队名称')
+    creator_user_id = Column(Integer, nullable=False, comment='创建者对外 user_id（6位 uid）')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_teams_name', 'name'),
+        Index('idx_teams_creator', 'creator_user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'creator_user_id': self.creator_user_id,
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
+class TeamMember(Base):
+    """团队成员关系表"""
+    __tablename__ = 'ai_task_team_members'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    team_id = Column(BigInteger, nullable=False, comment='关联团队 id')
+    user_id = Column(Integer, nullable=False, comment='成员对外 user_id（6位 uid）')
+    role = Column(String(16), nullable=False, default='member', comment='角色：admin-管理员，member-普通成员')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    ROLE_ADMIN = 'admin'
+    ROLE_MEMBER = 'member'
+    VALID_ROLES = [ROLE_ADMIN, ROLE_MEMBER]
+
+    ROLE_TEXT = {
+        'admin': '管理员',
+        'member': '普通成员',
+    }
+
+    __table_args__ = (
+        Index('idx_team_members_team_user', 'team_id', 'user_id'),
+        Index('idx_team_members_user', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'team_id': self.team_id,
+            'user_id': self.user_id,
+            'role': self.role,
+            'role_text': self.ROLE_TEXT.get(self.role, self.role),
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
