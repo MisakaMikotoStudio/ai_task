@@ -115,7 +115,7 @@ def my_orders():
     except (ValueError, TypeError):
         return jsonify({'code': 400, 'message': '分页参数无效', 'data': None}), 400
 
-    orders, total = order_dao.list_orders(user_id=user.id, page=page, page_size=page_size)
+    orders, total = order_dao.list_orders(user_id=user.user_id, page=page, page_size=page_size)
 
     product_keys = list({o.product_key for o in orders})
     products_map = {}
@@ -130,7 +130,7 @@ def my_orders():
         od['product_title'] = products_map.get(order.product_key, order.product_key)
         order_list.append(od)
 
-    logger.info("用户订单查询: user_id=%s, page=%s, total=%s", user.id, page, total)
+    logger.info("用户订单查询: user_id=%s, page=%s, total=%s", user.user_id, page, total)
     return jsonify({'code': 200, 'message': 'ok', 'data': {
         'orders': order_list,
         'total': total,
@@ -144,7 +144,7 @@ def my_services():
     """查询当前登录用户正在生效的服务（已支付且未过期或永久）"""
     user = request.user_info
 
-    active_orders = order_dao.get_user_active_orders(user_id=user.id)
+    active_orders = order_dao.get_user_active_orders(user_id=user.user_id)
 
     seen_keys: dict = {}
     for order in active_orders:
@@ -164,7 +164,7 @@ def my_services():
             'is_permanent': order.expire_at is None,
         })
 
-    logger.info("用户服务查询: user_id=%s, active_count=%s", user.id, len(services))
+    logger.info("用户服务查询: user_id=%s, active_count=%s", user.user_id, len(services))
     return jsonify({'code': 200, 'message': 'ok', 'data': services})
 
 

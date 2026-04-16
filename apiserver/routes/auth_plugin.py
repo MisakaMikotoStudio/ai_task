@@ -316,7 +316,6 @@ def _ensure_trace_id() -> str:
     if not trace_id:
         import uuid
         trace_id = f"auto-{uuid.uuid4()}"
-        logger.warning("请求缺少 traceId，自动生成: %s", trace_id)
 
     request.trace_id = trace_id
     return trace_id

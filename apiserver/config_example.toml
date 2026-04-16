@@ -38,7 +38,7 @@ app_private_key = "your-app-private-key"
 # 支付宝公钥（不含头尾，无换行）
 alipay_public_key = "your-alipay-public-key"
 # 支付宝异步通知回调 URL（必须公网可访问）
-notify_url = "https://your-domain.com/api/commercial/alipay/notify"
+notify_url = "https://your-domain.com/api/app/commercial/alipay/notify"
 # 支付完成后同步跳转 URL
 return_url = "https://your-domain.com/pay/result"
 # 支付宝网关（生产环境）
