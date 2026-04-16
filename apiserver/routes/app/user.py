@@ -7,7 +7,7 @@
 from flask import Blueprint, request, jsonify
 
 from routes.auth_plugin import skip_auth
-from service.user_service import register_user, login_user
+from service.user_service import register_user, login_user, UserServiceError
 from dao.secret_dao import get_user_secrets, create_user_secret, delete_user_secret
 
 user_bp = Blueprint('app_user', __name__)
@@ -24,7 +24,10 @@ def register():
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    user = register_user(data.get('name', ''), data.get('password_hash', ''))
+    try:
+        user = register_user(data.get('name', ''), data.get('password_hash', ''))
+    except UserServiceError as e:
+        return jsonify({'code': e.code, 'message': e.message}), e.code
     return jsonify({'code': 201, 'message': '注册成功', 'data': user.to_dict()}), 201
 
 
@@ -37,7 +40,10 @@ def login():
     if not data:
         return jsonify({'code': 400, 'message': '请求数据为空'}), 400
 
-    result = login_user(data.get('name', ''), data.get('password_hash', ''))
+    try:
+        result = login_user(data.get('name', ''), data.get('password_hash', ''))
+    except UserServiceError as e:
+        return jsonify({'code': e.code, 'message': e.message}), e.code
     return jsonify({'code': 200, 'message': '登录成功', 'data': result.to_dict()})
 
 

@@ -14,6 +14,15 @@ from dao.user_dao import (
 from dao.secret_dao import get_user_id_by_secret
 from dao.session_dao import create_session, get_session_by_token
 
+
+class UserServiceError(Exception):
+    """用户服务业务逻辑错误（校验失败、认证失败等）"""
+    def __init__(self, message: str, code: int = 400):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
+
 class UserInfo:
     def __init__(self, user_id: int, name: str, token: str):
         self.user_id = user_id
@@ -41,19 +50,19 @@ def register_user(name: str, password_hash: str) -> UserInfo:
     password_hash = (password_hash or '').strip()
 
     if not name:
-        raise Exception('用户名不能为空')
+        raise UserServiceError('用户名不能为空')
 
     if not password_hash:
-        raise Exception('密码不能为空')
+        raise UserServiceError('密码不能为空')
 
     if len(name) > 32:
-        raise Exception('用户名长度不能超过32个字符')
+        raise UserServiceError('用户名长度不能超过32个字符')
 
     if name.lower() in RESERVED_USERNAMES:
-        raise Exception('该用户名为系统保留账号，不允许注册')
+        raise UserServiceError('该用户名为系统保留账号，不允许注册')
 
     if check_user_exists(name):
-        raise Exception('用户名已存在')
+        raise UserServiceError('用户名已存在', 409)
 
     internal_id, public_uid = create_user(name, password_hash)
     token = create_session(internal_id).token
@@ -68,12 +77,12 @@ def login_user(name: str, password_hash: str) -> UserInfo:
     password_hash = (password_hash or '').strip()
 
     if not name or not password_hash:
-        raise Exception('用户名和密码不能为空')
+        raise UserServiceError('用户名和密码不能为空')
 
     user = get_user_by_name(name)
 
     if not user or user.password_hash != password_hash:
-        raise Exception('用户名或密码错误')
+        raise UserServiceError('用户名或密码错误', 401)
 
     update_last_access(user.id)
     token = create_session(user.id).token
@@ -87,12 +96,12 @@ def get_user_info(token: str) -> UserInfo:
     """
     user_session = get_session_by_token(token)
     if not user_session:
-        raise Exception('用户不存在或Token无效')
+        raise UserServiceError('用户不存在或Token无效', 401)
 
     user = get_user_by_id(user_session.user_id)
 
     if not user:
-        raise Exception('用户不存在或Token无效')
+        raise UserServiceError('用户不存在或Token无效', 401)
 
     return UserInfo(user.user_id, user.name, token)
 
