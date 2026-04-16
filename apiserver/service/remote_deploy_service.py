@@ -447,6 +447,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     commit_short = commit_id[:8]
     auth = repo_auth[repo_id_str]
     repo_name = auth['repo_name']
+    auth_url = commit_info['url'].replace('https://github.com', f"https://x-access-token:{auth['token']}@github.com")
 
     base_dir = f'/home/{username}/app{client_id}'
     repo_dir = f'{base_dir}/repo'
@@ -454,10 +455,16 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     tmp_repo_dir = f'{tmp_dir}/{repo_name}'
     full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
 
-    # 创建临时目录，拷贝仓库代码，fetch 指定 commit 并切换（兼容浅克隆）
+    # 创建临时目录，拷贝仓库代码。
+    # 先尝试直接 checkout（命中本地对象时无需网络）；失败再显式刷新 origin 并抓取指定 commit。
     _ssh_exec(ssh=ssh, command=f'mkdir -p {tmp_dir}')
     _ssh_exec(ssh=ssh, command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
-    _ssh_exec(ssh=ssh, command=f'cd {tmp_repo_dir} && git fetch --depth 1 origin {commit_id} && git checkout {commit_id}', timeout=_GIT_CLONE_TIMEOUT)
+    checkout_cmd = (
+        f'cd {tmp_repo_dir} && '
+        f'git checkout {commit_id} || '
+        f'(git remote set-url origin {auth_url} && git fetch --depth 1 origin {commit_id} && git checkout {commit_id})'
+    )
+    _ssh_exec(ssh=ssh, command=checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
 
     # Docker 镜像：检查 Dockerfile 是否存在
     image_name = f'app{client_id}_{deploy_uuid}'
