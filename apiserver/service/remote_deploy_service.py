@@ -11,6 +11,7 @@
 
 import logging
 import os
+import re
 import traceback
 import uuid
 from collections import defaultdict
@@ -47,6 +48,11 @@ def _create_ssh_client(ip: str, username: str, password: str):
     return client
 
 
+def _sanitize_command(command: str) -> str:
+    """移除命令中的 token/密码等敏感信息，用于日志输出"""
+    return re.sub(r'x-access-token:[^@]+@', 'x-access-token:***@', command)
+
+
 def _ssh_exec(ssh, command: str) -> str:
     """执行 SSH 命令并返回 stdout，非零退出码抛出异常"""
     stdin, stdout, stderr = ssh.exec_command(command)
@@ -54,7 +60,8 @@ def _ssh_exec(ssh, command: str) -> str:
     out = stdout.read().decode('utf-8', errors='replace').strip()
     if exit_status != 0:
         err = stderr.read().decode('utf-8', errors='replace').strip()
-        raise RemoteDeployError(f"命令失败(exit={exit_status}): {command[:120]}  stderr: {err[:500]}")
+        safe_cmd = _sanitize_command(command=command)
+        raise RemoteDeployError(f"命令失败(exit={exit_status}): {safe_cmd[:200]}  stderr: {err[-500:]}")
     return out
 
 
