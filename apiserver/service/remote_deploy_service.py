@@ -64,6 +64,10 @@ def _ssh_exec(ssh, command: str, timeout: int | None = None) -> str:
         ssh: paramiko SSHClient
         command: 要执行的命令
         timeout: 命令超时秒数，None 表示不限制
+
+    失败时日志与错误消息同时保留 stdout/stderr 的尾部 4000 字符。
+    docker build（2>&1 合流到 stdout）场景下，npm/pip 等工具在失败时
+    会连带打印长篇 usage/help 文本，若尾部过短会把真正的错误行挤出窗口。
     """
     safe_cmd = _sanitize_command(command=command)
     start = time.time()
@@ -81,9 +85,9 @@ def _ssh_exec(ssh, command: str, timeout: int | None = None) -> str:
         err = stderr.read().decode('utf-8', errors='replace').strip()
         logger.error(
             "SSH exec failed: exit=%s elapsed_ms=%s cmd=%s stdout_tail=%s stderr_tail=%s",
-            exit_status, elapsed_ms, safe_cmd[:600], out[-1000:], err[-2000:],
+            exit_status, elapsed_ms, safe_cmd[:600], out[-4000:], err[-4000:],
         )
-        raise RemoteDeployError(f"命令失败(exit={exit_status}, elapsed_ms={elapsed_ms}): {safe_cmd[:400]}  stdout: {out[-1000:]}  stderr: {err[-2000:]}")
+        raise RemoteDeployError(f"命令失败(exit={exit_status}, elapsed_ms={elapsed_ms}): {safe_cmd[:400]}  stdout: {out[-4000:]}  stderr: {err[-4000:]}")
     logger.info("SSH exec done: exit=0 elapsed_ms=%s cmd=%s stdout_tail=%s", elapsed_ms, safe_cmd[:600], out[-500:])
     return out
 
