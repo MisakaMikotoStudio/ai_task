@@ -100,15 +100,25 @@ def get_latest_deploy_records_by_msg_ids(user_id: int, client_id: int, msg_ids: 
     return result
 
 
-def get_pending_prod_deploy_records() -> List[DeployRecord]:
-    """获取所有生产环境待发布和发布中的记录（跨用户，供调度器使用）"""
+def get_pending_deploy_records(client_id: int) -> List[DeployRecord]:
+    """获取指定应用待发布和发布中的记录（跨用户，供调度器使用）"""
     with get_db_session() as session:
         records = session.query(DeployRecord).filter(
-            DeployRecord.env == 'prod',
+            DeployRecord.client_id == client_id,
             DeployRecord.status.in_([DeployRecord.STATUS_PENDING, DeployRecord.STATUS_PUBLISHING]),
             DeployRecord.deleted_at.is_(None),
-        ).order_by(DeployRecord.client_id.asc(), DeployRecord.created_at.desc()).all()
+        ).order_by(DeployRecord.created_at.desc()).all()
         return records
+
+
+def get_pending_deploy_client_ids() -> List[int]:
+    """获取存在待发布/发布中记录的应用 ID 列表"""
+    with get_db_session() as session:
+        rows = session.query(DeployRecord.client_id).filter(
+            DeployRecord.status.in_([DeployRecord.STATUS_PENDING, DeployRecord.STATUS_PUBLISHING]),
+            DeployRecord.deleted_at.is_(None),
+        ).distinct().all()
+        return [row[0] for row in rows]
 
 
 def update_deploy_record_status(record_id: int, status: str, detail: dict = None) -> bool:
