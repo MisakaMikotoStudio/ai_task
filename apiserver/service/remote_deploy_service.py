@@ -547,10 +547,11 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
         raise RemoteDeployError(f"工作目录 {work_dir or '/'} 下未找到 Dockerfile")
 
     # 镜像打包（已存在则跳过）
-    img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
+    # docker 命令统一用 sudo：ubuntu 用户首次部署尚未加入 docker 组时兜底，避免 /var/run/docker.sock 无权限
+    img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
     if 'not_exists' in img_check:
         logger.info("Building image: %s from %s, trace_id=%s", image_full, full_work_dir, trace_id)
-        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && docker build -t {image_full} .', timeout=600)
+        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && sudo docker build -t {image_full} .', timeout=600)
     else:
         logger.info("Image %s already exists, skip build, trace_id=%s", image_full, trace_id)
 
@@ -568,18 +569,18 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
 
     # 创建 Docker 网络
     network_name = f'network_{client_id}_{key}' if key else f'network_{client_id}'
-    _ssh_exec_ignore_error(ssh=ssh, command=f'docker network create {network_name} 2>/dev/null')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker network create {network_name} 2>/dev/null')
 
     # 停止并删除旧容器
     container_name = f'app_{client_id}_{deploy_uuid}'
-    _ssh_exec_ignore_error(ssh=ssh, command=f'docker rm -f {container_name} 2>/dev/null')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {container_name} 2>/dev/null')
 
     # 生成随机端口
     port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
 
     # 启动容器
     mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
-    run_cmd = f'docker run -d --name {container_name} --network {network_name} -p {port}:8080 {mount_opt} {image_full}'
+    run_cmd = f'sudo docker run -d --name {container_name} --network {network_name} -p {port}:8080 {mount_opt} {image_full}'
     if startup_command:
         escaped_cmd = startup_command.replace("'", "'\\''")
         run_cmd += f" sh -c '{escaped_cmd}'"
@@ -639,14 +640,14 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
     _ssh_write_file(ssh=ssh, remote_dir=nginx_dir, remote_path=nginx_conf_path, content=nginx_conf)
 
     # 停止并删除旧 Nginx 容器
-    _ssh_exec_ignore_error(ssh=ssh, command=f'docker rm -f {nginx_name} 2>/dev/null')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {nginx_name} 2>/dev/null')
 
     # 生成随机端口
     nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
 
     # 启动 Nginx 容器
     _ssh_exec(ssh=ssh, command=(
-        f'docker run -d --name {nginx_name} --network {network_name} '
+        f'sudo docker run -d --name {nginx_name} --network {network_name} '
         f'-p {nginx_port}:80 '
         f'-v {nginx_conf_path}:/etc/nginx/conf.d/default.conf:ro '
         f'nginx:alpine'

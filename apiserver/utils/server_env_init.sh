@@ -131,6 +131,7 @@ check_and_install_docker() {
         else
             log_warn "Docker 当前版本 $docker_ver 与目标版本 $DOCKER_VERSION 不一致，跳过重新安装"
         fi
+        grant_docker_access
         return 0
     fi
 
@@ -143,9 +144,29 @@ check_and_install_docker() {
 
     if command -v docker &>/dev/null; then
         log_ok "Docker 安装成功，版本: $(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)"
+        grant_docker_access
     else
         log_error "Docker 安装失败"
         return 1
+    fi
+}
+
+# ---- 将当前用户加入 docker 组 ----
+# 避免后续 docker 命令访问 /var/run/docker.sock 时 permission denied
+# 注意：组成员变更在当前登录会话不生效，需重新 SSH 登录后才能无 sudo 使用
+grant_docker_access() {
+    local current_user="${USER:-$(id -un)}"
+    if [[ "$current_user" == "root" ]]; then
+        return 0
+    fi
+    if ! getent group docker &>/dev/null; then
+        $SUDO groupadd docker || true
+    fi
+    if id -nG "$current_user" | grep -qw docker; then
+        log_ok "用户 $current_user 已在 docker 组"
+    else
+        $SUDO usermod -aG docker "$current_user"
+        log_ok "已将用户 $current_user 加入 docker 组（下次登录会话生效）"
     fi
 }
 
