@@ -823,6 +823,26 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
     return primary
 
 
+def _render_acme_http_only_vhost(server_names: str) -> str:
+    """仅用于 certbot HTTP-01 的临时 vhost。"""
+    return (
+        f'# Managed by ai-task remote deploy (acme bootstrap)\n'
+        f'server {{\n'
+        f'    listen 80;\n'
+        f'    listen [::]:80;\n'
+        f'    server_name {server_names};\n'
+        f'\n'
+        f'    location /.well-known/acme-challenge/ {{\n'
+        f'        root /var/www/certbot;\n'
+        f'    }}\n'
+        f'\n'
+        f'    location / {{\n'
+        f'        return 200 "acme bootstrap";\n'
+        f'    }}\n'
+        f'}}\n'
+    )
+
+
 def _render_host_nginx_vhost(server_names: str, upstream_port: str, primary_for_cert: str) -> str:
     """宿主机 nginx：HTTP 跳转 HTTPS + ACME；HTTPS 反代到本机 Docker 映射端口"""
     cert_base = f'/etc/letsencrypt/live/{primary_for_cert}'
@@ -921,6 +941,17 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
         inner_segment = 'default'
 
     _ensure_certbot_ready(ssh=ssh, trace_id=trace_id)
+
+    host_conf_path = f'{base_dir}/nginx/{host_conf_basename}'
+
+    # 在证书签发前，先放置 HTTP challenge vhost 并 reload，避免 webroot 校验 404。
+    acme_conf = _render_acme_http_only_vhost(server_names=server_names)
+    _ssh_write_file(ssh=ssh, remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=acme_conf)
+    _ensure_host_nginx_includes_app_vhosts(
+        ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
+    )
+    _reload_host_nginx(ssh=ssh, trace_id=trace_id)
+
     primary_for_cert = _ensure_domain_certificate(ssh=ssh, server_names=server_names, trace_id=trace_id)
 
     primary_container = container_names[0]
@@ -931,17 +962,12 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
 
     nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1').strip()
 
-    host_conf_path = f'{base_dir}/nginx/{host_conf_basename}'
     host_conf = _render_host_nginx_vhost(
         server_names=server_names,
         upstream_port=nginx_port,
         primary_for_cert=primary_for_cert,
     )
     _ssh_write_file(ssh=ssh, remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=host_conf)
-
-    _ensure_host_nginx_includes_app_vhosts(
-        ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
-    )
 
     _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {nginx_name} 2>/dev/null')
 
