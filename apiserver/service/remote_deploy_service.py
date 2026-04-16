@@ -45,6 +45,9 @@ def _create_ssh_client(ip: str, username: str, password: str):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(hostname=ip, username=username, password=password, timeout=SSH_CONNECT_TIMEOUT, allow_agent=False, look_for_keys=False)
+    transport = client.get_transport()
+    if transport:
+        transport.set_keepalive(30)
     return client
 
 
@@ -53,15 +56,27 @@ def _sanitize_command(command: str) -> str:
     return re.sub(r'x-access-token:[^@]+@', 'x-access-token:***@', command)
 
 
-def _ssh_exec(ssh, command: str) -> str:
-    """执行 SSH 命令并返回 stdout，非零退出码抛出异常"""
+def _ssh_exec(ssh, command: str, timeout: int | None = None) -> str:
+    """执行 SSH 命令并返回 stdout，非零退出码或超时抛出异常
+
+    Args:
+        ssh: paramiko SSHClient
+        command: 要执行的命令
+        timeout: 命令超时秒数，None 表示不限制
+    """
     stdin, stdout, stderr = ssh.exec_command(command)
-    exit_status = stdout.channel.recv_exit_status()
+    if timeout is not None:
+        stdout.channel.settimeout(timeout)
+    try:
+        exit_status = stdout.channel.recv_exit_status()
+    except Exception:
+        safe_cmd = _sanitize_command(command=command)
+        raise RemoteDeployError(f"命令超时({timeout}s): {safe_cmd[:200]}")
     out = stdout.read().decode('utf-8', errors='replace').strip()
     if exit_status != 0:
         err = stderr.read().decode('utf-8', errors='replace').strip()
         safe_cmd = _sanitize_command(command=command)
-        raise RemoteDeployError(f"命令失败(exit={exit_status}): {safe_cmd[:200]}  stderr: {err[-500:]}")
+        raise RemoteDeployError(f"命令失败(exit={exit_status}): {safe_cmd[:200]}  stdout: {out[-200:]}  stderr: {err[-500:]}")
     return out
 
 
@@ -300,6 +315,10 @@ def _fill_commit_info(repos, trace_id: str) -> tuple:
 # 步骤 3.3：目录文件检查
 # ============================================================
 
+_GIT_CLONE_TIMEOUT = 300
+_GIT_CLONE_MAX_RETRIES = 2
+
+
 def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
     """
     检查远程服务器目录结构并下载缺失的仓库。
@@ -318,6 +337,12 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_dir}')
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_tmp_dir}')
 
+    _ssh_exec_ignore_error(ssh=ssh, command=(
+        'git config --global http.postBuffer 524288000 && '
+        'git config --global http.lowSpeedLimit 1000 && '
+        'git config --global http.lowSpeedTime 60'
+    ))
+
     for repo in repos:
         repo_id_str = str(repo.id)
         if repo_id_str not in repo_auth:
@@ -327,17 +352,54 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
         repo_name = auth['repo_name']
         token = auth['token']
         url = repo.url
+        branch = repo.default_branch or 'main'
         auth_url = url.replace('https://github.com', f'https://x-access-token:{token}@github.com')
 
-        # 检查仓库目录是否存在
-        check = _ssh_exec_ignore_error(ssh=ssh, command=f'test -d {repo_dir}/{repo_name} && echo "exists" || echo "not_exists"')
+        target_path = f'{repo_dir}/{repo_name}'
 
-        if 'not_exists' in check:
-            logger.info("Cloning repo: %s -> %s/%s, trace_id=%s", repo_name, repo_dir, repo_name, trace_id)
-            _ssh_exec(ssh=ssh, command=f'cd {repo_dir} && git clone {auth_url} {repo_name}')
+        is_valid_repo = _ssh_exec_ignore_error(
+            ssh=ssh,
+            command=f'git -C {target_path} rev-parse --is-inside-work-tree 2>/dev/null || echo "invalid"',
+        )
+
+        if 'invalid' in is_valid_repo:
+            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+            _clone_repo_with_retry(
+                ssh=ssh, auth_url=auth_url, branch=branch,
+                repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+            )
         else:
-            # 更新远程 URL（刷新 token）并 fetch 最新代码
-            _ssh_exec(ssh=ssh, command=f'cd {repo_dir}/{repo_name} && git remote set-url origin {auth_url} && git fetch origin')
+            logger.info("Updating repo: %s, trace_id=%s", repo_name, trace_id)
+            _ssh_exec(
+                ssh=ssh,
+                command=f'cd {target_path} && git remote set-url origin {auth_url} && git fetch origin',
+                timeout=_GIT_CLONE_TIMEOUT,
+            )
+
+
+def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_name: str, trace_id: str):
+    """clone 仓库（浅克隆 + 重试），失败时清理残留目录"""
+    target_path = f'{repo_dir}/{repo_name}'
+    clone_cmd = f'cd {repo_dir} && git clone --depth 1 --single-branch --branch {branch} {auth_url} {repo_name}'
+
+    last_err = None
+    for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
+        logger.info(
+            "Cloning repo (attempt %d/%d): %s -> %s, trace_id=%s",
+            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, target_path, trace_id,
+        )
+        try:
+            _ssh_exec(ssh=ssh, command=clone_cmd, timeout=_GIT_CLONE_TIMEOUT)
+            return
+        except RemoteDeployError as e:
+            last_err = e
+            logger.warning(
+                "Clone attempt %d failed: %s, repo=%s, trace_id=%s",
+                attempt, e.message[:200], repo_name, trace_id,
+            )
+            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+
+    raise RemoteDeployError(f"仓库 {repo_name} 克隆失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
 
 
 # ============================================================
@@ -375,10 +437,10 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     tmp_repo_dir = f'{tmp_dir}/{repo_name}'
     full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
 
-    # 创建临时目录，拷贝仓库代码，切换到指定 commit
+    # 创建临时目录，拷贝仓库代码，fetch 指定 commit 并切换（兼容浅克隆）
     _ssh_exec(ssh=ssh, command=f'mkdir -p {tmp_dir}')
     _ssh_exec(ssh=ssh, command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
-    _ssh_exec(ssh=ssh, command=f'cd {tmp_repo_dir} && git checkout {commit_id}')
+    _ssh_exec(ssh=ssh, command=f'cd {tmp_repo_dir} && git fetch --depth 1 origin {commit_id} && git checkout {commit_id}', timeout=_GIT_CLONE_TIMEOUT)
 
     # Docker 镜像：检查 Dockerfile 是否存在
     image_name = f'app{client_id}_{deploy_uuid}'
@@ -393,7 +455,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
     if 'not_exists' in img_check:
         logger.info("Building image: %s from %s, trace_id=%s", image_full, full_work_dir, trace_id)
-        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && docker build -t {image_full} .')
+        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && docker build -t {image_full} .', timeout=600)
     else:
         logger.info("Image %s already exists, skip build, trace_id=%s", image_full, trace_id)
 
