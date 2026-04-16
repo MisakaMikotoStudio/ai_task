@@ -297,9 +297,16 @@
         <div class="deploy-page-header">
             <h1 class="deploy-page-title">发布详情</h1>
             <div class="deploy-filter-bar">
+                <span id="msg-id-badge" style="display:none;padding:4px 10px;border-radius:10px;background:var(--bg-tertiary);border:1px solid var(--border-color);font-size:12px;color:var(--text-secondary);"></span>
                 <label for="client-filter">应用</label>
                 <select id="client-filter">
                     <option value="">全部</option>
+                </select>
+                <label for="env-filter">环境</label>
+                <select id="env-filter">
+                    <option value="">全部</option>
+                    <option value="test">测试（预览）</option>
+                    <option value="prod">生产（发布）</option>
                 </select>
                 <label for="status-filter">状态</label>
                 <select id="status-filter">
@@ -354,6 +361,7 @@
 
         const PAGE_SIZE = 20;
         let currentPage = 1;
+        let msgIdFilter = null; // null 表示不过滤
 
         const params = new URLSearchParams(window.location.search);
         const urlClientId = parseInt(params.get('client_id'), 10);
@@ -361,6 +369,44 @@
         document.title = '发布详情';
 
         const clientFilter = document.getElementById('client-filter');
+
+        // 读取 msg_id/env URL 参数（由 chat 页面徽章跳转携带）
+        const msgIdParam = params.get('msg_id');
+        if (msgIdParam !== null && msgIdParam !== '' && !isNaN(parseInt(msgIdParam, 10))) {
+            msgIdFilter = parseInt(msgIdParam, 10);
+            const badge = document.getElementById('msg-id-badge');
+            badge.style.display = 'inline-block';
+            badge.textContent = `Msg #${msgIdFilter}`;
+            badge.title = '当前正在按消息 ID 筛选，点击可清除';
+            badge.style.cursor = 'pointer';
+            badge.onclick = function() {
+                msgIdFilter = null;
+                badge.style.display = 'none';
+                const url = new URL(window.location.href);
+                url.searchParams.delete('msg_id');
+                window.history.replaceState(null, '', url.toString());
+                currentPage = 1;
+                loadRecords();
+            };
+        }
+
+        const envFilter = document.getElementById('env-filter');
+        const envParam = params.get('env');
+        if (envParam === 'test' || envParam === 'prod') {
+            envFilter.value = envParam;
+        }
+        envFilter.addEventListener('change', function() {
+            currentPage = 1;
+            const url = new URL(window.location.href);
+            if (envFilter.value) {
+                url.searchParams.set('env', envFilter.value);
+            } else {
+                url.searchParams.delete('env');
+            }
+            window.history.replaceState(null, '', url.toString());
+            loadRecords();
+        });
+
         const statusFilter = document.getElementById('status-filter');
 
         clientFilter.addEventListener('change', function() {
@@ -400,7 +446,15 @@
                 await initAPIConfig();
                 const status = statusFilter.value;
                 const clientIdVal = clientFilter.value;
-                const res = await deployAPI.listAllRecords({ client_id: clientIdVal, status: status, page: currentPage, page_size: PAGE_SIZE });
+                const env = envFilter.value;
+                let res;
+                if (clientIdVal) {
+                    const queryParams = { page: currentPage, page_size: PAGE_SIZE, status: status, env: env };
+                    if (msgIdFilter !== null) queryParams.msg_id = msgIdFilter;
+                    res = await deployAPI.listRecords(clientIdVal, queryParams);
+                } else {
+                    res = await deployAPI.listAllRecords({ status: status, page: currentPage, page_size: PAGE_SIZE });
+                }
                 const data = res.data || {};
                 const records = data.records || [];
                 const total = data.total || 0;

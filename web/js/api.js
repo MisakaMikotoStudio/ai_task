@@ -554,9 +554,11 @@ const chatAPI = {
 
 // 发布记录 API
 const deployAPI = {
-    async listRecords(clientId, { page = 1, page_size = 20, status = '' } = {}) {
+    async listRecords(clientId, { page = 1, page_size = 20, status = '', env = '', msg_id = '' } = {}) {
         const params = new URLSearchParams({ page, page_size });
         if (status) params.set('status', status);
+        if (env) params.set('env', env);
+        if (msg_id !== '' && msg_id !== null && msg_id !== undefined) params.set('msg_id', msg_id);
         return request(`/app/deploy/client/${clientId}/records?${params.toString()}`);
     },
     async listAllRecords({ client_id = '', status = '', page = 1, page_size = 20 } = {}) {
@@ -565,9 +567,13 @@ const deployAPI = {
         if (status) params.set('status', status);
         return request(`/app/deploy/records?${params.toString()}`);
     },
-    async createRecord(clientId, env, description, status, detail) {
-        const body = JSON.stringify({ env, description, status, detail });
+    async createRecord(clientId, env, description, status, detail, msgId = 0) {
+        const body = JSON.stringify({ env, description, status, detail, msg_id: msgId || 0 });
         return request(`/app/deploy/client/${clientId}/records`, { method: 'POST', body });
+    },
+    async getRecordsByMsgIds(clientId, msgIds) {
+        const body = JSON.stringify({ msg_ids: msgIds || [] });
+        return request(`/app/deploy/client/${clientId}/records/by-msgs`, { method: 'POST', body });
     },
     async cancelRecord(recordId) {
         return request(`/app/deploy/records/${recordId}/cancel`, { method: 'PATCH' });

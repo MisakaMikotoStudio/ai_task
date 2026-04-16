@@ -16,6 +16,8 @@ let mergeRequestStore = {};
 let clientConfigCache = null;
 let isStandaloneMode = false; // task_id=0 模式
 let standaloneClientId = null; // 独立 chat 的 client_id
+// 按 msg_id 聚合的发布记录映射：{ "msg_id": { test: record, prod: record } }
+let deployRecordsByMsg = {};
 
 // ===== Image attachment state =====
 // 已上传图片列表（active view），每项 { oss_path, filename }
@@ -246,10 +248,27 @@ async function loadMessages(chatId) {
         messagesCache = res.data || [];
         // 让轮询指纹与当前缓存对齐，避免首次轮询做重复渲染/请求
         messagesFingerprint = getMessagesFingerprint(messagesCache);
+        await refreshDeployRecords();
         renderFeed();
         updateComposerState();
     } catch (e) {
         showToast(e.message, 'error');
+    }
+}
+
+// 批量拉取当前 chat 下所有消息对应的发布记录
+async function refreshDeployRecords() {
+    deployRecordsByMsg = {};
+    const clientId = _getClientId();
+    if (!clientId || !messagesCache.length) return;
+    const msgIds = messagesCache.map(m => m.id).filter(id => Number.isInteger(id) && id > 0);
+    if (!msgIds.length) return;
+    try {
+        const res = await deployAPI.getRecordsByMsgIds(clientId, msgIds);
+        deployRecordsByMsg = res.data || {};
+    } catch (e) {
+        console.warn('refreshDeployRecords failed:', e);
+        deployRecordsByMsg = {};
     }
 }
 
@@ -321,6 +340,8 @@ function renderFeed() {
             mergeRequestStore[storeKey] = mrData;
             extraBtns += `<button class="msg-extra-btn mr-btn" onclick="showMergeRequestModal('${storeKey}')">🔀 变更详情</button>`;
         }
+        // 预览/发布 状态徽章：若存在对应发布记录则展示状态并支持点击跳转
+        extraBtns += _renderDeployBadges(msg.id);
 
         const agentRow = `
         <div class="msg-agent-row">
@@ -516,6 +537,7 @@ function startPolling() {
                 const prevRunningId = runningMessageId;
                 messagesFingerprint = nextFingerprint;
                 messagesCache = fresh;
+                await refreshDeployRecords();
                 renderFeed();
                 updateComposerState();
                 // 仅当运行状态开关变化时，才刷新 Chat 列表（减少无意义请求）
@@ -955,12 +977,33 @@ function _getClientId() {
     return isStandaloneMode ? standaloneClientId : (taskInfo ? taskInfo.client_id : null);
 }
 
-function previewApp() {
+async function previewApp() {
     if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
     const msgId = _getLatestCompletedMsgId();
     if (!msgId) { showToast('当前 Chat 暂无消息', 'error'); return; }
     const testDomain = _getTestDomain();
     if (!testDomain) { showToast('未配置应用测试环境域名', 'error'); return; }
+
+    const clientId = _getClientId();
+    const chat = chatsCache.find(c => c.id === currentChatId);
+    const chatTitle = chat ? chat.title : `Chat ${currentChatId}`;
+
+    // 记录一条 test 环境的预览记录（便于在 chat 历史上展示徽章）。
+    // 测试环境是用户点击即看，无需后台调度，因此 status 直接标记为 success。
+    if (clientId) {
+        try {
+            await deployAPI.createRecord(
+                clientId, 'test', chatTitle, 'success',
+                { task_id: taskId, chat_id: currentChatId, msg_id: msgId },
+                msgId,
+            );
+            await refreshDeployRecords();
+            renderFeed();
+        } catch (e) {
+            console.warn('previewApp createRecord failed:', e);
+        }
+    }
+
     const previewUrl = `http://task${taskId}chat${currentChatId}msg${msgId}.${testDomain}`;
     window.open(previewUrl, '_blank');
 }
@@ -982,7 +1025,11 @@ async function publishApp() {
     try {
         const res = await chatAPI.createMessage(taskId, currentChatId, prompt);
         const msgId = res.data ? res.data.id : null;
-        await deployAPI.createRecord(clientId, 'prod', chatTitle, 'pending', {task_id: taskId, chat_id: currentChatId, msg_id: msgId});
+        await deployAPI.createRecord(
+            clientId, 'prod', chatTitle, 'pending',
+            { task_id: taskId, chat_id: currentChatId, msg_id: msgId },
+            msgId,
+        );
         showToast('发布记录已创建', 'success');
         await loadMessages(currentChatId);
         await loadChats();
@@ -991,4 +1038,23 @@ async function publishApp() {
     } finally {
         btn.disabled = false;
     }
+}
+
+// ===== Deploy badges =====
+function _renderDeployBadges(msgId) {
+    const bucket = deployRecordsByMsg[String(msgId)] || {};
+    const clientId = _getClientId();
+    if (!clientId) return '';
+    const order = [
+        { env: 'test', label: '预览' },
+        { env: 'prod', label: '发布' },
+    ];
+    return order.map(({ env, label }) => {
+        const record = bucket[env];
+        if (!record) return '';
+        const statusText = escapeHtml(record.status_text || record.status || '');
+        const statusClass = `deploy-badge-${record.status || 'unknown'}`;
+        const detailUrl = `deploy-details.html?client_id=${clientId}&msg_id=${msgId}&env=${env}`;
+        return `<button class="msg-extra-btn deploy-badge ${statusClass}" onclick="window.open('${detailUrl}', '_blank')">${label}:${statusText}</button>`;
+    }).join('');
 }

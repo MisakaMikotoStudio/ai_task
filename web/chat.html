@@ -832,6 +832,42 @@
             border-color: rgba(163, 113, 247, 0.35);
         }
 
+        /* 发布/预览状态徽章 */
+        .msg-extra-btn.deploy-badge {
+            background: rgba(139, 148, 158, 0.12);
+            color: var(--text-secondary);
+            border: 1px solid rgba(139, 148, 158, 0.25);
+        }
+        .msg-extra-btn.deploy-badge:hover {
+            background: rgba(139, 148, 158, 0.22);
+            border-color: rgba(139, 148, 158, 0.4);
+        }
+        .msg-extra-btn.deploy-badge-pending {
+            background: rgba(210, 153, 34, 0.12);
+            color: #d29922;
+            border-color: rgba(210, 153, 34, 0.25);
+        }
+        .msg-extra-btn.deploy-badge-publishing {
+            background: rgba(88, 166, 255, 0.12);
+            color: var(--accent-primary);
+            border-color: rgba(88, 166, 255, 0.25);
+        }
+        .msg-extra-btn.deploy-badge-success {
+            background: rgba(63, 185, 80, 0.12);
+            color: #3fb950;
+            border-color: rgba(63, 185, 80, 0.25);
+        }
+        .msg-extra-btn.deploy-badge-failed {
+            background: rgba(248, 81, 73, 0.12);
+            color: var(--accent-danger);
+            border-color: rgba(248, 81, 73, 0.25);
+        }
+        .msg-extra-btn.deploy-badge-cancel {
+            background: rgba(139, 148, 158, 0.12);
+            color: var(--text-muted);
+            border-color: rgba(139, 148, 158, 0.25);
+        }
+
         /* Merge Request Detail Modal */
         .mr-modal-card {
             background: var(--bg-secondary);
@@ -1524,8 +1560,8 @@
 <div class="chat-toast" id="chat-toast"></div>
 
 <script src="js/utils.js?v=3"></script>
-<script src="js/api.js?v=11"></script>
+<script src="js/api.js?v=17"></script>
 <script src="js/chat-helpers.js?v=1"></script>
-<script src="js/chat.js?v=9"></script>
+<script src="js/chat.js?v=10"></script>
 </body>
 </html>

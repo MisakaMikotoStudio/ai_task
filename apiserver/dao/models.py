@@ -845,6 +845,7 @@ class DeployRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, nullable=False, comment='所属用户ID')
     client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    msg_id = Column(Integer, nullable=False, default=0, server_default='0', comment='关联 chat 消息ID，0 表示未关联')
     env = Column(String(16), nullable=False, comment='环境标识：test/prod')
     description = Column(String(255), nullable=False, default='', comment='发布描述')
     status = Column(String(20), nullable=False, default='pending', comment='发布状态：pending/publishing/failed/success/cancel')
@@ -856,6 +857,7 @@ class DeployRecord(Base):
     __table_args__ = (
         Index('idx_deploy_records_user_client', 'user_id', 'client_id'),
         Index('idx_deploy_records_client_env', 'client_id', 'env'),
+        Index('idx_deploy_records_client_msg', 'client_id', 'msg_id'),
     )
 
     STATUS_PENDING = 'pending'
@@ -879,6 +881,7 @@ class DeployRecord(Base):
         return {
             'id': self.id,
             'client_id': self.client_id,
+            'msg_id': self.msg_id or 0,
             'env': self.env,
             'description': self.description or '',
             'status': self.status,
