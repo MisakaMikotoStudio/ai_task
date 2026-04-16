@@ -783,9 +783,39 @@ def _ensure_certbot_ready(ssh, trace_id: str) -> None:
     logger.info("Certbot runtime ready on host, trace_id=%s", trace_id)
 
 
+def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
+    """解析 certbot 实际 lineage 名称（可能是 domain 或 domain-0001）。"""
+    exact = _ssh_exec_ignore_error(
+        ssh=ssh,
+        command=(
+            f'test -f /etc/letsencrypt/live/{primary_domain}/fullchain.pem '
+            f'-a -f /etc/letsencrypt/live/{primary_domain}/privkey.pem && echo "{primary_domain}" || true'
+        ),
+    ).strip()
+    if exact:
+        return exact
+
+    wildcard = _ssh_exec_ignore_error(
+        ssh=ssh,
+        command=(
+            f'for d in /etc/letsencrypt/live/{primary_domain}*; do '
+            f'[ -d "$d" ] || continue; '
+            f'[ -f "$d/fullchain.pem" ] || continue; '
+            f'[ -f "$d/privkey.pem" ] || continue; '
+            f'basename "$d"; break; '
+            f'done'
+        ),
+    ).strip()
+    return wildcard
+
+
 def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
-    """确保 server_names 首个域名对应证书存在，不存在则尝试签发。"""
+    """确保 server_names 对应证书可用，返回证书 lineage 名称。"""
     primary = server_names.split()[0]
+    cert_lineage = _resolve_cert_lineage_name(ssh=ssh, primary_domain=primary)
+    if cert_lineage:
+        return cert_lineage
+
     cert_base = f'/etc/letsencrypt/live/{primary}'
     crt = f'{cert_base}/fullchain.pem'
     key = f'{cert_base}/privkey.pem'
@@ -806,21 +836,19 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
         ssh=ssh,
         command=(
             f'sudo certbot certonly --webroot -w /var/www/certbot '
-            f'--register-unsafely-without-email --agree-tos -n {domain_flags}'
+            f'--register-unsafely-without-email --agree-tos -n '
+            f'--cert-name {primary} {domain_flags}'
         ),
         timeout=180,
     )
 
-    cert_exists_after = _ssh_exec_ignore_error(
-        ssh=ssh,
-        command=f'test -f {crt} -a -f {key} && echo "yes" || echo "no"',
-    )
-    if 'yes' not in cert_exists_after:
+    cert_lineage_after = _resolve_cert_lineage_name(ssh=ssh, primary_domain=primary)
+    if not cert_lineage_after:
         raise RemoteDeployError(
             f'证书签发后仍未找到证书文件: {crt} / {key}，请检查 DNS 与 80 端口可达性'
         )
     logger.info("Certificate ensured for domains=%s trace_id=%s", server_names, trace_id)
-    return primary
+    return cert_lineage_after
 
 
 def _render_acme_http_only_vhost(server_names: str) -> str:
