@@ -324,7 +324,14 @@ def _fill_commit_info(repos, trace_id: str) -> tuple:
 # ============================================================
 
 _GIT_CLONE_TIMEOUT = 300
-_GIT_CLONE_MAX_RETRIES = 2
+_GIT_CLONE_MAX_RETRIES = 3
+_GIT_RETRY_BACKOFF_BASE_SEC = 2  # 重试退避基数，第 N 次失败 sleep 2 * 2^(N-1) 秒
+
+# 每条 git 命令前置 per-command 环境变量实现快速失败，避免跨境链路 stall 时等到 TCP 超时（~130s）才失败
+# 不写入 ~/.gitconfig，不影响服务器上其他 git 使用
+# - GIT_HTTP_LOW_SPEED_LIMIT=1000: 低于 1KB/s
+# - GIT_HTTP_LOW_SPEED_TIME=20:   持续 20 秒 → 判定失败
+_GIT_HTTP_FAIL_FAST_ENV = 'GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20'
 
 
 def _is_git_auth_error(message: str) -> bool:
@@ -401,35 +408,33 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
                     repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
                 )
             else:
-                _fetch_repo_with_retry(
-                    ssh=ssh, target_path=target_path, auth_url=auth_url,
-                    repo_name=repo_name, trace_id=trace_id,
+                _fetch_or_reclone(
+                    ssh=ssh, target_path=target_path, repo_dir=repo_dir,
+                    repo_name=repo_name, branch=branch, auth_url=auth_url, trace_id=trace_id,
                 )
         except RemoteDeployError as e:
             if not _is_git_auth_error(e.message):
                 raise
-            # token 可能在部署过程中失效，认证失败时刷新一次并重试
+            # token 可能在部署过程中失效，认证失败时刷新一次并重建本地仓库（re-clone 最可靠）
             new_token = _refresh_repo_token(repo_url=url, repo_name=repo_name, trace_id=trace_id)
             repo_auth[repo_id_str]['token'] = new_token
             new_auth_url = url.replace('https://github.com', f'https://x-access-token:{new_token}@github.com')
             logger.warning("Git auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
-            if 'invalid' in is_valid_repo:
-                _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
-                _clone_repo_with_retry(
-                    ssh=ssh, auth_url=new_auth_url, branch=branch,
-                    repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
-                )
-            else:
-                _fetch_repo_with_retry(
-                    ssh=ssh, target_path=target_path, auth_url=new_auth_url,
-                    repo_name=repo_name, trace_id=trace_id,
-                )
+            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+            _clone_repo_with_retry(
+                ssh=ssh, auth_url=new_auth_url, branch=branch,
+                repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+            )
 
 
 def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_name: str, trace_id: str):
-    """clone 仓库（浅克隆 + 重试），失败时清理残留目录"""
+    """clone 仓库（浅克隆 + 重试 + 指数退避），失败时清理残留目录"""
     target_path = f'{repo_dir}/{repo_name}'
-    clone_cmd = f'cd {repo_dir} && git clone --depth 1 --single-branch --branch {branch} {auth_url} {repo_name}'
+    # --no-tags 减少拉取量；per-command 低速超时，卡住 20s 后立刻失败
+    clone_cmd = (
+        f'cd {repo_dir} && {_GIT_HTTP_FAIL_FAST_ENV} '
+        f'git clone --depth 1 --single-branch --no-tags --branch {branch} {auth_url} {repo_name}'
+    )
 
     last_err = None
     for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
@@ -447,19 +452,30 @@ def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_
                 attempt, repo_name, trace_id, e.message,
             )
             _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+            if attempt < _GIT_CLONE_MAX_RETRIES and not _is_git_auth_error(e.message):
+                backoff = _GIT_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
+                logger.info("Clone backoff %ds before retry, repo=%s, trace_id=%s", backoff, repo_name, trace_id)
+                time.sleep(backoff)
 
     raise RemoteDeployError(f"仓库 {repo_name} 克隆失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
 
 
-def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str, trace_id: str):
-    """更新已有仓库（刷新 token + fetch），带重试"""
-    fetch_cmd = f'cd {target_path} && git remote set-url origin {auth_url} && git fetch origin'
+def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str, branch: str, trace_id: str):
+    """更新已有仓库（浅 fetch 指定分支 + 重试 + 指数退避）
+
+    相比无参数的 `git fetch origin`，只拉取目标分支的最新 1 个 commit，数据量最小化，
+    显著降低跨境链路 TLS 被中断的概率。
+    """
+    fetch_cmd = (
+        f'cd {target_path} && git remote set-url origin {auth_url} && '
+        f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {branch}'
+    )
 
     last_err = None
     for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
         logger.info(
-            "Fetching repo (attempt %d/%d): %s, trace_id=%s",
-            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, trace_id,
+            "Fetching repo (attempt %d/%d): %s, branch=%s, trace_id=%s",
+            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, branch, trace_id,
         )
         try:
             _ssh_exec(ssh=ssh, command=fetch_cmd, timeout=_GIT_CLONE_TIMEOUT)
@@ -470,8 +486,39 @@ def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str,
                 "Fetch attempt %d failed, repo=%s, trace_id=%s, detail=%s",
                 attempt, repo_name, trace_id, e.message,
             )
+            # 认证错误不退避、不重试，立即抛给上层刷新 token
+            if _is_git_auth_error(e.message):
+                break
+            if attempt < _GIT_CLONE_MAX_RETRIES:
+                backoff = _GIT_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
+                logger.info("Fetch backoff %ds before retry, repo=%s, trace_id=%s", backoff, repo_name, trace_id)
+                time.sleep(backoff)
 
     raise RemoteDeployError(f"仓库 {repo_name} fetch 失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
+
+
+def _fetch_or_reclone(ssh, target_path: str, repo_dir: str, repo_name: str, branch: str, auth_url: str, trace_id: str):
+    """优先增量 fetch；fetch 持续失败（非认证错误）时删除本地目录重新浅 clone。
+
+    认证错误保留原语义，抛给上层统一刷新 token 后重建。
+    """
+    try:
+        _fetch_repo_with_retry(
+            ssh=ssh, target_path=target_path, auth_url=auth_url,
+            repo_name=repo_name, branch=branch, trace_id=trace_id,
+        )
+    except RemoteDeployError as fetch_err:
+        if _is_git_auth_error(fetch_err.message):
+            raise
+        logger.warning(
+            "Fetch persistently failed for %s, fallback to re-clone, trace_id=%s, detail=%s",
+            repo_name, trace_id, fetch_err.message,
+        )
+        _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+        _clone_repo_with_retry(
+            ssh=ssh, auth_url=auth_url, branch=branch,
+            repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+        )
 
 
 # ============================================================
@@ -519,7 +566,8 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     checkout_cmd = (
         f'cd {tmp_repo_dir} && '
         f'git checkout {commit_id} || '
-        f'(git remote set-url origin {auth_url} && git fetch --depth 1 origin {commit_id} && git checkout {commit_id})'
+        f'(git remote set-url origin {auth_url} && '
+        f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && git checkout {commit_id})'
     )
     try:
         _ssh_exec(ssh=ssh, command=checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
@@ -532,7 +580,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
         retry_checkout_cmd = (
             f'cd {tmp_repo_dir} && '
             f'git remote set-url origin {auth_url} && '
-            f'git fetch --depth 1 origin {commit_id} && git checkout {commit_id}'
+            f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && git checkout {commit_id}'
         )
         logger.warning("Checkout auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
         _ssh_exec(ssh=ssh, command=retry_checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
