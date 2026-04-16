@@ -1363,52 +1363,131 @@
 
                 <!-- 应用视图 -->
                 <div id="clients-view" class="view">
-                    <div class="view-header">
-                        <h2>应用</h2>
-                        <div class="view-header-right">
-                            <div class="filter-group">
-                                <input type="text" id="client-search-input" placeholder="输入应用ID搜索" class="search-input">
-                                <button id="client-search-btn" class="btn-secondary btn-small">搜索</button>
-                                <button id="client-search-clear-btn" class="btn-secondary btn-small">清除</button>
+                    <!-- 应用内子 Tab 切换：应用 / 团队 -->
+                    <div class="app-subtabs" id="app-subtabs">
+                        <button type="button" class="app-subtab active" data-subtab="clients">应用</button>
+                        <button type="button" class="app-subtab" data-subtab="teams">团队</button>
+                    </div>
+
+                    <!-- 子 Tab 面板：应用列表 -->
+                    <div id="clients-subtab-panel" class="app-subtab-panel active">
+                        <div class="view-header">
+                            <h2>应用</h2>
+                            <div class="view-header-right">
+                                <div class="filter-group">
+                                    <input type="text" id="client-search-input" placeholder="输入应用ID搜索" class="search-input">
+                                    <button id="client-search-btn" class="btn-secondary btn-small">搜索</button>
+                                    <button id="client-search-clear-btn" class="btn-secondary btn-small">清除</button>
+                                </div>
+                                <button id="add-client-btn" class="btn-primary">
+                                    <span>+</span> 添加应用
+                                </button>
                             </div>
-                            <button id="add-client-btn" class="btn-primary">
-                                <span>+</span> 添加应用
-                            </button>
+                        </div>
+                        <div class="table-container clients-table-container">
+                            <table class="data-table clients-table">
+                                <colgroup>
+                                    <col class="client-col-id">
+                                    <col class="client-col-name">
+                                    <col class="client-col-cloud">
+                                    <col class="client-col-agent">
+                                    <col class="client-col-version">
+                                    <col class="client-col-creator">
+                                    <col class="client-col-heartbeat">
+                                    <col class="client-col-created">
+                                    <col class="client-col-actions">
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>名称</th>
+                                        <th>云部署</th>
+                                        <th>Agent类型</th>
+                                        <th>版本号</th>
+                                        <th>创建人</th>
+                                        <th>最后心跳</th>
+                                        <th>创建时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="clients-table-body">
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
+                            <div id="clients-empty" class="empty-state">
+                                <span class="empty-icon">🖥️</span>
+                                <p>暂无应用</p>
+                            </div>
                         </div>
                     </div>
-                    <div class="table-container clients-table-container">
-                        <table class="data-table clients-table">
-                            <colgroup>
-                                <col class="client-col-id">
-                                <col class="client-col-name">
-                                <col class="client-col-cloud">
-                                <col class="client-col-agent">
-                                <col class="client-col-version">
-                                <col class="client-col-creator">
-                                <col class="client-col-heartbeat">
-                                <col class="client-col-created">
-                                <col class="client-col-actions">
-                            </colgroup>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>名称</th>
-                                    <th>云部署</th>
-                                    <th>Agent类型</th>
-                                    <th>版本号</th>
-                                    <th>创建人</th>
-                                    <th>最后心跳</th>
-                                    <th>创建时间</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="clients-table-body">
-                                <!-- 动态填充 -->
-                            </tbody>
-                        </table>
-                        <div id="clients-empty" class="empty-state">
-                            <span class="empty-icon">🖥️</span>
-                            <p>暂无应用</p>
+
+                    <!-- 子 Tab 面板：团队 -->
+                    <div id="teams-subtab-panel" class="app-subtab-panel">
+                        <div class="view-header">
+                            <h2>团队</h2>
+                            <div class="view-header-right">
+                                <div class="filter-group">
+                                    <input type="text" id="team-search-input" placeholder="按团队ID或名称搜索（最多10条）" class="search-input">
+                                    <button id="team-search-btn" class="btn-secondary btn-small">搜索</button>
+                                    <button id="team-search-clear-btn" class="btn-secondary btn-small">清除</button>
+                                </div>
+                                <button id="add-team-btn" class="btn-primary">
+                                    <span>+</span> 新建团队
+                                </button>
+                            </div>
+                        </div>
+                        <div class="team-layout">
+                            <!-- 搜索结果：团队列表 -->
+                            <div class="team-results" id="team-results">
+                                <div class="team-results-empty" id="team-results-empty">点击搜索按钮开始查找你的团队</div>
+                                <ul class="team-results-list" id="team-results-list"></ul>
+                            </div>
+
+                            <!-- 右侧：当前团队详情 / 成员列表 -->
+                            <div class="team-detail" id="team-detail">
+                                <div class="team-detail-empty" id="team-detail-empty">
+                                    <span class="empty-icon">👥</span>
+                                    <p>请在左侧搜索并选择一个团队，以查看成员</p>
+                                </div>
+                                <div class="team-detail-body" id="team-detail-body" style="display:none;">
+                                    <div class="team-detail-header">
+                                        <div class="team-detail-title">
+                                            <span id="team-detail-name" class="team-detail-name"></span>
+                                            <span id="team-detail-id" class="team-detail-id"></span>
+                                            <span id="team-detail-role" class="team-detail-role"></span>
+                                        </div>
+                                    </div>
+
+                                    <!-- 管理员专属：添加成员 -->
+                                    <div class="team-add-member" id="team-add-member" style="display:none;">
+                                        <div class="filter-group">
+                                            <input type="text" id="team-add-uid-input" placeholder="输入用户 uid（6 位数字）" class="search-input">
+                                            <button id="team-add-lookup-btn" class="btn-secondary btn-small">查询</button>
+                                            <button id="team-add-confirm-btn" class="btn-primary btn-small">加入团队</button>
+                                        </div>
+                                        <div class="team-add-hint" id="team-add-hint"></div>
+                                    </div>
+
+                                    <!-- 成员列表 -->
+                                    <div class="table-container team-members-table-container">
+                                        <table class="data-table team-members-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>用户ID</th>
+                                                    <th>名称</th>
+                                                    <th>角色</th>
+                                                    <th>操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="team-members-table-body"></tbody>
+                                        </table>
+                                        <div id="team-members-empty" class="empty-state">
+                                            <span class="empty-icon">👤</span>
+                                            <p>暂无成员</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2131,18 +2210,19 @@
     <div id="toast-container" class="toast-container"></div>
     
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=13"></script>
+    <script src="js/api.js?v=14"></script>
     <script src="js/flow-chart.js?v=7"></script>
     <script src="js/okr.js?v=2"></script>
     <script src="js/chat-helpers.js?v=1"></script>
     <script src="js/clients.js?v=1"></script>
+    <script src="js/teams.js?v=1"></script>
     <script src="js/clients-config-wizard.js?v=1"></script>
     <script src="js/tasks.js?v=1"></script>
     <script src="js/admin-commerce.js?v=1"></script>
     <script src="js/admin.js?v=1"></script>
     <script src="js/standalone-chat.js?v=1"></script>
     <script src="js/store-profile.js?v=1"></script>
-    <script src="js/app.js?v=29"></script>
+    <script src="js/app.js?v=30"></script>
 </body>
 </html>
 

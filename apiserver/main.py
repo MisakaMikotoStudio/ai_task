@@ -55,6 +55,7 @@ from routes.app.todo import todo_bp as app_todo_bp
 from routes.app.commercial import commercial_bp as app_commercial_bp
 from routes.app.client import client_bp as app_client_bp
 from routes.app.deploy import deploy_bp as app_deploy_bp
+from routes.app.team import team_bp as app_team_bp
 
 # Admin 管理后台路由
 from routes.admin.admin import admin_bp
@@ -95,6 +96,7 @@ def create_app(config: AppConfig) -> Flask:
     app.register_blueprint(app_commercial_bp, url_prefix=f'{prefix}/api/app/commercial')
     app.register_blueprint(app_client_bp, url_prefix=f'{prefix}/api/app/client')
     app.register_blueprint(app_deploy_bp, url_prefix=f'{prefix}/api/app/deploy')
+    app.register_blueprint(app_team_bp, url_prefix=f'{prefix}/api/app/team')
 
     # 注册蓝图 —— Admin 管理后台
     app.register_blueprint(admin_bp, url_prefix=f'{prefix}/api/admin')

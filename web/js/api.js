@@ -596,6 +596,45 @@ const commercialAPI = {
     }
 };
 
+// 团队API
+const teamAPI = {
+    // 创建团队
+    async create(name) {
+        return request('/app/team', { method: 'POST', body: JSON.stringify({ name }) });
+    },
+
+    // 搜索团队（keyword 支持 id 精确/名称模糊，后端限制最多10条）
+    async search(keyword) {
+        const query = new URLSearchParams();
+        if (keyword) query.set('keyword', keyword);
+        const qs = query.toString();
+        return request(`/app/team${qs ? `?${qs}` : ''}`);
+    },
+
+    // 成员列表
+    async listMembers(teamId) {
+        return request(`/app/team/${teamId}/members`);
+    },
+
+    // 添加成员（uid）
+    async addMember(teamId, userId) {
+        return request(`/app/team/${teamId}/members`, {
+            method: 'POST',
+            body: JSON.stringify({ user_id: userId })
+        });
+    },
+
+    // 删除成员
+    async deleteMember(teamId, userId) {
+        return request(`/app/team/${teamId}/members/${userId}`, { method: 'DELETE' });
+    },
+
+    // 通过 uid 查询用户
+    async searchUser(userId) {
+        return request(`/app/team/users/search?user_id=${encodeURIComponent(userId)}`);
+    }
+};
+
 // 待办API
 const todoAPI = {
     // 获取列表

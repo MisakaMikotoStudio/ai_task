@@ -124,6 +124,10 @@ function showMainPage() {
         document.querySelectorAll('.nav-item[data-view=”products”], .nav-item[data-view=”orders”], .nav-item[data-view=”permissions”]').forEach((el) => {
             el.style.display = '';
         });
+        // 管理后台不需要团队子 Tab
+        document.querySelectorAll('.app-subtab[data-subtab="teams"]').forEach(el => {
+            el.style.display = 'none';
+        });
         initAdminCommerce();
         initAdminPermissions();
         initSecrets();
@@ -149,6 +153,9 @@ function showMainPage() {
 
     // 初始化客户端搜索
     initClientSearch();
+
+    // 初始化"应用"视图的子 Tab（应用 / 团队）
+    initAppSubTabs();
 
     // 初始化个人中心
     initProfile();
