@@ -19,6 +19,12 @@ DISTRO=""
 PKG_MANAGER=""
 SUDO=""
 
+# ---- Docker apt/yum 源镜像 ----
+# 背景：大陆服务器访问 download.docker.com 会被 GFW 基于 TLS SNI 发送 RST，
+#       curl 报 `OpenSSL SSL_connect: Connection reset by peer`（exit=35）。
+# 方案：统一走阿里云开源镜像站（mirrors.aliyun.com/docker-ce），跨云可用、HTTPS 稳定。
+DOCKER_MIRROR_BASE="https://mirrors.aliyun.com/docker-ce/linux"
+
 # ---- 日志函数 ----
 log_info()  { echo -e "${BLUE}[INFO]${NC}  $(date -u '+%Y-%m-%d %H:%M:%S UTC') $*"; }
 log_ok()    { echo -e "${GREEN}[OK]${NC}    $(date -u '+%Y-%m-%d %H:%M:%S UTC') $*"; }
@@ -258,15 +264,22 @@ install_docker_debian() {
     # 移除旧版本
     apt_get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
 
-    # 添加 Docker 官方 GPG key
+    # 只读取一次 /etc/os-release，避免重复 subshell
+    local os_id os_codename
+    os_id=$(. /etc/os-release && echo "$ID")
+    os_codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+
+    # 添加 Docker GPG key（走阿里云镜像，避开 download.docker.com 的 GFW TLS 重置）
     $SUDO install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null
+    curl -fsSL \
+        --retry 3 --retry-delay 2 \
+        --connect-timeout 10 --max-time 60 \
+        "${DOCKER_MIRROR_BASE}/${os_id}/gpg" | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null
     $SUDO chmod a+r /etc/apt/keyrings/docker.asc
 
-    # 添加 Docker 源
+    # 添加 Docker apt 源
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+${DOCKER_MIRROR_BASE}/${os_id} ${os_codename} stable" | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
 
     apt_get update -y
 
@@ -290,9 +303,9 @@ install_docker_rhel() {
     # 移除旧版本
     $SUDO $PKG_MANAGER remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine 2>/dev/null || true
 
-    # 添加 Docker 源
+    # 添加 Docker 源（走阿里云镜像，避开 download.docker.com 的 GFW TLS 重置）
     $SUDO $PKG_MANAGER install -y yum-utils 2>/dev/null || true
-    $SUDO yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    $SUDO yum-config-manager --add-repo "${DOCKER_MIRROR_BASE}/centos/docker-ce.repo"
 
     # 查找并安装指定版本
     local docker_pkg_version
@@ -314,9 +327,9 @@ install_docker_fedora() {
     # 移除旧版本
     $SUDO dnf remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-selinux docker-engine-selinux docker-engine 2>/dev/null || true
 
-    # 添加 Docker 源
+    # 添加 Docker 源（走阿里云镜像，避开 download.docker.com 的 GFW TLS 重置）
     $SUDO dnf install -y dnf-plugins-core 2>/dev/null || true
-    $SUDO dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+    $SUDO dnf config-manager --add-repo "${DOCKER_MIRROR_BASE}/fedora/docker-ce.repo"
 
     # 查找并安装指定版本
     local docker_pkg_version
