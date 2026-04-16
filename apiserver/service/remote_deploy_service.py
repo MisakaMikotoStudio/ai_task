@@ -16,9 +16,8 @@ import traceback
 import uuid
 import time
 from urllib.parse import urlparse
-from collections import defaultdict
 
-from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
+from dao.deploy_dao import get_pending_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
 from dao.client_dao import get_client_repos, get_client_deploys, get_client_servers, get_client_domains
 from dao.models import DeployRecord
 from service.deploy_service import generate_deploy_toml
@@ -148,31 +147,18 @@ def _init_server_env(ssh, trace_id: str):
 # 主入口
 # ============================================================
 
-def process_pending_prod_deploys():
+def process_pending_deploys(client_id: int):
     """
-    处理所有生产环境待发布的部署记录（供调度器调用）。
+    处理指定应用的待发布记录（供调度器调用）。
 
-    按 client_id 分组，每个应用独立处理：
+    单个 client 处理规则：
     - 存在 publishing 记录 → 跳过
     - 仅 pending → 取消旧记录，部署最新
     """
-    records = get_pending_prod_deploy_records()
+    records = get_pending_deploy_records(client_id=client_id)
     if not records:
         return
 
-    grouped = defaultdict(list)
-    for record in records:
-        grouped[record.client_id].append(record)
-
-    for client_id, client_records in grouped.items():
-        try:
-            _process_client_records(client_id=client_id, records=client_records)
-        except Exception:
-            logger.exception("process_pending_prod_deploys: client_id=%s error", client_id)
-
-
-def _process_client_records(client_id: int, records: list):
-    """处理单个应用（client）的部署记录"""
     # 存在 publishing 记录则跳过
     if any(r.status == DeployRecord.STATUS_PUBLISHING for r in records):
         logger.debug("client_id=%s has publishing record, skip", client_id)
