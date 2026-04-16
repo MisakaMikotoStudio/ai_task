@@ -14,6 +14,7 @@ import os
 import re
 import traceback
 import uuid
+import time
 from collections import defaultdict
 
 from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
@@ -64,19 +65,26 @@ def _ssh_exec(ssh, command: str, timeout: int | None = None) -> str:
         command: 要执行的命令
         timeout: 命令超时秒数，None 表示不限制
     """
+    safe_cmd = _sanitize_command(command=command)
+    start = time.time()
+    logger.info("SSH exec start: timeout=%s, cmd=%s", timeout, safe_cmd[:600])
     stdin, stdout, stderr = ssh.exec_command(command)
     if timeout is not None:
         stdout.channel.settimeout(timeout)
     try:
         exit_status = stdout.channel.recv_exit_status()
     except Exception:
-        safe_cmd = _sanitize_command(command=command)
         raise RemoteDeployError(f"命令超时({timeout}s): {safe_cmd[:200]}")
+    elapsed_ms = int((time.time() - start) * 1000)
     out = stdout.read().decode('utf-8', errors='replace').strip()
     if exit_status != 0:
         err = stderr.read().decode('utf-8', errors='replace').strip()
-        safe_cmd = _sanitize_command(command=command)
-        raise RemoteDeployError(f"命令失败(exit={exit_status}): {safe_cmd[:200]}  stdout: {out[-200:]}  stderr: {err[-500:]}")
+        logger.error(
+            "SSH exec failed: exit=%s elapsed_ms=%s cmd=%s stdout_tail=%s stderr_tail=%s",
+            exit_status, elapsed_ms, safe_cmd[:600], out[-1000:], err[-2000:],
+        )
+        raise RemoteDeployError(f"命令失败(exit={exit_status}, elapsed_ms={elapsed_ms}): {safe_cmd[:400]}  stdout: {out[-1000:]}  stderr: {err[-2000:]}")
+    logger.info("SSH exec done: exit=0 elapsed_ms=%s cmd=%s stdout_tail=%s", elapsed_ms, safe_cmd[:600], out[-500:])
     return out
 
 
@@ -337,7 +345,15 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_dir}')
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_tmp_dir}')
 
+    # 清理历史部署遗留的低速中断配置（该配置是持久化到 ~/.gitconfig 的）
+    _ssh_exec_ignore_error(ssh=ssh, command='git config --global --unset-all http.lowSpeedLimit')
+    _ssh_exec_ignore_error(ssh=ssh, command='git config --global --unset-all http.lowSpeedTime')
     _ssh_exec_ignore_error(ssh=ssh, command='git config --global http.postBuffer 524288000')
+    git_cfg = _ssh_exec_ignore_error(
+        ssh=ssh,
+        command='git config --global --get-regexp "^http\\.(postBuffer|lowSpeedLimit|lowSpeedTime)$" || true',
+    )
+    logger.info("Remote git http config after sanitize, trace_id=%s, config=%s", trace_id, git_cfg or "<empty>")
 
     for repo in repos:
         repo_id_str = str(repo.id)
@@ -388,8 +404,8 @@ def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_
         except RemoteDeployError as e:
             last_err = e
             logger.warning(
-                "Clone attempt %d failed: %s, repo=%s, trace_id=%s",
-                attempt, e.message[:200], repo_name, trace_id,
+                "Clone attempt %d failed, repo=%s, trace_id=%s, detail=%s",
+                attempt, repo_name, trace_id, e.message,
             )
             _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
 
@@ -412,8 +428,8 @@ def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str,
         except RemoteDeployError as e:
             last_err = e
             logger.warning(
-                "Fetch attempt %d failed: %s, repo=%s, trace_id=%s",
-                attempt, e.message[:200], repo_name, trace_id,
+                "Fetch attempt %d failed, repo=%s, trace_id=%s, detail=%s",
+                attempt, repo_name, trace_id, e.message,
             )
 
     raise RemoteDeployError(f"仓库 {repo_name} fetch 失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
