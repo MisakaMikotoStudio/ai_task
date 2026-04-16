@@ -14,6 +14,7 @@ import os
 import re
 import traceback
 import uuid
+import time
 from collections import defaultdict
 
 from dao.deploy_dao import get_pending_prod_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
@@ -45,6 +46,9 @@ def _create_ssh_client(ip: str, username: str, password: str):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(hostname=ip, username=username, password=password, timeout=SSH_CONNECT_TIMEOUT, allow_agent=False, look_for_keys=False)
+    transport = client.get_transport()
+    if transport:
+        transport.set_keepalive(30)
     return client
 
 
@@ -53,15 +57,38 @@ def _sanitize_command(command: str) -> str:
     return re.sub(r'x-access-token:[^@]+@', 'x-access-token:***@', command)
 
 
-def _ssh_exec(ssh, command: str) -> str:
-    """执行 SSH 命令并返回 stdout，非零退出码抛出异常"""
+def _ssh_exec(ssh, command: str, timeout: int | None = None) -> str:
+    """执行 SSH 命令并返回 stdout，非零退出码或超时抛出异常
+
+    Args:
+        ssh: paramiko SSHClient
+        command: 要执行的命令
+        timeout: 命令超时秒数，None 表示不限制
+
+    失败时日志与错误消息同时保留 stdout/stderr 的尾部 4000 字符。
+    docker build（2>&1 合流到 stdout）场景下，npm/pip 等工具在失败时
+    会连带打印长篇 usage/help 文本，若尾部过短会把真正的错误行挤出窗口。
+    """
+    safe_cmd = _sanitize_command(command=command)
+    start = time.time()
+    logger.info("SSH exec start: timeout=%s, cmd=%s", timeout, safe_cmd[:600])
     stdin, stdout, stderr = ssh.exec_command(command)
-    exit_status = stdout.channel.recv_exit_status()
+    if timeout is not None:
+        stdout.channel.settimeout(timeout)
+    try:
+        exit_status = stdout.channel.recv_exit_status()
+    except Exception:
+        raise RemoteDeployError(f"命令超时({timeout}s): {safe_cmd[:200]}")
+    elapsed_ms = int((time.time() - start) * 1000)
     out = stdout.read().decode('utf-8', errors='replace').strip()
     if exit_status != 0:
         err = stderr.read().decode('utf-8', errors='replace').strip()
-        safe_cmd = _sanitize_command(command=command)
-        raise RemoteDeployError(f"命令失败(exit={exit_status}): {safe_cmd[:200]}  stderr: {err[-500:]}")
+        logger.error(
+            "SSH exec failed: exit=%s elapsed_ms=%s cmd=%s stdout_tail=%s stderr_tail=%s",
+            exit_status, elapsed_ms, safe_cmd[:600], out[-4000:], err[-4000:],
+        )
+        raise RemoteDeployError(f"命令失败(exit={exit_status}, elapsed_ms={elapsed_ms}): {safe_cmd[:400]}  stdout: {out[-4000:]}  stderr: {err[-4000:]}")
+    logger.info("SSH exec done: exit=0 elapsed_ms=%s cmd=%s stdout_tail=%s", elapsed_ms, safe_cmd[:600], out[-500:])
     return out
 
 
@@ -300,6 +327,36 @@ def _fill_commit_info(repos, trace_id: str) -> tuple:
 # 步骤 3.3：目录文件检查
 # ============================================================
 
+_GIT_CLONE_TIMEOUT = 300
+_GIT_CLONE_MAX_RETRIES = 3
+_GIT_RETRY_BACKOFF_BASE_SEC = 2  # 重试退避基数，第 N 次失败 sleep 2 * 2^(N-1) 秒
+
+# 每条 git 命令前置 per-command 环境变量实现快速失败，避免跨境链路 stall 时等到 TCP 超时（~130s）才失败
+# 不写入 ~/.gitconfig，不影响服务器上其他 git 使用
+# - GIT_HTTP_LOW_SPEED_LIMIT=1000: 低于 1KB/s
+# - GIT_HTTP_LOW_SPEED_TIME=20:   持续 20 秒 → 判定失败
+_GIT_HTTP_FAIL_FAST_ENV = 'GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20'
+
+
+def _is_git_auth_error(message: str) -> bool:
+    lower_msg = (message or "").lower()
+    return (
+        "authentication failed" in lower_msg
+        or "invalid username or token" in lower_msg
+        or "password authentication is not supported" in lower_msg
+    )
+
+
+def _refresh_repo_token(repo_url: str, repo_name: str, trace_id: str) -> str:
+    from service.git_service import refresh_repo_token_by_url
+
+    logger.info("Refreshing repo token: repo=%s, trace_id=%s", repo_name, trace_id)
+    try:
+        return refresh_repo_token_by_url(repo_url=repo_url)
+    except Exception as e:
+        raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
+
+
 def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
     """
     检查远程服务器目录结构并下载缺失的仓库。
@@ -318,6 +375,16 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_dir}')
     _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_tmp_dir}')
 
+    # 清理历史部署遗留的低速中断配置（该配置是持久化到 ~/.gitconfig 的）
+    _ssh_exec_ignore_error(ssh=ssh, command='git config --global --unset-all http.lowSpeedLimit')
+    _ssh_exec_ignore_error(ssh=ssh, command='git config --global --unset-all http.lowSpeedTime')
+    _ssh_exec_ignore_error(ssh=ssh, command='git config --global http.postBuffer 524288000')
+    git_cfg = _ssh_exec_ignore_error(
+        ssh=ssh,
+        command='git config --global --get-regexp "^http\\.(postBuffer|lowSpeedLimit|lowSpeedTime)$" || true',
+    )
+    logger.info("Remote git http config after sanitize, trace_id=%s, config=%s", trace_id, git_cfg or "<empty>")
+
     for repo in repos:
         repo_id_str = str(repo.id)
         if repo_id_str not in repo_auth:
@@ -327,17 +394,135 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
         repo_name = auth['repo_name']
         token = auth['token']
         url = repo.url
+        branch = repo.default_branch or 'main'
         auth_url = url.replace('https://github.com', f'https://x-access-token:{token}@github.com')
 
-        # 检查仓库目录是否存在
-        check = _ssh_exec_ignore_error(ssh=ssh, command=f'test -d {repo_dir}/{repo_name} && echo "exists" || echo "not_exists"')
+        target_path = f'{repo_dir}/{repo_name}'
 
-        if 'not_exists' in check:
-            logger.info("Cloning repo: %s -> %s/%s, trace_id=%s", repo_name, repo_dir, repo_name, trace_id)
-            _ssh_exec(ssh=ssh, command=f'cd {repo_dir} && git clone {auth_url} {repo_name}')
-        else:
-            # 更新远程 URL（刷新 token）并 fetch 最新代码
-            _ssh_exec(ssh=ssh, command=f'cd {repo_dir}/{repo_name} && git remote set-url origin {auth_url} && git fetch origin')
+        is_valid_repo = _ssh_exec_ignore_error(
+            ssh=ssh,
+            command=f'git -C {target_path} rev-parse --is-inside-work-tree 2>/dev/null || echo "invalid"',
+        )
+
+        try:
+            if 'invalid' in is_valid_repo:
+                _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+                _clone_repo_with_retry(
+                    ssh=ssh, auth_url=auth_url, branch=branch,
+                    repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+                )
+            else:
+                _fetch_or_reclone(
+                    ssh=ssh, target_path=target_path, repo_dir=repo_dir,
+                    repo_name=repo_name, branch=branch, auth_url=auth_url, trace_id=trace_id,
+                )
+        except RemoteDeployError as e:
+            if not _is_git_auth_error(e.message):
+                raise
+            # token 可能在部署过程中失效，认证失败时刷新一次并重建本地仓库（re-clone 最可靠）
+            new_token = _refresh_repo_token(repo_url=url, repo_name=repo_name, trace_id=trace_id)
+            repo_auth[repo_id_str]['token'] = new_token
+            new_auth_url = url.replace('https://github.com', f'https://x-access-token:{new_token}@github.com')
+            logger.warning("Git auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
+            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+            _clone_repo_with_retry(
+                ssh=ssh, auth_url=new_auth_url, branch=branch,
+                repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+            )
+
+
+def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_name: str, trace_id: str):
+    """clone 仓库（浅克隆 + 重试 + 指数退避），失败时清理残留目录"""
+    target_path = f'{repo_dir}/{repo_name}'
+    # --no-tags 减少拉取量；per-command 低速超时，卡住 20s 后立刻失败
+    clone_cmd = (
+        f'cd {repo_dir} && {_GIT_HTTP_FAIL_FAST_ENV} '
+        f'git clone --depth 1 --single-branch --no-tags --branch {branch} {auth_url} {repo_name}'
+    )
+
+    last_err = None
+    for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
+        logger.info(
+            "Cloning repo (attempt %d/%d): %s -> %s, trace_id=%s",
+            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, target_path, trace_id,
+        )
+        try:
+            _ssh_exec(ssh=ssh, command=clone_cmd, timeout=_GIT_CLONE_TIMEOUT)
+            return
+        except RemoteDeployError as e:
+            last_err = e
+            logger.warning(
+                "Clone attempt %d failed, repo=%s, trace_id=%s, detail=%s",
+                attempt, repo_name, trace_id, e.message,
+            )
+            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+            if attempt < _GIT_CLONE_MAX_RETRIES and not _is_git_auth_error(e.message):
+                backoff = _GIT_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
+                logger.info("Clone backoff %ds before retry, repo=%s, trace_id=%s", backoff, repo_name, trace_id)
+                time.sleep(backoff)
+
+    raise RemoteDeployError(f"仓库 {repo_name} 克隆失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
+
+
+def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str, branch: str, trace_id: str):
+    """更新已有仓库（浅 fetch 指定分支 + 重试 + 指数退避）
+
+    相比无参数的 `git fetch origin`，只拉取目标分支的最新 1 个 commit，数据量最小化，
+    显著降低跨境链路 TLS 被中断的概率。
+    """
+    fetch_cmd = (
+        f'cd {target_path} && git remote set-url origin {auth_url} && '
+        f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {branch}'
+    )
+
+    last_err = None
+    for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
+        logger.info(
+            "Fetching repo (attempt %d/%d): %s, branch=%s, trace_id=%s",
+            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, branch, trace_id,
+        )
+        try:
+            _ssh_exec(ssh=ssh, command=fetch_cmd, timeout=_GIT_CLONE_TIMEOUT)
+            return
+        except RemoteDeployError as e:
+            last_err = e
+            logger.warning(
+                "Fetch attempt %d failed, repo=%s, trace_id=%s, detail=%s",
+                attempt, repo_name, trace_id, e.message,
+            )
+            # 认证错误不退避、不重试，立即抛给上层刷新 token
+            if _is_git_auth_error(e.message):
+                break
+            if attempt < _GIT_CLONE_MAX_RETRIES:
+                backoff = _GIT_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
+                logger.info("Fetch backoff %ds before retry, repo=%s, trace_id=%s", backoff, repo_name, trace_id)
+                time.sleep(backoff)
+
+    raise RemoteDeployError(f"仓库 {repo_name} fetch 失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
+
+
+def _fetch_or_reclone(ssh, target_path: str, repo_dir: str, repo_name: str, branch: str, auth_url: str, trace_id: str):
+    """优先增量 fetch；fetch 持续失败（非认证错误）时删除本地目录重新浅 clone。
+
+    认证错误保留原语义，抛给上层统一刷新 token 后重建。
+    """
+    try:
+        _fetch_repo_with_retry(
+            ssh=ssh, target_path=target_path, auth_url=auth_url,
+            repo_name=repo_name, branch=branch, trace_id=trace_id,
+        )
+    except RemoteDeployError as fetch_err:
+        if _is_git_auth_error(fetch_err.message):
+            raise
+        logger.warning(
+            "Fetch persistently failed for %s, fallback to re-clone, trace_id=%s, detail=%s",
+            repo_name, trace_id, fetch_err.message,
+        )
+        _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+        _clone_repo_with_retry(
+            ssh=ssh, auth_url=auth_url, branch=branch,
+            repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+        )
 
 
 # ============================================================
@@ -368,6 +553,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     commit_short = commit_id[:8]
     auth = repo_auth[repo_id_str]
     repo_name = auth['repo_name']
+    auth_url = commit_info['url'].replace('https://github.com', f"https://x-access-token:{auth['token']}@github.com")
 
     base_dir = f'/home/{username}/app{client_id}'
     repo_dir = f'{base_dir}/repo'
@@ -375,10 +561,33 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     tmp_repo_dir = f'{tmp_dir}/{repo_name}'
     full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
 
-    # 创建临时目录，拷贝仓库代码，切换到指定 commit
+    # 创建临时目录并清理旧副本。
+    # 历史部署可能遗留 root 拥有文件，先用 sudo 清理并修复权限，避免 cp 权限错误。
     _ssh_exec(ssh=ssh, command=f'mkdir -p {tmp_dir}')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo rm -rf {tmp_repo_dir} || rm -rf {tmp_repo_dir}')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo chown -R {username}:{username} {tmp_dir} || true')
     _ssh_exec(ssh=ssh, command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
-    _ssh_exec(ssh=ssh, command=f'cd {tmp_repo_dir} && git checkout {commit_id}')
+    checkout_cmd = (
+        f'cd {tmp_repo_dir} && '
+        f'git checkout {commit_id} || '
+        f'(git remote set-url origin {auth_url} && '
+        f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && git checkout {commit_id})'
+    )
+    try:
+        _ssh_exec(ssh=ssh, command=checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
+    except RemoteDeployError as e:
+        if not _is_git_auth_error(e.message):
+            raise
+        new_token = _refresh_repo_token(repo_url=commit_info['url'], repo_name=repo_name, trace_id=trace_id)
+        repo_auth[repo_id_str]['token'] = new_token
+        auth_url = commit_info['url'].replace('https://github.com', f"https://x-access-token:{new_token}@github.com")
+        retry_checkout_cmd = (
+            f'cd {tmp_repo_dir} && '
+            f'git remote set-url origin {auth_url} && '
+            f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && git checkout {commit_id}'
+        )
+        logger.warning("Checkout auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
+        _ssh_exec(ssh=ssh, command=retry_checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
 
     # Docker 镜像：检查 Dockerfile 是否存在
     image_name = f'app{client_id}_{deploy_uuid}'
@@ -390,10 +599,18 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
         raise RemoteDeployError(f"工作目录 {work_dir or '/'} 下未找到 Dockerfile")
 
     # 镜像打包（已存在则跳过）
-    img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
+    # docker 命令统一用 sudo：ubuntu 用户首次部署尚未加入 docker 组时兜底，避免 /var/run/docker.sock 无权限
+    img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
     if 'not_exists' in img_check:
         logger.info("Building image: %s from %s, trace_id=%s", image_full, full_work_dir, trace_id)
-        _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && docker build -t {image_full} .')
+        # BuildKit 在默认 progress=auto 下会以步骤为单位缓冲输出，失败时容易只剩 header 一行日志，真实错误丢失。
+        # 强制 --progress=plain + 2>&1 合流，确保失败原因在 stdout tail 中完整可见；sudo -E 保留 BUILDKIT 相关环境变量。
+        build_cmd = (
+            f'cd {full_work_dir} && '
+            f'BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 DOCKER_CLI_HINTS=false '
+            f'sudo -E docker build --progress=plain -t {image_full} . 2>&1'
+        )
+        _ssh_exec(ssh=ssh, command=build_cmd, timeout=600)
     else:
         logger.info("Image %s already exists, skip build, trace_id=%s", image_full, trace_id)
 
@@ -411,18 +628,18 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
 
     # 创建 Docker 网络
     network_name = f'network_{client_id}_{key}' if key else f'network_{client_id}'
-    _ssh_exec_ignore_error(ssh=ssh, command=f'docker network create {network_name} 2>/dev/null')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker network create {network_name} 2>/dev/null')
 
     # 停止并删除旧容器
     container_name = f'app_{client_id}_{deploy_uuid}'
-    _ssh_exec_ignore_error(ssh=ssh, command=f'docker rm -f {container_name} 2>/dev/null')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {container_name} 2>/dev/null')
 
     # 生成随机端口
     port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
 
     # 启动容器
     mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
-    run_cmd = f'docker run -d --name {container_name} --network {network_name} -p {port}:8080 {mount_opt} {image_full}'
+    run_cmd = f'sudo docker run -d --name {container_name} --network {network_name} -p {port}:8080 {mount_opt} {image_full}'
     if startup_command:
         escaped_cmd = startup_command.replace("'", "'\\''")
         run_cmd += f" sh -c '{escaped_cmd}'"
@@ -482,14 +699,14 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
     _ssh_write_file(ssh=ssh, remote_dir=nginx_dir, remote_path=nginx_conf_path, content=nginx_conf)
 
     # 停止并删除旧 Nginx 容器
-    _ssh_exec_ignore_error(ssh=ssh, command=f'docker rm -f {nginx_name} 2>/dev/null')
+    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {nginx_name} 2>/dev/null')
 
     # 生成随机端口
     nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
 
     # 启动 Nginx 容器
     _ssh_exec(ssh=ssh, command=(
-        f'docker run -d --name {nginx_name} --network {network_name} '
+        f'sudo docker run -d --name {nginx_name} --network {network_name} '
         f'-p {nginx_port}:80 '
         f'-v {nginx_conf_path}:/etc/nginx/conf.d/default.conf:ro '
         f'nginx:alpine'
