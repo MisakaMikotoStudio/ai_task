@@ -13,12 +13,13 @@ from .models import Client, DeployRecord
 logger = logging.getLogger(__name__)
 
 
-def create_deploy_record(user_id: int, client_id: int, env: str, description: str, status: str, detail: dict) -> int:
+def create_deploy_record(user_id: int, client_id: int, env: str, description: str, status: str, detail: dict, msg_id: int = 0) -> int:
     """创建发布记录，返回记录 ID"""
     with get_db_session() as session:
         record = DeployRecord(
             user_id=user_id,
             client_id=client_id,
+            msg_id=msg_id or 0,
             env=env,
             description=description,
             status=status,
@@ -29,9 +30,12 @@ def create_deploy_record(user_id: int, client_id: int, env: str, description: st
         return record.id
 
 
-def get_deploy_records_by_client(user_id: int, client_id: int, status: str = None, page: int = 1, page_size: int = 20) -> dict:
-    """获取指定客户端的发布记录列表（按创建时间倒序，支持分页和状态筛选）"""
-    return _query_deploy_records(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
+def get_deploy_records_by_client(user_id: int, client_id: int, status: str = None, env: str = None, msg_id: int = None, page: int = 1, page_size: int = 20) -> dict:
+    """获取指定客户端的发布记录列表（按创建时间倒序，支持分页、状态、环境、msg_id 筛选）"""
+    return _query_deploy_records(
+        user_id=user_id, client_id=client_id, status=status, env=env, msg_id=msg_id,
+        page=page, page_size=page_size,
+    )
 
 
 def get_deploy_records_by_user(user_id: int, client_id: int = None, status: str = None, page: int = 1, page_size: int = 20) -> dict:
@@ -39,7 +43,7 @@ def get_deploy_records_by_user(user_id: int, client_id: int = None, status: str 
     return _query_deploy_records(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
 
 
-def _query_deploy_records(user_id: int, client_id: int = None, status: str = None, page: int = 1, page_size: int = 20) -> dict:
+def _query_deploy_records(user_id: int, client_id: int = None, status: str = None, env: str = None, msg_id: int = None, page: int = 1, page_size: int = 20) -> dict:
     """发布记录通用查询：强制按 user_id 过滤，LEFT JOIN ai_task_clients 带出应用名称。"""
     with get_db_session() as session:
         query = session.query(DeployRecord, Client.name).outerjoin(
@@ -52,6 +56,10 @@ def _query_deploy_records(user_id: int, client_id: int = None, status: str = Non
             query = query.filter(DeployRecord.client_id == client_id)
         if status:
             query = query.filter(DeployRecord.status == status)
+        if env:
+            query = query.filter(DeployRecord.env == env)
+        if msg_id is not None:
+            query = query.filter(DeployRecord.msg_id == msg_id)
         total = query.count()
         offset = (page - 1) * page_size
         rows = query.order_by(DeployRecord.created_at.desc()).offset(offset).limit(page_size).all()
@@ -61,6 +69,35 @@ def _query_deploy_records(user_id: int, client_id: int = None, status: str = Non
             record_dict['client_name'] = client_name or ''
             records.append(record_dict)
         return {'records': records, 'total': total, 'page': page, 'page_size': page_size}
+
+
+def get_latest_deploy_records_by_msg_ids(user_id: int, client_id: int, msg_ids: list) -> dict:
+    """
+    批量查询指定 msg_id 列表下的最新发布记录。
+
+    Returns:
+        {str(msg_id): {env: record_dict, ...}, ...}
+        对每个 (msg_id, env) 组合返回创建时间最新的一条记录。
+    """
+    valid_ids = [int(mid) for mid in msg_ids if mid and int(mid) > 0]
+    if not valid_ids:
+        return {}
+    with get_db_session() as session:
+        records = session.query(DeployRecord).filter(
+            DeployRecord.user_id == user_id,
+            DeployRecord.client_id == client_id,
+            DeployRecord.msg_id.in_(valid_ids),
+            DeployRecord.deleted_at.is_(None),
+        ).order_by(DeployRecord.created_at.desc()).all()
+
+    result = {}
+    for record in records:
+        key = str(record.msg_id)
+        bucket = result.setdefault(key, {})
+        # 创建时间倒序遍历，每个 env 只保留首次出现的（即最新）一条
+        if record.env not in bucket:
+            bucket[record.env] = record.to_dict()
+    return result
 
 
 def get_pending_prod_deploy_records() -> List[DeployRecord]:

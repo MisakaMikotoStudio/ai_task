@@ -35,6 +35,17 @@ def _run_migrations(engine):
         ADD COLUMN IF NOT EXISTS `work_dir` VARCHAR(512) NULL DEFAULT ''
         COMMENT '工作目录路径，启动命令在此目录下运行'
         """,
+        # DeployRecord 表增加 msg_id 字段（关联 chat message）
+        """
+        ALTER TABLE ai_task_deploy_records
+        ADD COLUMN IF NOT EXISTS `msg_id` INT NOT NULL DEFAULT 0
+        COMMENT '关联 chat 消息ID，0 表示未关联'
+        """,
+        # DeployRecord 表增加 (client_id, msg_id) 组合索引（重复创建时会抛错，由外层 try 吞掉）
+        """
+        CREATE INDEX `idx_deploy_records_client_msg`
+        ON ai_task_deploy_records (`client_id`, `msg_id`)
+        """,
     ]
     with engine.connect() as conn:
         for sql in migrations:
