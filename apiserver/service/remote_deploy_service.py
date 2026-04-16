@@ -11,6 +11,8 @@
 
 import logging
 import os
+import re
+import traceback
 import uuid
 from collections import defaultdict
 
@@ -46,6 +48,11 @@ def _create_ssh_client(ip: str, username: str, password: str):
     return client
 
 
+def _sanitize_command(command: str) -> str:
+    """移除命令中的 token/密码等敏感信息，用于日志输出"""
+    return re.sub(r'x-access-token:[^@]+@', 'x-access-token:***@', command)
+
+
 def _ssh_exec(ssh, command: str) -> str:
     """执行 SSH 命令并返回 stdout，非零退出码抛出异常"""
     stdin, stdout, stderr = ssh.exec_command(command)
@@ -53,7 +60,8 @@ def _ssh_exec(ssh, command: str) -> str:
     out = stdout.read().decode('utf-8', errors='replace').strip()
     if exit_status != 0:
         err = stderr.read().decode('utf-8', errors='replace').strip()
-        raise RemoteDeployError(f"命令失败(exit={exit_status}): {command[:120]}  stderr: {err[:500]}")
+        safe_cmd = _sanitize_command(command=command)
+        raise RemoteDeployError(f"命令失败(exit={exit_status}): {safe_cmd[:200]}  stderr: {err[-500:]}")
     return out
 
 
@@ -79,7 +87,7 @@ def _ssh_write_file(ssh, remote_dir: str, remote_path: str, content: str) -> Non
 # 环境初始化
 # ============================================================
 
-def _init_server_env(ssh):
+def _init_server_env(ssh, trace_id: str):
     """传输并执行服务器环境初始化脚本（安装 git、docker、nginx、certbot）"""
     try:
         with open(_ENV_INIT_SCRIPT_PATH, 'r', encoding='utf-8') as f:
@@ -90,9 +98,9 @@ def _init_server_env(ssh):
     remote_path = '/tmp/server_env_init.sh'
     _ssh_write_file(ssh=ssh, remote_dir='/tmp', remote_path=remote_path, content=script_content)
     _ssh_exec(ssh=ssh, command=f'chmod +x {remote_path}')
-    logger.info("Executing server env init script on remote server")
+    logger.info("Executing server env init script on remote server, trace_id=%s", trace_id)
     _ssh_exec(ssh=ssh, command=f'bash {remote_path}')
-    logger.info("Server env init completed successfully")
+    logger.info("Server env init completed successfully, trace_id=%s", trace_id)
 
 
 # ============================================================
@@ -177,7 +185,7 @@ def _execute_prod_deploy(record):
 
         # 3.1 补充 repo commit 信息
         repos = get_client_repos(client_id=client_id, user_id=user_id)
-        commits, repo_auth = _fill_commit_info(repos=repos)
+        commits, repo_auth = _fill_commit_info(repos=repos, trace_id=trace_id)
         detail['commits'] = commits
         update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
 
@@ -195,13 +203,13 @@ def _execute_prod_deploy(record):
 
         ssh = _create_ssh_client(ip=ip, username=username, password=password)
         try:
-            logger.info("SSH connected: record_id=%s, ip=%s", record_id, ip)
+            logger.info("SSH connected: record_id=%s, ip=%s, trace_id=%s", record_id, ip, trace_id)
 
             # 环境初始化：传输并执行 server_env_init.sh
-            _init_server_env(ssh=ssh)
+            _init_server_env(ssh=ssh, trace_id=trace_id)
 
             # 3.3 目录文件检查
-            _setup_directories(ssh=ssh, username=username, client_id=client_id, repos=repos, repo_auth=repo_auth)
+            _setup_directories(ssh=ssh, username=username, client_id=client_id, repos=repos, repo_auth=repo_auth, trace_id=trace_id)
 
             # 3.4 遍历部署命令
             deploys = get_client_deploys(client_id=client_id, user_id=user_id)
@@ -216,7 +224,7 @@ def _execute_prod_deploy(record):
             for deploy in deploys:
                 cname = _execute_single_deploy(
                     ssh=ssh, username=username, client_id=client_id, record_id=record_id,
-                    deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=user_id, key=key,
+                    deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=user_id, key=key, trace_id=trace_id,
                 )
                 container_names.append(cname)
 
@@ -224,28 +232,29 @@ def _execute_prod_deploy(record):
             if prod_domains and container_names:
                 _setup_nginx_container(
                     ssh=ssh, username=username, client_id=client_id,
-                    container_names=container_names, key=key, prod_domains=prod_domains,
+                    container_names=container_names, key=key, prod_domains=prod_domains, trace_id=trace_id,
                 )
 
             # 部署成功
             detail['deploy_log'] = '部署成功'
             update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_SUCCESS, detail=detail)
-            logger.info("Prod deploy success: record_id=%s, client_id=%s", record_id, client_id)
+            logger.info("Prod deploy success: record_id=%s, client_id=%s, trace_id=%s", record_id, client_id, trace_id)
         finally:
             ssh.close()
 
     except Exception as e:
         error_msg = str(e)
+        tb = traceback.format_exc()
         detail['deploy_log'] = f'部署失败：{error_msg}'
         update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_FAILED, detail=detail)
-        logger.error("Prod deploy failed: record_id=%s, client_id=%s, error=%s", record_id, client_id, error_msg)
+        logger.error("Prod deploy failed: record_id=%s, client_id=%s, trace_id=%s, error=%s\n%s", record_id, client_id, trace_id, error_msg, tb)
 
 
 # ============================================================
 # 步骤 3.1：Commit 信息补充
 # ============================================================
 
-def _fill_commit_info(repos) -> tuple:
+def _fill_commit_info(repos, trace_id: str) -> tuple:
     """
     查询所有仓库默认分支的最新 commitId。
 
@@ -263,7 +272,7 @@ def _fill_commit_info(repos) -> tuple:
         url = repo.url
         org, repo_name = parse_github_url(url=url)
         if not org or not repo_name:
-            logger.warning("Cannot parse repo URL: %s, skip", url)
+            logger.warning("Cannot parse repo URL: %s, skip, trace_id=%s", url, trace_id)
             continue
 
         # 刷新 GitHub Installation Token
@@ -282,7 +291,7 @@ def _fill_commit_info(repos) -> tuple:
         repo_id_str = str(repo.id)
         commits[repo_id_str] = {'url': url, 'branch': branch, 'commit_id': commit_id}
         repo_auth[repo_id_str] = {'token': token, 'org': org, 'repo_name': repo_name}
-        logger.info("Got commit: repo=%s, branch=%s, commit=%s", repo_name, branch, commit_id[:8])
+        logger.info("Got commit: repo=%s, branch=%s, commit=%s, trace_id=%s", repo_name, branch, commit_id[:8], trace_id)
 
     return commits, repo_auth
 
@@ -291,7 +300,7 @@ def _fill_commit_info(repos) -> tuple:
 # 步骤 3.3：目录文件检查
 # ============================================================
 
-def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict):
+def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
     """
     检查远程服务器目录结构并下载缺失的仓库。
 
@@ -324,7 +333,7 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
         check = _ssh_exec_ignore_error(ssh=ssh, command=f'test -d {repo_dir}/{repo_name} && echo "exists" || echo "not_exists"')
 
         if 'not_exists' in check:
-            logger.info("Cloning repo: %s -> %s/%s", repo_name, repo_dir, repo_name)
+            logger.info("Cloning repo: %s -> %s/%s, trace_id=%s", repo_name, repo_dir, repo_name, trace_id)
             _ssh_exec(ssh=ssh, command=f'cd {repo_dir} && git clone {auth_url} {repo_name}')
         else:
             # 更新远程 URL（刷新 token）并 fetch 最新代码
@@ -335,7 +344,7 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
 # 步骤 3.4：单条部署命令执行
 # ============================================================
 
-def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, deploy, commits: dict, repo_auth: dict, user_id: int, key: str) -> str:
+def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, deploy, commits: dict, repo_auth: dict, user_id: int, key: str, trace_id: str) -> str:
     """
     执行单条部署命令（ClientDeploy）：拷贝仓库、打包镜像、启动容器。
 
@@ -383,10 +392,10 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     # 镜像打包（已存在则跳过）
     img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
     if 'not_exists' in img_check:
-        logger.info("Building image: %s from %s", image_full, full_work_dir)
+        logger.info("Building image: %s from %s, trace_id=%s", image_full, full_work_dir, trace_id)
         _ssh_exec(ssh=ssh, command=f'cd {full_work_dir} && docker build -t {image_full} .')
     else:
-        logger.info("Image %s already exists, skip build", image_full)
+        logger.info("Image %s already exists, skip build, trace_id=%s", image_full, trace_id)
 
     # 生成 TOML 配置并写入远程服务器
     toml_content = generate_deploy_toml(
@@ -419,7 +428,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
         run_cmd += f" sh -c '{escaped_cmd}'"
 
     _ssh_exec(ssh=ssh, command=run_cmd)
-    logger.info("Container started: name=%s, port=%s, image=%s", container_name, port, image_full)
+    logger.info("Container started: name=%s, port=%s, image=%s, trace_id=%s", container_name, port, image_full, trace_id)
 
     return container_name
 
@@ -428,7 +437,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
 # Nginx 容器路由
 # ============================================================
 
-def _setup_nginx_container(ssh, username: str, client_id: int, container_names: list, key: str, prod_domains: list):
+def _setup_nginx_container(ssh, username: str, client_id: int, container_names: list, key: str, prod_domains: list, trace_id: str):
     """
     创建 Nginx 容器用于域名路由。
 
@@ -485,4 +494,4 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
         f'-v {nginx_conf_path}:/etc/nginx/conf.d/default.conf:ro '
         f'nginx:alpine'
     ))
-    logger.info("Nginx container started: name=%s, port=%s, server_name=%s", nginx_name, nginx_port, server_names)
+    logger.info("Nginx container started: name=%s, port=%s, server_name=%s, trace_id=%s", nginx_name, nginx_port, server_names, trace_id)
