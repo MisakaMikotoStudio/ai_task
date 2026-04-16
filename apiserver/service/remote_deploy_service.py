@@ -327,6 +327,25 @@ _GIT_CLONE_TIMEOUT = 300
 _GIT_CLONE_MAX_RETRIES = 2
 
 
+def _is_git_auth_error(message: str) -> bool:
+    lower_msg = (message or "").lower()
+    return (
+        "authentication failed" in lower_msg
+        or "invalid username or token" in lower_msg
+        or "password authentication is not supported" in lower_msg
+    )
+
+
+def _refresh_repo_token(repo_url: str, repo_name: str, trace_id: str) -> str:
+    from service.git_service import refresh_repo_token_by_url
+
+    logger.info("Refreshing repo token: repo=%s, trace_id=%s", repo_name, trace_id)
+    try:
+        return refresh_repo_token_by_url(repo_url=repo_url)
+    except Exception as e:
+        raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
+
+
 def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
     """
     检查远程服务器目录结构并下载缺失的仓库。
@@ -374,17 +393,37 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
             command=f'git -C {target_path} rev-parse --is-inside-work-tree 2>/dev/null || echo "invalid"',
         )
 
-        if 'invalid' in is_valid_repo:
-            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
-            _clone_repo_with_retry(
-                ssh=ssh, auth_url=auth_url, branch=branch,
-                repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
-            )
-        else:
-            _fetch_repo_with_retry(
-                ssh=ssh, target_path=target_path, auth_url=auth_url,
-                repo_name=repo_name, trace_id=trace_id,
-            )
+        try:
+            if 'invalid' in is_valid_repo:
+                _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+                _clone_repo_with_retry(
+                    ssh=ssh, auth_url=auth_url, branch=branch,
+                    repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+                )
+            else:
+                _fetch_repo_with_retry(
+                    ssh=ssh, target_path=target_path, auth_url=auth_url,
+                    repo_name=repo_name, trace_id=trace_id,
+                )
+        except RemoteDeployError as e:
+            if not _is_git_auth_error(e.message):
+                raise
+            # token 可能在部署过程中失效，认证失败时刷新一次并重试
+            new_token = _refresh_repo_token(repo_url=url, repo_name=repo_name, trace_id=trace_id)
+            repo_auth[repo_id_str]['token'] = new_token
+            new_auth_url = url.replace('https://github.com', f'https://x-access-token:{new_token}@github.com')
+            logger.warning("Git auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
+            if 'invalid' in is_valid_repo:
+                _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
+                _clone_repo_with_retry(
+                    ssh=ssh, auth_url=new_auth_url, branch=branch,
+                    repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+                )
+            else:
+                _fetch_repo_with_retry(
+                    ssh=ssh, target_path=target_path, auth_url=new_auth_url,
+                    repo_name=repo_name, trace_id=trace_id,
+                )
 
 
 def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_name: str, trace_id: str):
@@ -480,7 +519,21 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
         f'git checkout {commit_id} || '
         f'(git remote set-url origin {auth_url} && git fetch --depth 1 origin {commit_id} && git checkout {commit_id})'
     )
-    _ssh_exec(ssh=ssh, command=checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
+    try:
+        _ssh_exec(ssh=ssh, command=checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
+    except RemoteDeployError as e:
+        if not _is_git_auth_error(e.message):
+            raise
+        new_token = _refresh_repo_token(repo_url=commit_info['url'], repo_name=repo_name, trace_id=trace_id)
+        repo_auth[repo_id_str]['token'] = new_token
+        auth_url = commit_info['url'].replace('https://github.com', f"https://x-access-token:{new_token}@github.com")
+        retry_checkout_cmd = (
+            f'cd {tmp_repo_dir} && '
+            f'git remote set-url origin {auth_url} && '
+            f'git fetch --depth 1 origin {commit_id} && git checkout {commit_id}'
+        )
+        logger.warning("Checkout auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
+        _ssh_exec(ssh=ssh, command=retry_checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
 
     # Docker 镜像：检查 Dockerfile 是否存在
     image_name = f'app{client_id}_{deploy_uuid}'
