@@ -8,7 +8,7 @@ import logging
 
 from flask import Blueprint, request, jsonify
 
-from dao.deploy_dao import create_deploy_record, get_deploy_records_by_client, cancel_deploy_record, retry_deploy_record
+from dao.deploy_dao import create_deploy_record, get_deploy_records_by_client, get_deploy_records_by_user, cancel_deploy_record, retry_deploy_record
 from dao.client_dao import get_client_by_id
 from dao.models import DeployRecord
 
@@ -36,6 +36,30 @@ def list_deploy_records(client_id):
         return jsonify({'code': 400, 'message': f'无效的状态筛选，可选值: {", ".join(DeployRecord.VALID_STATUSES)}'}), 400
 
     result = get_deploy_records_by_client(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
+    return jsonify({'code': 200, 'data': result})
+
+
+@deploy_bp.route('/records', methods=['GET'])
+def list_all_deploy_records():
+    """获取当前用户的发布记录列表（支持按应用、状态筛选 + 分页，附带应用名称）"""
+    user_id = request.user_info.user_id
+
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 20, type=int)
+    status = request.args.get('status', '', type=str).strip() or None
+    client_id = request.args.get('client_id', type=int)
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 100:
+        page_size = 20
+    if status and status not in DeployRecord.VALID_STATUSES:
+        return jsonify({'code': 400, 'message': f'无效的状态筛选，可选值: {", ".join(DeployRecord.VALID_STATUSES)}'}), 400
+    if client_id is not None:
+        client = get_client_by_id(client_id, user_id)
+        if not client:
+            return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
+
+    result = get_deploy_records_by_user(user_id=user_id, client_id=client_id, status=status, page=page, page_size=page_size)
     return jsonify({'code': 200, 'data': result})
 
 

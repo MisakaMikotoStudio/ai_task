@@ -94,6 +94,20 @@
             white-space: nowrap;
         }
 
+        .deploy-table .deploy-id-cell {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .deploy-table .deploy-client-cell {
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .deploy-table .deploy-detail-cell {
             font-family: monospace;
             font-size: 12px;
@@ -283,7 +297,11 @@
         <div class="deploy-page-header">
             <h1 class="deploy-page-title">发布详情</h1>
             <div class="deploy-filter-bar">
-                <label for="status-filter">状态筛选</label>
+                <label for="client-filter">应用</label>
+                <select id="client-filter">
+                    <option value="">全部</option>
+                </select>
+                <label for="status-filter">状态</label>
                 <select id="status-filter">
                     <option value="">全部</option>
                     <option value="pending">等待发布</option>
@@ -301,6 +319,8 @@
                 <table class="deploy-table">
                     <thead>
                         <tr>
+                            <th>记录ID</th>
+                            <th>应用名称</th>
                             <th>环境</th>
                             <th>描述</th>
                             <th>状态</th>
@@ -321,7 +341,7 @@
     </div>
 
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=16"></script>
+    <script src="js/api.js?v=17"></script>
     <script>
     (function() {
         const DEPLOY_STATUS_CLASS = {
@@ -334,22 +354,37 @@
 
         const PAGE_SIZE = 20;
         let currentPage = 1;
-        let clientId = null;
 
         const params = new URLSearchParams(window.location.search);
-        clientId = parseInt(params.get('client_id'), 10);
-        if (!clientId) {
-            document.getElementById('deploy-loading').textContent = '缺少 client_id 参数';
-            return;
-        }
+        const urlClientId = parseInt(params.get('client_id'), 10);
 
-        document.title = `发布详情 - 应用 #${clientId}`;
+        document.title = '发布详情';
 
+        const clientFilter = document.getElementById('client-filter');
         const statusFilter = document.getElementById('status-filter');
+
+        clientFilter.addEventListener('change', function() {
+            currentPage = 1;
+            loadRecords();
+        });
         statusFilter.addEventListener('change', function() {
             currentPage = 1;
             loadRecords();
         });
+
+        async function loadClientOptions() {
+            try {
+                const res = await clientAPI.list();
+                const clients = (res && res.data) ? res.data : [];
+                const options = clients.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+                clientFilter.insertAdjacentHTML('beforeend', options);
+                if (urlClientId && clients.some(c => c.id === urlClientId)) {
+                    clientFilter.value = String(urlClientId);
+                }
+            } catch (e) {
+                // 下拉加载失败不阻塞列表加载
+            }
+        }
 
         async function loadRecords() {
             const loadingEl = document.getElementById('deploy-loading');
@@ -364,7 +399,8 @@
             try {
                 await initAPIConfig();
                 const status = statusFilter.value;
-                const res = await deployAPI.listRecords(clientId, { page: currentPage, page_size: PAGE_SIZE, status: status });
+                const clientIdVal = clientFilter.value;
+                const res = await deployAPI.listAllRecords({ client_id: clientIdVal, status: status, page: currentPage, page_size: PAGE_SIZE });
                 const data = res.data || {};
                 const records = data.records || [];
                 const total = data.total || 0;
@@ -410,7 +446,10 @@
             if (canCancel) actionHtml = `<button class="btn-action btn-cancel" onclick="cancelRecord(${record.id})">取消</button>`;
             if (canRetry) actionHtml = `<button class="btn-action btn-retry" onclick="retryRecord(${record.id})">重试</button>`;
             const detailBtnHtml = `<button class="btn-detail" onclick="showDetail(${index})">发布详情</button>`;
+            const clientName = record.client_name ? escapeHtml(record.client_name) : '-';
             return `<tr>
+                <td class="deploy-id-cell">#${record.id}</td>
+                <td class="deploy-client-cell" title="${clientName}">${clientName}</td>
                 <td><span class="env-badge env-${record.env}">${envLabel}</span></td>
                 <td class="deploy-desc-cell" title="${escapeHtml(record.description)}">${escapeHtml(record.description)}</td>
                 <td><span class="deploy-status-chip ${statusClass}">${escapeHtml(record.status_text)}</span></td>
@@ -492,7 +531,15 @@
             return;
         }
 
-        loadRecords();
+        (async function bootstrap() {
+            try {
+                await initAPIConfig();
+            } catch (e) {
+                // initAPIConfig 失败时 loadRecords 内部会再捕获
+            }
+            await loadClientOptions();
+            loadRecords();
+        })();
     })();
     </script>
 </body>
