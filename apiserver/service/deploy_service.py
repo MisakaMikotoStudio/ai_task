@@ -6,6 +6,7 @@
 
 import logging
 import random
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -406,3 +407,90 @@ def _ssh_write_file(ip: str, username: str, password: str, remote_dir: str, remo
             sftp.close()
     finally:
         client.close()
+
+
+def auto_create_test_deploy_on_message_sync(
+    user_id: int,
+    task_id: int,
+    chat_id: int,
+    message_id: int,
+    merge_request: List[Dict[str, Any]],
+) -> Optional[int]:
+    """
+    客户端 after_execute 通过 /api/open/chat/msg/sync_execute 上报 chat 分支 merge_request
+    时，自动创建/更新一条测试环境发布记录。
+
+    触发条件：merge_request 中存在至少一条带 repo_name 与 latest_commitId 的 diff 记录。
+    幂等语义：按 (user_id, client_id, task_id, chat_id, msg_id, env='test') 唯一：
+      - 不存在 → 创建 pending 记录
+      - 已存在且 status == publishing → 不打断，仅返回现有记录 ID
+      - 已存在且其它状态 → 重置为 pending 并更新 description/detail
+
+    client_id 解析：
+      - task_id > 0：从 Task.client_id 取
+      - task_id == 0（独立 Chat）：从 Chat.client_id 取
+
+    Returns:
+        记录 ID；merge_request 无 diff、或无法解析 client_id 时返回 None。
+    """
+    if not merge_request:
+        return None
+
+    has_diff = any(
+        isinstance(mr, dict) and mr.get('repo_name') and mr.get('latest_commitId')
+        for mr in merge_request
+    )
+    if not has_diff:
+        return None
+
+    task_id = int(task_id or 0)
+    chat_id = int(chat_id or 0)
+    message_id = int(message_id or 0)
+    if chat_id <= 0 or message_id <= 0:
+        logger.warning(
+            "auto test deploy skipped: missing chat_id/msg_id, user_id=%s task_id=%s chat_id=%s msg_id=%s",
+            user_id, task_id, chat_id, message_id,
+        )
+        return None
+
+    client_id: Optional[int] = None
+    if task_id > 0:
+        from dao.task_dao import get_task_by_id
+        task = get_task_by_id(task_id, user_id)
+        client_id = getattr(task, 'client_id', None) if task else None
+    else:
+        from dao.chat_dao import get_chat_by_id
+        chat = get_chat_by_id(user_id=user_id, chat_id=chat_id, task_id=task_id)
+        client_id = getattr(chat, 'client_id', None) if chat else None
+
+    if not client_id:
+        logger.warning(
+            "auto test deploy skipped: client_id unresolved, user_id=%s task_id=%s chat_id=%s msg_id=%s",
+            user_id, task_id, chat_id, message_id,
+        )
+        return None
+
+    from dao.deploy_dao import upsert_auto_test_deploy_record
+
+    description = f'after_execute 自动发布 task{task_id}chat{chat_id}msg{message_id}'[:255]
+    detail = {
+        'task_id': task_id,
+        'chat_id': chat_id,
+        'msg_id': message_id,
+        'source': 'after_execute',
+    }
+
+    record_id, action = upsert_auto_test_deploy_record(
+        user_id=user_id,
+        client_id=int(client_id),
+        task_id=task_id,
+        chat_id=chat_id,
+        msg_id=message_id,
+        description=description,
+        detail=detail,
+    )
+    logger.info(
+        "auto test deploy upsert: action=%s record_id=%s user_id=%s client_id=%s task_id=%s chat_id=%s msg_id=%s",
+        action, record_id, user_id, client_id, task_id, chat_id, message_id,
+    )
+    return record_id

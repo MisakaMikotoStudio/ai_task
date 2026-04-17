@@ -6,7 +6,7 @@ SQLAlchemy ORM 模型定义
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Index, func, BigInteger, Text, Date, Boolean, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Index, UniqueConstraint, func, BigInteger, Text, Date, Boolean, Numeric
 from decimal import Decimal
 from sqlalchemy.orm import DeclarativeBase
 
@@ -862,6 +862,15 @@ class DeployRecord(Base):
         Index('idx_deploy_records_user_client', 'user_id', 'client_id'),
         Index('idx_deploy_records_client_env', 'client_id', 'env'),
         Index('idx_deploy_records_client_msg', 'client_id', 'msg_id'),
+        # 同一 (task_id, chat_id, msg_id, env) 仅允许一条记录：
+        # - after_execute 自动测试发布按该键做 upsert，避免重复 pending
+        # - 保留 env 维度以便同一 msg 的 test/prod 记录并存（不同环境一条一条）
+        # 注意：DeployRecord 目前无软删除写入，deleted_at 未纳入唯一键；
+        # 若后续引入软删除需重新评估（避免与已软删行冲突）。
+        UniqueConstraint(
+            'task_id', 'chat_id', 'msg_id', 'env',
+            name='uk_deploy_records_task_chat_msg_env',
+        ),
     )
 
     STATUS_PENDING = 'pending'
