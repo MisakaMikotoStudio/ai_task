@@ -143,7 +143,7 @@ def refresh_repo_token_api(client_id, repo_id):
         return jsonify({'code': 400, 'message': '仓库配置不存在'}), 400
 
     try:
-        new_token = refresh_repo_token_by_url(repo_url=repo.url)
+        new_token = refresh_repo_token_by_url(repo_url=repo.url, force=True)
     except GitHubServiceError as e:
         return jsonify({'code': 500, 'message': f'token刷新失败: {e.message}'}), 500
 

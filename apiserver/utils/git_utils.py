@@ -13,7 +13,8 @@ GitHub REST API 底层工具 —— 纯第三方 API 操作，不依赖业务模
 
 import logging
 import time
-from typing import Dict, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -130,7 +131,7 @@ def create_installation_token(
     repository_ids: Optional[list] = None,
     permissions: Optional[Dict[str, str]] = None,
     trace_id: str = '',
-) -> str:
+) -> Dict[str, Any]:
     """
     创建 GitHub App Installation Access Token。
 
@@ -144,7 +145,8 @@ def create_installation_token(
         trace_id: 链路追踪 ID，用于日志聚合
 
     Returns:
-        Installation Access Token
+        {'token': Installation Access Token 字符串,
+         'expires_at': token 过期时间（UTC datetime，若 GitHub 未返回则为 None）}
 
     Raises:
         GitHubServiceError: 创建失败
@@ -182,7 +184,8 @@ def create_installation_token(
         if not token:
             raise GitHubServiceError("创建 Installation Token 失败：响应中缺少 token 字段")
 
-        return token
+        expires_at = _parse_github_datetime(data.get('expires_at', ''))
+        return {'token': token, 'expires_at': expires_at}
 
     except GitHubServiceError:
         raise
@@ -190,6 +193,21 @@ def create_installation_token(
         raise GitHubServiceError(f"创建 Installation Token 网络请求失败：{str(e)}")
     except Exception as e:
         raise GitHubServiceError(f"创建 Installation Token 失败：{str(e)}")
+
+
+def _parse_github_datetime(value: str) -> Optional[datetime]:
+    """将 GitHub API 返回的 ISO8601 UTC 时间（如 "2024-01-01T12:00:00Z"）解析为带时区的 datetime。"""
+    if not value:
+        return None
+    try:
+        if value.endswith('Z'):
+            value = value[:-1] + '+00:00'
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
 
 
 # ──────────────────────────────────────────────────────

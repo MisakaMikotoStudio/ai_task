@@ -12,7 +12,9 @@ GitHub 代码仓库服务层 —— 业务逻辑（依赖 Resource 模型、DAO 
 """
 
 import logging
-from typing import Dict
+import threading
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional, Tuple
 
 from dao.models import Resource
 from utils.git_utils import (
@@ -29,6 +31,44 @@ from utils.git_utils import (
 
 logger = logging.getLogger(__name__)
 
+# ──────────────────────────────────────────────────────
+#  Installation Token 缓存
+#  - 避免每次 GitHub 操作都重新走 JWT → installation → token 流程
+#  - 缓存 key: (organization, repo_name)；repo_name=None 表示 org 级 token
+#  - 剩余有效期 > 10 分钟时复用，否则重新申请
+# ──────────────────────────────────────────────────────
+_TOKEN_REUSE_THRESHOLD = timedelta(minutes=10)
+_token_cache: Dict[Tuple[str, Optional[str]], Dict[str, Any]] = {}
+_token_cache_lock = threading.Lock()
+
+
+def _get_cached_token(cache_key: Tuple[str, Optional[str]]) -> Optional[str]:
+    """获取缓存中仍有效（剩余 > 10 分钟）的 token，否则返回 None。"""
+    with _token_cache_lock:
+        entry = _token_cache.get(cache_key)
+        if not entry:
+            return None
+        expires_at: Optional[datetime] = entry.get('expires_at')
+        if expires_at is None:
+            return None
+        if expires_at - datetime.now(timezone.utc) > _TOKEN_REUSE_THRESHOLD:
+            return entry.get('token')
+        return None
+
+
+def _set_cached_token(cache_key: Tuple[str, Optional[str]], token: str, expires_at: Optional[datetime]) -> None:
+    """写入 token 缓存；无 expires_at 时按 GitHub 默认 1 小时估算。"""
+    if expires_at is None:
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    with _token_cache_lock:
+        _token_cache[cache_key] = {'token': token, 'expires_at': expires_at}
+
+
+def invalidate_token_cache(organization: str, repo_name: Optional[str] = None) -> None:
+    """清除指定 key 的 token 缓存（token 失效时可调用）。"""
+    with _token_cache_lock:
+        _token_cache.pop((organization, repo_name), None)
+
 # 重导出，方便调用方从 service 层导入
 __all__ = [
     'GitHubServiceError',
@@ -38,6 +78,7 @@ __all__ = [
     'create_repo_scoped_token',
     'setup_repo_for_user',
     'refresh_repo_token_by_url',
+    'invalidate_token_cache',
 ]
 
 
@@ -77,6 +118,8 @@ def _get_installation_token_for_org(resource: Resource, trace_id: str = '') -> s
     """
     获取组织级别的 Installation Access Token（用于创建仓库等操作）。
 
+    优先复用缓存中剩余 > 10 分钟的 token；缓存未命中才重新生成。
+
     Args:
         resource: Resource 对象
 
@@ -87,9 +130,20 @@ def _get_installation_token_for_org(resource: Resource, trace_id: str = '') -> s
         GitHubServiceError: 获取失败
     """
     config = _get_resource_config(resource=resource)
+    organization = config['organization']
+    cache_key: Tuple[str, Optional[str]] = (organization, None)
+
+    cached = _get_cached_token(cache_key=cache_key)
+    if cached:
+        logger.info(
+            "[trace_id=%s] _get_installation_token_for_org: cache hit, org=%s",
+            trace_id, organization,
+        )
+        return cached
+
     jwt_token = generate_app_jwt(app_id=config['app_id'], private_key_pem=config['private_key'], trace_id=trace_id)
-    installation_id = get_installation_id(jwt_token=jwt_token, organization=config['organization'], trace_id=trace_id)
-    return create_installation_token(
+    installation_id = get_installation_id(jwt_token=jwt_token, organization=organization, trace_id=trace_id)
+    result = create_installation_token(
         jwt_token=jwt_token,
         installation_id=installation_id,
         permissions={
@@ -99,6 +153,13 @@ def _get_installation_token_for_org(resource: Resource, trace_id: str = '') -> s
         },
         trace_id=trace_id,
     )
+    _set_cached_token(cache_key=cache_key, token=result['token'], expires_at=result.get('expires_at'))
+    logger.info(
+        "[trace_id=%s] _get_installation_token_for_org: token created, org=%s, expires_at=%s",
+        trace_id, organization,
+        result['expires_at'].isoformat() if result.get('expires_at') else 'unknown',
+    )
+    return result['token']
 
 
 def create_org_repo(resource: Resource, repo_name: str, description: str = '', private: bool = True, trace_id: str = '') -> Dict:
@@ -177,6 +238,8 @@ def create_repo_scoped_token(resource: Resource, repo_name: str, trace_id: str =
     """
     为指定仓库创建仅具有 admin 权限的 Installation Access Token。
 
+    优先复用缓存中剩余 > 10 分钟的 scoped token；缓存未命中才重新申请。
+
     Args:
         resource: Resource 对象
         repo_name: 仓库名称（不含组织前缀）
@@ -189,27 +252,37 @@ def create_repo_scoped_token(resource: Resource, repo_name: str, trace_id: str =
     """
     config = _get_resource_config(resource=resource)
     organization = config['organization']
+    cache_key: Tuple[str, Optional[str]] = (organization, repo_name)
 
-    # 1. 生成 App JWT
+    cached = _get_cached_token(cache_key=cache_key)
+    if cached:
+        logger.info(
+            "[trace_id=%s] create_repo_scoped_token: cache hit, org=%s, repo=%s",
+            trace_id, organization, repo_name,
+        )
+        return cached
+
     jwt_token = generate_app_jwt(
         app_id=config['app_id'],
         private_key_pem=config['private_key'],
         trace_id=trace_id,
     )
 
-    # 2. 获取 Installation ID
     installation_id = get_installation_id(
         jwt_token=jwt_token,
         organization=organization,
         trace_id=trace_id,
     )
 
-    # 3. 获取仓库 ID
-    org_token = create_installation_token(
-        jwt_token=jwt_token,
-        installation_id=installation_id,
-        trace_id=trace_id,
-    )
+    # 3. 获取仓库 ID —— 优先复用缓存中的 org 级 token，否则临时申请一个用于查询
+    org_token = _get_cached_token(cache_key=(organization, None))
+    if not org_token:
+        org_result = create_installation_token(
+            jwt_token=jwt_token,
+            installation_id=installation_id,
+            trace_id=trace_id,
+        )
+        org_token = org_result['token']
     repo_id = get_repo_id_api(
         token=org_token,
         organization=organization,
@@ -217,8 +290,7 @@ def create_repo_scoped_token(resource: Resource, repo_name: str, trace_id: str =
         trace_id=trace_id,
     )
 
-    # 4. 创建仅对该仓库有效的 scoped Installation Token
-    scoped_token = create_installation_token(
+    scoped_result = create_installation_token(
         jwt_token=jwt_token,
         installation_id=installation_id,
         repository_ids=[repo_id],
@@ -229,12 +301,18 @@ def create_repo_scoped_token(resource: Resource, repo_name: str, trace_id: str =
         },
         trace_id=trace_id,
     )
+    _set_cached_token(
+        cache_key=cache_key,
+        token=scoped_result['token'],
+        expires_at=scoped_result.get('expires_at'),
+    )
 
     logger.info(
-        "[trace_id=%s] create_repo_scoped_token: org=%s, repo=%s, repo_id=%s, token created",
+        "[trace_id=%s] create_repo_scoped_token: org=%s, repo=%s, repo_id=%s, token created, expires_at=%s",
         trace_id, organization, repo_name, repo_id,
+        scoped_result['expires_at'].isoformat() if scoped_result.get('expires_at') else 'unknown',
     )
-    return scoped_token
+    return scoped_result['token']
 
 
 def setup_repo_for_user(
@@ -333,16 +411,20 @@ def setup_repo_for_user(
     }
 
 
-def refresh_repo_token_by_url(repo_url: str, trace_id: str = '') -> str:
+def refresh_repo_token_by_url(repo_url: str, trace_id: str = '', force: bool = False) -> str:
     """
-    根据仓库 URL 重新生成 scoped Installation Access Token。
+    根据仓库 URL 获取 scoped Installation Access Token。
+
+    内部会优先复用剩余有效期 > 10 分钟的缓存 token；
+    若需要强制申请新 token（如外部发现旧 token 被吊销），可传 force=True。
 
     Args:
         repo_url: 仓库 URL（如 https://github.com/org/repo.git）
         trace_id: 链路追踪 ID，用于日志聚合
+        force: True 时先清空缓存再重新申请
 
     Returns:
-        新的 scoped token
+        scoped token
 
     Raises:
         GitHubServiceError: 刷新失败
@@ -366,10 +448,13 @@ def refresh_repo_token_by_url(repo_url: str, trace_id: str = '') -> str:
             f"未找到组织 {org} 对应的代码仓库资源，无法刷新 token"
         )
 
+    if force:
+        invalidate_token_cache(organization=org, repo_name=repo_name)
+
     new_token = create_repo_scoped_token(resource=matched_resource, repo_name=repo_name, trace_id=trace_id)
 
     logger.info(
-        "[trace_id=%s] refresh_repo_token_by_url: org=%s, repo=%s, token refreshed",
-        trace_id, org, repo_name,
+        "[trace_id=%s] refresh_repo_token_by_url: org=%s, repo=%s, force=%s, token ready",
+        trace_id, org, repo_name, force,
     )
     return new_token

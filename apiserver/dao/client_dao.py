@@ -640,6 +640,19 @@ def apply_client_env_var_sync(
 VALID_ENVS = ('test', 'prod')
 
 
+def get_all_active_servers_by_env(env: str) -> List[ClientServer]:
+    """
+    获取指定环境下所有未删除的云服务器配置（跨用户，供调度器使用）。
+
+    用于测试环境过期容器清理等需要全局遍历的后台任务。
+    """
+    with get_db_session() as session:
+        return session.query(ClientServer).filter(
+            ClientServer.env == env,
+            ClientServer.deleted_at.is_(None),
+        ).all()
+
+
 def get_client_servers(client_id: int, user_id: int, env: str = None) -> List[ClientServer]:
     """获取客户端云服务器配置（所有环境）"""
     with get_db_session() as session:
