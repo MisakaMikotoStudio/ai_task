@@ -583,6 +583,15 @@ const deployAPI = {
         const body = JSON.stringify({ msg_ids: msgIds || [] });
         return request(`/app/deploy/client/${clientId}/records/by-msgs`, { method: 'POST', body });
     },
+    async preview(clientId, taskId, chatId, msgId, description = '') {
+        const body = JSON.stringify({
+            task_id: taskId || 0,
+            chat_id: chatId || 0,
+            msg_id: msgId || 0,
+            description: description || '',
+        });
+        return request(`/app/deploy/client/${clientId}/preview`, { method: 'POST', body });
+    },
     async cancelRecord(recordId) {
         return request(`/app/deploy/records/${recordId}/cancel`, { method: 'PATCH' });
     },

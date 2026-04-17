@@ -26,6 +26,7 @@ let scRunningMessageId = null;
 let scPollTimer = null;
 let scMergeRequestStore = {};
 let scClientConfigCache = null;
+let scDeployRecordsByMsg = {};
 
 // Image attachment state
 let scWelcomePendingImages = [];
@@ -344,11 +345,45 @@ async function scLoadMessages(chatId) {
         const res = await chatAPI.listMessages(0, chatId);
         scMessagesCache = res.data || [];
         scMessagesFingerprint = scGetMessagesFingerprint(scMessagesCache);
+        await scRefreshDeployRecords();
         scRenderFeed();
         scUpdateComposerState();
     } catch (e) {
         showToast(e.message, 'error');
     }
+}
+
+async function scRefreshDeployRecords() {
+    scDeployRecordsByMsg = {};
+    const clientId = scSelectedClientId;
+    if (!clientId || !scMessagesCache.length) return;
+    const msgIds = scMessagesCache.map(m => m.id).filter(id => Number.isInteger(id) && id > 0);
+    if (!msgIds.length) return;
+    try {
+        const res = await deployAPI.getRecordsByMsgIds(clientId, msgIds);
+        scDeployRecordsByMsg = res.data || {};
+    } catch (e) {
+        console.warn('scRefreshDeployRecords failed:', e);
+        scDeployRecordsByMsg = {};
+    }
+}
+
+function _scRenderDeployBadges(msgId) {
+    const bucket = scDeployRecordsByMsg[String(msgId)] || {};
+    const clientId = scSelectedClientId;
+    if (!clientId) return '';
+    const order = [
+        { env: 'test', label: '预览' },
+        { env: 'prod', label: '发布' },
+    ];
+    return order.map(({ env, label }) => {
+        const record = bucket[env];
+        if (!record) return '';
+        const statusText = escapeHtml(record.status_text || record.status || '');
+        const statusClass = `deploy-badge-${record.status || 'unknown'}`;
+        const detailUrl = `deploy-details.html?client_id=${clientId}&msg_id=${msgId}&env=${env}`;
+        return `<button class="sc-msg-extra-btn deploy-badge ${statusClass}" onclick="window.open('${detailUrl}', '_blank')">${label}:${statusText}</button>`;
+    }).join('');
 }
 
 function scRenderFeed() {
@@ -417,6 +452,7 @@ function scRenderFeed() {
             scMergeRequestStore[storeKey] = mrData;
             extraBtns += `<button class="sc-msg-extra-btn mr-btn" onclick="scShowMergeRequestModal('${storeKey}')">🔀 变更详情</button>`;
         }
+        extraBtns += _scRenderDeployBadges(msg.id);
 
         const agentRow = `
         <div class="sc-msg-agent-row">
@@ -500,6 +536,7 @@ function scStartPolling() {
                 const prevRunningId = scRunningMessageId;
                 scMessagesFingerprint = nextFingerprint;
                 scMessagesCache = fresh;
+                await scRefreshDeployRecords();
                 scRenderFeed();
                 scUpdateComposerState();
                 if (prevRunningId !== scRunningMessageId) {
@@ -862,15 +899,36 @@ function _scGetTestDomain() {
     return testDomains.length > 0 ? testDomains[0] : null;
 }
 
-function scPreviewApp() {
+async function scPreviewApp() {
     if (!scSelectedChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
     const msgId = _scGetLatestCompletedMsgId();
     if (!msgId) { showToast('当前 Chat 暂无消息', 'error'); return; }
-    const testDomain = _scGetTestDomain();
-    if (!testDomain) { showToast('未配置应用测试环境域名', 'error'); return; }
-    const taskId = 0;
-    const previewUrl = `http://task${taskId}chat${scSelectedChatId}msg${msgId}.${testDomain}`;
-    window.open(previewUrl, '_blank');
+
+    const clientId = scSelectedClientId;
+    if (!clientId) { showToast('未找到关联的应用', 'error'); return; }
+
+    const chat = scChatList.find(c => c.id === scSelectedChatId);
+    const chatTitle = chat ? chat.title : `Chat ${scSelectedChatId}`;
+
+    const btn = document.getElementById('sc-preview-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await deployAPI.preview(clientId, 0, scSelectedChatId, msgId, chatTitle);
+        const data = res.data || {};
+        if (data.status === 'ready' && data.url) {
+            window.open(data.url, '_blank');
+        } else if (data.status === 'deploying') {
+            showToast(data.message || '服务正在部署，请稍后几分钟查看。', 'success');
+            await scRefreshDeployRecords();
+            scRenderFeed();
+        } else {
+            showToast('预览请求返回异常', 'error');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 async function scPublishApp() {

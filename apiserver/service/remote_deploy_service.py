@@ -15,6 +15,7 @@
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -42,6 +43,17 @@ from utils.git_remote_utils import (
 logger = logging.getLogger(__name__)
 
 _ENV_INIT_SCRIPT_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils', 'server_env_init.sh'))
+
+# ──────────────────────────────────────────────────────
+#  按服务器 IP 缓存本进程内已执行过的一次性幂等操作
+#  - 跨部署复用，进程重启后清零（重启后成本 = 每台服务器付出一次，可接受）
+#  - 缓存 key 带脚本/逻辑的"版本"，逻辑或脚本变更时自动重跑
+# ──────────────────────────────────────────────────────
+_server_init_lock = threading.Lock()
+_server_env_init_done: "set[tuple[str, str]]" = set()  # (ip, script_version)
+_server_git_config_done: "set[str]" = set()            # ip
+_server_certbot_ready: "set[str]" = set()              # ip
+_server_host_include_done: "set[tuple[str, int]]" = set()  # (ip, client_id)
 
 
 class RemoteDeployError(Exception):
@@ -118,6 +130,61 @@ def process_pending_deploys_test(client_id: int):
         )
 
 
+def check_test_docker_network_exists(client_id: int, user_id: int, host_key: str) -> bool:
+    """检查任一测试环境服务器上是否存在指定 host_key 对应的 docker 网络。
+
+    网络命名与 `_execute_single_deploy` 保持一致：`network_{client_id}_{host_key}`。
+    只要有一台 test 服务器存在该网络，即认为预览容器可用。
+
+    任意服务器 SSH 失败时仅记录日志并视为不存在，由上层决定是否触发重新部署。
+    """
+    trace_id = str(uuid.uuid4())
+    host_key = (host_key or '').strip()
+    if not host_key:
+        return False
+
+    servers = get_client_servers(client_id=client_id, user_id=user_id, env='test')
+    if not servers:
+        return False
+
+    network_name = f'network_{client_id}_{host_key}'
+    check_cmd = (
+        f'sudo docker network inspect {network_name} > /dev/null 2>&1 '
+        f'&& echo "exists" || echo "missing"'
+    )
+
+    for server in servers:
+        ip = (server.ip or '').strip()
+        username = (server.name or '').strip()
+        password = (server.password or '').strip()
+        if not ip or not username:
+            continue
+        try:
+            with SshClient(
+                ip=ip, username=username, password=password,
+                connect_timeout=5, retries=1, trace_id=trace_id,
+            ) as ssh:
+                out = ssh.execute_ignore_error(command=check_cmd)
+                if 'exists' in (out or ''):
+                    logger.info(
+                        "[trace_id=%s] preview network exists: ip=%s network=%s",
+                        trace_id, ip, network_name,
+                    )
+                    return True
+        except Exception:
+            logger.warning(
+                "[trace_id=%s] preview ssh check failed: ip=%s network=%s",
+                trace_id, ip, network_name, exc_info=True,
+            )
+            continue
+
+    logger.info(
+        "[trace_id=%s] preview network missing on all test servers: client_id=%s network=%s",
+        trace_id, client_id, network_name,
+    )
+    return False
+
+
 def _pick_latest_and_cancel_older(records: list, trace_id: str, scope_desc: str) -> tuple:
     """从 pending 记录中选出最新待部署记录，其余标记为 cancel。
 
@@ -184,12 +251,28 @@ def _run_deploy_with_failure_handler(
 # ============================================================
 
 def _init_server_env(ssh: SshClient, trace_id: str):
-    """传输并执行服务器环境初始化脚本（安装 git、docker、nginx、certbot）"""
+    """传输并执行服务器环境初始化脚本（安装 git、docker、nginx、certbot）。
+
+    脚本本身幂等，但即使空跑也要 ~8 秒。使用 (ip, 脚本内容哈希) 做进程内缓存，
+    同一脚本版本 + 同一台服务器在进程生命周期内只会真正执行一次。
+    """
     try:
         with open(_ENV_INIT_SCRIPT_PATH, 'r', encoding='utf-8') as f:
             script_content = f.read()
     except FileNotFoundError:
         raise RemoteDeployError(f"环境初始化脚本不存在: {_ENV_INIT_SCRIPT_PATH}")
+
+    # 用脚本内容哈希做版本号，脚本更新后会自动 cache miss 重新执行
+    import hashlib
+    script_version = hashlib.sha1(script_content.encode('utf-8')).hexdigest()[:12]
+    cache_key = (ssh.ip, script_version)
+    with _server_init_lock:
+        if cache_key in _server_env_init_done:
+            logger.info(
+                "[trace_id=%s] Server env init skipped (cached): ip=%s, version=%s",
+                trace_id, ssh.ip, script_version,
+            )
+            return
 
     remote_path = '/tmp/server_env_init.sh'
     ssh.write_file(remote_dir='/tmp', remote_path=remote_path, content=script_content)
@@ -197,6 +280,8 @@ def _init_server_env(ssh: SshClient, trace_id: str):
     logger.info("[trace_id=%s] Executing server env init script on remote server", trace_id)
     ssh.execute(command=f'bash {remote_path}')
     logger.info("[trace_id=%s] Server env init completed successfully", trace_id)
+    with _server_init_lock:
+        _server_env_init_done.add(cache_key)
 
 
 # ============================================================
@@ -223,7 +308,23 @@ def _execute_deploy(record: DeployRecord, trace_id: str, host_key: str, merge_re
     if not repos:
         raise RemoteDeployError("未配置代码仓库")
 
-    commits, repo_auth = _fill_commit_info(repos=repos, trace_id=trace_id, merge_request=merge_request)
+    # 预先取 deploys 并过滤出实际会用到的 repos，避免对未被任何 deploy 引用的
+    # 仓库（例如独立文档仓库）做无谓的 token 刷新 / commit 查询 / 远端 fetch。
+    deploys = get_client_deploys(client_id=record.client_id, user_id=record.user_id)
+    if not deploys:
+        raise RemoteDeployError("未配置部署命令")
+    required_repo_ids = {d.repo_id for d in deploys if d.repo_id}
+    required_repos = [r for r in repos if r.id in required_repo_ids]
+    if not required_repos:
+        raise RemoteDeployError("所有部署命令均未关联有效的代码仓库")
+    skipped = [r.url for r in repos if r.id not in required_repo_ids]
+    if skipped:
+        logger.info(
+            "[trace_id=%s] Skip repos not referenced by any deploy: %s",
+            trace_id, ','.join(skipped),
+        )
+
+    commits, repo_auth = _fill_commit_info(repos=required_repos, trace_id=trace_id, merge_request=merge_request)
 
     detail['commits'] = commits or {}
     update_deploy_record_status(record_id=record.id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
@@ -250,38 +351,42 @@ def _execute_deploy(record: DeployRecord, trace_id: str, host_key: str, merge_re
             # 环境初始化：传输并执行 server_env_init.sh
             _init_server_env(ssh=ssh, trace_id=trace_id)
 
-            # 3.3 目录文件检查
+            # 3.3 目录文件检查（只同步被 deploys 引用的仓库）
             _setup_directories(
                 ssh=ssh, username=username, client_id=record.client_id,
-                repos=repos, repo_auth=repo_auth, trace_id=trace_id,
+                repos=required_repos, repo_auth=repo_auth, trace_id=trace_id,
             )
 
             # 3.4 遍历部署命令
-            deploys = get_client_deploys(client_id=record.client_id, user_id=record.user_id)
-            if not deploys:
-                raise RemoteDeployError("未配置部署命令")
-
             domains = [d.domain for d in get_client_domains(client_id=record.client_id, user_id=record.user_id, env=record.env)]
 
+            # 同一 record 下的多个 deploy 可能共用同一个 (repo, commit)，
+            # 共享 tmp_repo_dir，整条 record 结束后统一清理，避免对同一仓库重复 cp/checkout。
+            tmp_dir = f'/home/{username}/app{record.client_id}/repo_tmp/tmp_{record.id}'
+            prepared_repos: "set[tuple[str, str]]" = set()  # (repo_name, commit_id)
             container_names = []
-            for deploy in deploys:
-                cname = _execute_single_deploy(
-                    ssh=ssh, username=username, client_id=record.client_id, record_id=record.id,
-                    deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=record.user_id,
-                    host_key=host_key, trace_id=trace_id, env=record.env,
-                )
-                container_names.append(cname)
+            try:
+                for deploy in deploys:
+                    cname = _execute_single_deploy(
+                        ssh=ssh, username=username, client_id=record.client_id, record_id=record.id,
+                        deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=record.user_id,
+                        host_key=host_key, trace_id=trace_id, env=record.env,
+                        prepared_repos=prepared_repos,
+                    )
+                    container_names.append(cname)
 
-            # 创建 nginx 容器（按 route_prefix 分流到各容器）
-            if domains and container_names:
-                try:
-                    route_specs = pairs_from_deploys(deploys, container_names)
-                except ValueError as e:
-                    raise RemoteDeployError(str(e)) from e
-                _setup_nginx_container(
-                    ssh=ssh, username=username, client_id=record.client_id,
-                    route_specs=route_specs, host_key=host_key, domains=domains, trace_id=trace_id,
-                )
+                # 创建 nginx 容器（按 route_prefix 分流到各容器）
+                if domains and container_names:
+                    try:
+                        route_specs = pairs_from_deploys(deploys, container_names)
+                    except ValueError as e:
+                        raise RemoteDeployError(str(e)) from e
+                    _setup_nginx_container(
+                        ssh=ssh, username=username, client_id=record.client_id,
+                        route_specs=route_specs, host_key=host_key, domains=domains, trace_id=trace_id,
+                    )
+            finally:
+                ssh.execute_ignore_error(command=f'sudo rm -rf {tmp_dir} || rm -rf {tmp_dir}')
 
     # 所有服务器均部署成功后才置 SUCCESS
     update_deploy_record_status(
@@ -395,14 +500,22 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     ssh.execute(command=f'mkdir -p {repo_tmp_dir}')
     ssh.execute(command=f'mkdir -p {nginx_dir}')
 
-    # 清理历史部署遗留的低速中断配置（该配置是持久化到 ~/.gitconfig 的）
-    ssh.execute_ignore_error(command='git config --global --unset-all http.lowSpeedLimit')
-    ssh.execute_ignore_error(command='git config --global --unset-all http.lowSpeedTime')
-    ssh.execute_ignore_error(command='git config --global http.postBuffer 524288000')
-    git_cfg = ssh.execute_ignore_error(
-        command='git config --global --get-regexp "^http\\.(postBuffer|lowSpeedLimit|lowSpeedTime)$" || true',
-    )
-    logger.info("[trace_id=%s] Remote git http config after sanitize, config=%s", trace_id, git_cfg or "<empty>")
+    # 清理历史部署遗留的低速中断配置（该配置是持久化到 ~/.gitconfig 的），按 IP 幂等缓存，
+    # 同一进程对同一台服务器只做一次。
+    with _server_init_lock:
+        git_cfg_done = ssh.ip in _server_git_config_done
+    if not git_cfg_done:
+        ssh.execute_ignore_error(command='git config --global --unset-all http.lowSpeedLimit')
+        ssh.execute_ignore_error(command='git config --global --unset-all http.lowSpeedTime')
+        ssh.execute_ignore_error(command='git config --global http.postBuffer 524288000')
+        git_cfg = ssh.execute_ignore_error(
+            command='git config --global --get-regexp "^http\\.(postBuffer|lowSpeedLimit|lowSpeedTime)$" || true',
+        )
+        logger.info("[trace_id=%s] Remote git http config after sanitize, config=%s", trace_id, git_cfg or "<empty>")
+        with _server_init_lock:
+            _server_git_config_done.add(ssh.ip)
+    else:
+        logger.info("[trace_id=%s] Remote git http config sanitize skipped (cached): ip=%s", trace_id, ssh.ip)
 
     for repo in repos:
         repo_id_str = str(repo.id)
@@ -462,9 +575,15 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
 def _execute_single_deploy(
     ssh: SshClient, username: str, client_id: int, record_id: int, deploy: ClientDeploy,
     commits: dict, repo_auth: dict, user_id: int, host_key: str, trace_id: str, env: str,
+    prepared_repos: "set[tuple[str, str]] | None" = None,
 ) -> str:
     """
     执行单条部署命令（ClientDeploy）：拷贝仓库、打包镜像、启动容器。
+
+    Args:
+        prepared_repos: 本次 record 已准备好（cp + checkout）的 (repo_name, commit_id) 集合；
+            调用方跨多个 deploy 共享该集合，命中时跳过重复的 cp/checkout。
+            整个 record 结束后由调用方负责清理 tmp_dir。
 
     Returns:
         启动的容器名称
@@ -494,103 +613,115 @@ def _execute_single_deploy(
     tmp_repo_dir = f'{tmp_dir}/{repo_name}'
     full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
 
-    try:
-        # 创建临时目录并清理旧副本。
-        # 历史部署可能遗留 root 拥有文件，先用 sudo 清理并修复权限，避免 cp 权限错误。
-        ssh.execute(command=f'mkdir -p {tmp_dir}')
-        ssh.execute_ignore_error(command=f'sudo rm -rf {tmp_repo_dir} || rm -rf {tmp_repo_dir}')
-        ssh.execute_ignore_error(command=f'sudo chown -R {username}:{username} {tmp_dir} || true')
-        ssh.execute(command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
+    image_name = f'app{client_id}_{deploy_uuid}'
+    image_tag = commit_short
+    image_full = f'{image_name}:{image_tag}'
 
-        try:
-            final_token = checkout_commit_with_auth_refresh(
-                ssh=ssh, tmp_repo_dir=tmp_repo_dir, commit_id=commit_id,
-                url=url, token=auth['token'], repo_name=repo_name,
-                token_provider=_token_provider, trace_id=trace_id,
+    # 前置 docker image inspect：镜像已存在时直接跳过 cp / checkout / Dockerfile 检查 / build，
+    # 对「images already exist」场景可省掉 GB 级 IO 与一次远端认证交互
+    img_check = ssh.execute_ignore_error(
+        command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"',
+    )
+    image_exists = 'exists' in img_check
+
+    if not image_exists:
+        repo_share_key = (repo_name, commit_id)
+        already_prepared = prepared_repos is not None and repo_share_key in prepared_repos
+        if not already_prepared:
+            # 创建临时目录并清理旧副本。
+            # 历史部署可能遗留 root 拥有文件，先用 sudo 清理并修复权限，避免 cp 权限错误。
+            ssh.execute(command=f'mkdir -p {tmp_dir}')
+            ssh.execute_ignore_error(command=f'sudo rm -rf {tmp_repo_dir} || rm -rf {tmp_repo_dir}')
+            ssh.execute_ignore_error(command=f'sudo chown -R {username}:{username} {tmp_dir} || true')
+            ssh.execute(command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
+
+            try:
+                final_token = checkout_commit_with_auth_refresh(
+                    ssh=ssh, tmp_repo_dir=tmp_repo_dir, commit_id=commit_id,
+                    url=url, token=auth['token'], repo_name=repo_name,
+                    token_provider=_token_provider, trace_id=trace_id,
+                )
+                repo_auth[repo_id_str]['token'] = final_token
+            except GitRemoteError as e:
+                raise RemoteDeployError(e.message) from e
+            if prepared_repos is not None:
+                prepared_repos.add(repo_share_key)
+        else:
+            logger.info(
+                "[trace_id=%s] Reuse prepared tmp_repo_dir for repo=%s commit=%s, skip cp+checkout",
+                trace_id, repo_name, commit_short,
             )
-            repo_auth[repo_id_str]['token'] = final_token
-        except GitRemoteError as e:
-            raise RemoteDeployError(e.message) from e
 
         # Docker 镜像：检查 Dockerfile 是否存在
-        image_name = f'app{client_id}_{deploy_uuid}'
-        image_tag = commit_short
-        image_full = f'{image_name}:{image_tag}'
-
         df_check = ssh.execute_ignore_error(
             command=f'test -f {full_work_dir}/Dockerfile && echo "found" || echo "not_found"',
         )
         if 'not_found' in df_check:
             raise RemoteDeployError(f"工作目录 {work_dir or '/'} 下未找到 Dockerfile")
 
-        # 镜像打包（已存在则跳过）
+        # BuildKit 在默认 progress=auto 下会以步骤为单位缓冲输出，失败时容易只剩 header 一行日志，
+        # 真实错误丢失。强制 --progress=plain + 2>&1 合流，确保失败原因在 stdout tail 中完整可见；
+        # sudo -E 保留 BUILDKIT 相关环境变量。
         # docker 命令统一用 sudo：ubuntu 用户首次部署尚未加入 docker 组时兜底，
         # 避免 /var/run/docker.sock 无权限。
-        img_check = ssh.execute_ignore_error(
-            command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"',
+        build_cmd = (
+            f'cd {full_work_dir} && '
+            f'BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 DOCKER_CLI_HINTS=false '
+            f'sudo -E docker build --progress=plain -t {image_full} . 2>&1'
         )
-        if 'not_exists' in img_check:
-            # BuildKit 在默认 progress=auto 下会以步骤为单位缓冲输出，失败时容易只剩 header 一行日志，
-            # 真实错误丢失。强制 --progress=plain + 2>&1 合流，确保失败原因在 stdout tail 中完整可见；
-            # sudo -E 保留 BUILDKIT 相关环境变量。
-            build_cmd = (
-                f'cd {full_work_dir} && '
-                f'BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 DOCKER_CLI_HINTS=false '
-                f'sudo -E docker build --progress=plain -t {image_full} . 2>&1'
-            )
-            logger.info(
-                "[trace_id=%s] Building image: %s from %s, build_cmd=%s",
-                trace_id, image_full, full_work_dir, build_cmd,
-            )
-            ssh.execute(command=build_cmd, timeout=1200)
-        else:
-            logger.info("[trace_id=%s] Image %s already exists, skip build", trace_id, image_full)
-
-        # 生成 TOML 配置并写入远程服务器
-        toml_content = generate_deploy_toml(
-            client_id=client_id, user_id=user_id,
-            official_configs=deploy.official_configs or [],
-            custom_config=deploy.custom_config or '',
-            env=env,
+        logger.info(
+            "[trace_id=%s] Building image: %s from %s, build_cmd=%s",
+            trace_id, image_full, full_work_dir, build_cmd,
         )
-        config_dir = f'{base_dir}/config{deploy_uuid}'
-        config_path = f'{config_dir}/config.toml'
-        if toml_content:
-            ssh.write_file(remote_dir=config_dir, remote_path=config_path, content=toml_content)
-
-        # 创建 Docker 网络
-        network_name = f'network_{client_id}_{host_key}' if host_key else f'network_{client_id}'
-        ssh.execute_ignore_error(command=f'sudo docker network create {network_name} 2>/dev/null')
-
-        # 停止并删除旧容器
-        container_name = (
-            f'app_{client_id}_{env}_{deploy_uuid}_{host_key}' if host_key
-            else f'app_{client_id}_{env}_{deploy_uuid}'
+        ssh.execute(command=build_cmd, timeout=1200)
+    else:
+        logger.info(
+            "[trace_id=%s] Image %s already exists, skip cp+checkout+build",
+            trace_id, image_full,
         )
-        ssh.execute_ignore_error(command=f'sudo docker rm -f {container_name} 2>/dev/null')
 
-        # 启动容器
-        # 应用容器不对外暴露端口：生产流量统一走「宿主 nginx → nginx 容器 → 容器网络内 {container_name}:8080」，
-        # 不需要在宿主机上再占用随机端口；排障请用 `docker exec` 或临时 `docker run --network` 接入同一网络访问。
-        mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
-        # 与模板仓库约定：APP_CONFIG_PATH 指向挂载的 /config/config.toml
-        env_opt = '-e APP_CONFIG_PATH=/config/config.toml' if toml_content else ''
-        run_cmd = (
-            f'sudo docker run -d --name {container_name} --network {network_name} '
-            f'{env_opt} {mount_opt} {image_full}'
-        )
-        if startup_command:
-            escaped_cmd = startup_command.replace("'", "'\\''")
-            run_cmd += f" sh -c '{escaped_cmd}'"
+    # 生成 TOML 配置并写入远程服务器
+    toml_content = generate_deploy_toml(
+        client_id=client_id, user_id=user_id,
+        official_configs=deploy.official_configs or [],
+        custom_config=deploy.custom_config or '',
+        env=env,
+    )
+    config_dir = f'{base_dir}/config{deploy_uuid}'
+    config_path = f'{config_dir}/config.toml'
+    if toml_content:
+        ssh.write_file(remote_dir=config_dir, remote_path=config_path, content=toml_content)
 
-        logger.info("[trace_id=%s] Container starting: image=%s, run_cmd=%s", trace_id, image_full, run_cmd)
-        ssh.execute(command=run_cmd)
-        logger.info("[trace_id=%s] Container started: name=%s, image=%s", trace_id, container_name, image_full)
+    # 创建 Docker 网络
+    network_name = f'network_{client_id}_{host_key}' if host_key else f'network_{client_id}'
+    ssh.execute_ignore_error(command=f'sudo docker network create {network_name} 2>/dev/null')
 
-        return container_name
-    finally:
-        # 清理本次部署的临时仓库拷贝（保留镜像），避免累积磁盘占用
-        ssh.execute_ignore_error(command=f'sudo rm -rf {tmp_dir} || rm -rf {tmp_dir}')
+    # 停止并删除旧容器
+    container_name = (
+        f'app_{client_id}_{env}_{deploy_uuid}_{host_key}' if host_key
+        else f'app_{client_id}_{env}_{deploy_uuid}'
+    )
+    ssh.execute_ignore_error(command=f'sudo docker rm -f {container_name} 2>/dev/null')
+
+    # 启动容器
+    # 应用容器不对外暴露端口：生产流量统一走「宿主 nginx → nginx 容器 → 容器网络内 {container_name}:8080」，
+    # 不需要在宿主机上再占用随机端口；排障请用 `docker exec` 或临时 `docker run --network` 接入同一网络访问。
+    mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
+    # 与模板仓库约定：APP_CONFIG_PATH 指向挂载的 /config/config.toml
+    env_opt = '-e APP_CONFIG_PATH=/config/config.toml' if toml_content else ''
+    run_cmd = (
+        f'sudo docker run -d --name {container_name} --network {network_name} '
+        f'{env_opt} {mount_opt} {image_full}'
+    )
+    if startup_command:
+        escaped_cmd = startup_command.replace("'", "'\\''")
+        run_cmd += f" sh -c '{escaped_cmd}'"
+
+    logger.info("[trace_id=%s] Container starting: image=%s, run_cmd=%s", trace_id, image_full, run_cmd)
+    ssh.execute(command=run_cmd)
+    logger.info("[trace_id=%s] Container started: name=%s, image=%s", trace_id, container_name, image_full)
+
+    return container_name
 
 
 # ============================================================
@@ -630,7 +761,21 @@ def _sanitize_key_for_nginx_filename(key: str) -> str:
 
 
 def _ensure_host_nginx_includes_app_vhosts(ssh, username: str, client_id: int, trace_id: str) -> None:
-    """在宿主机 /etc/nginx/conf.d 下增加 include，加载 /home/{user}/app{id}/nginx/*.conf"""
+    """在宿主机 /etc/nginx/conf.d 下增加 include，加载 /home/{user}/app{id}/nginx/*.conf。
+
+    进程内按 (ip, client_id) 幂等缓存：include 文件内容仅依赖 username/client_id，
+    同一 (ip, client_id) 首次写入后，后续部署直接跳过。/var/www/certbot 目录在
+    _ensure_certbot_ready 里已创建，这里不再重复 mkdir。
+    """
+    cache_key = (ssh.ip, client_id)
+    with _server_init_lock:
+        if cache_key in _server_host_include_done:
+            logger.info(
+                "[trace_id=%s] Host nginx include already ensured (cached): ip=%s, client_id=%s",
+                trace_id, ssh.ip, client_id,
+            )
+            return
+
     base_nginx = f'/home/{username}/app{client_id}/nginx'
     inc_path = f'/etc/nginx/conf.d/ai_task_app_{client_id}.conf'
     content = (
@@ -638,8 +783,9 @@ def _ensure_host_nginx_includes_app_vhosts(ssh, username: str, client_id: int, t
         f'include {base_nginx}/*.conf;\n'
     )
     ssh.write_root_owned_file(remote_path=inc_path, content=content)
-    ssh.execute(command='sudo mkdir -p /var/www/certbot')
     logger.info("[trace_id=%s] Ensured host nginx include: path=%s", trace_id, inc_path)
+    with _server_init_lock:
+        _server_host_include_done.add(cache_key)
 
 
 _INNER_PROXY_COMMON = (
@@ -697,7 +843,16 @@ def _render_inner_nginx_conf(route_specs: list) -> str:
 
 
 def _ensure_certbot_ready(ssh, trace_id: str) -> None:
-    """确保 certbot 与 nginx 插件可用，并初始化 letsencrypt 附加文件。"""
+    """确保 certbot 与 nginx 插件可用，并初始化 letsencrypt 附加文件。
+
+    进程内按 IP 幂等缓存：同一台服务器在进程生命周期内只真正执行一次
+    （安装检查 + 附加文件生成），后续部署直接跳过。
+    """
+    with _server_init_lock:
+        if ssh.ip in _server_certbot_ready:
+            logger.info("[trace_id=%s] Certbot runtime ready (cached): ip=%s", trace_id, ssh.ip)
+            return
+
     ssh.execute(
         command=(
             'if ! command -v certbot >/dev/null 2>&1; then '
@@ -739,6 +894,8 @@ def _ensure_certbot_ready(ssh, trace_id: str) -> None:
         timeout=600,
     )
     logger.info("[trace_id=%s] Certbot runtime ready on host", trace_id)
+    with _server_init_lock:
+        _server_certbot_ready.add(ssh.ip)
 
 
 def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
@@ -931,15 +1088,28 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
 
     host_conf_path = f'{base_dir}/nginx/{host_conf_basename}'
 
-    # 在证书签发前，先放置 HTTP challenge vhost 并 reload，避免 webroot 校验 404。
-    acme_conf = _render_acme_http_only_vhost(server_names=server_names)
-    ssh.write_file(remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=acme_conf)
-    _ensure_host_nginx_includes_app_vhosts(
-        ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
-    )
-    _reload_host_nginx(ssh=ssh, trace_id=trace_id)
-
-    primary_for_cert = _ensure_domain_certificate(ssh=ssh, server_names=server_names, trace_id=trace_id)
+    # 稳态（证书已存在）下无需 ACME HTTP-01 验证，可跳过一次 bootstrap vhost 写入 + reload。
+    primary_domain = server_names.split()[0]
+    existing_lineage = _resolve_cert_lineage_name(ssh=ssh, primary_domain=primary_domain)
+    if existing_lineage:
+        # 证书已就绪：直接生成最终 HTTPS vhost 后再 reload 一次即可
+        _ensure_host_nginx_includes_app_vhosts(
+            ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
+        )
+        primary_for_cert = existing_lineage
+        logger.info(
+            "[trace_id=%s] Certificate lineage already present, skip ACME bootstrap reload: %s",
+            trace_id, existing_lineage,
+        )
+    else:
+        # 首次签发：先写 HTTP-01 bootstrap vhost 让 webroot 校验能通过
+        acme_conf = _render_acme_http_only_vhost(server_names=server_names)
+        ssh.write_file(remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=acme_conf)
+        _ensure_host_nginx_includes_app_vhosts(
+            ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
+        )
+        _reload_host_nginx(ssh=ssh, trace_id=trace_id)
+        primary_for_cert = _ensure_domain_certificate(ssh=ssh, server_names=server_names, trace_id=trace_id)
 
     inner_conf_dir = f'{base_dir}/nginx/container/{inner_segment}'
     inner_conf_path = f'{inner_conf_dir}/default.conf'

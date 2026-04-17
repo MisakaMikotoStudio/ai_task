@@ -981,33 +981,32 @@ async function previewApp() {
     if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
     const msgId = _getLatestCompletedMsgId();
     if (!msgId) { showToast('当前 Chat 暂无消息', 'error'); return; }
-    const testDomain = _getTestDomain();
-    if (!testDomain) { showToast('未配置应用测试环境域名', 'error'); return; }
 
     const clientId = _getClientId();
+    if (!clientId) { showToast('未找到关联的应用', 'error'); return; }
+
     const chat = chatsCache.find(c => c.id === currentChatId);
     const chatTitle = chat ? chat.title : `Chat ${currentChatId}`;
 
-    // 记录一条 test 环境的预览记录（便于在 chat 历史上展示徽章）。
-    // 测试环境是用户点击即看，无需后台调度，因此 status 直接标记为 success。
-    if (clientId) {
-        try {
-            await deployAPI.createRecord(
-                clientId, 'test', chatTitle, 'success',
-                { task_id: taskId, chat_id: currentChatId, msg_id: msgId },
-                msgId,
-                taskId,
-                currentChatId,
-            );
-            await refreshDeployRecords();
-            renderFeed();
-        } catch (e) {
-            console.warn('previewApp createRecord failed:', e);
+    const btn = document.getElementById('preview-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await deployAPI.preview(clientId, taskId, currentChatId, msgId, chatTitle);
+        const data = res.data || {};
+        if (data.status === 'ready' && data.url) {
+            window.open(data.url, '_blank');
+        } else if (data.status === 'deploying') {
+            showToast(data.message || '服务正在部署，请稍后几分钟查看。', 'success');
+        } else {
+            showToast('预览请求返回异常', 'error');
         }
+        await refreshDeployRecords();
+        renderFeed();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
-
-    const previewUrl = `http://task${taskId}chat${currentChatId}msg${msgId}.${testDomain}`;
-    window.open(previewUrl, '_blank');
 }
 
 async function publishApp() {
