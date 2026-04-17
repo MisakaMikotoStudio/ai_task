@@ -13,6 +13,7 @@ from dao.chat_dao import (
     get_chat_by_id, update_chat_status,
     get_message_by_id, update_message, update_chat_sessionid,
 )
+from service.deploy_service import auto_create_test_deploy_on_message_sync
 
 chat_bp = Blueprint('open_chat', __name__)
 
@@ -53,6 +54,23 @@ def sync_execute_message_api():
         task_id=int(task_id),
         status=Chat.STATUS_COMPLETED,
     )
+
+    # after_execute 同步 merge_request 时，自动 upsert 一条测试环境发布记录
+    # （merge_request 为空或无 diff 时会被 service 层自行跳过）
+    try:
+        auto_create_test_deploy_on_message_sync(
+            user_id=request.user_info.user_id,
+            task_id=int(task_id or 0),
+            chat_id=int(chat_id),
+            message_id=int(message_id),
+            merge_request=merge_request or [],
+        )
+    except Exception:
+        # 自动发布失败不阻塞客户端同步流程，仅记录日志
+        logger.exception(
+            'auto test deploy failed on msg sync_execute: task_id=%s chat_id=%s msg_id=%s',
+            task_id, chat_id, message_id,
+        )
 
     return jsonify({'code': 200, 'message': '同步成功'})
 
