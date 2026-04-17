@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import List
+from typing import List, Optional, Tuple
 
 from .connection import get_db_session
 from .models import Client, DeployRecord
@@ -124,6 +124,62 @@ def get_latest_deploy_record_by_msg_env(user_id: int, client_id: int, msg_id: in
             DeployRecord.env == env,
             DeployRecord.deleted_at.is_(None),
         ).order_by(DeployRecord.created_at.desc()).first()
+
+
+def upsert_auto_test_deploy_record(
+    user_id: int,
+    client_id: int,
+    task_id: int,
+    chat_id: int,
+    msg_id: int,
+    description: str,
+    detail: dict,
+) -> Tuple[int, str]:
+    """
+    自动测试环境发布记录的 upsert。
+
+    按 (user_id, client_id, task_id, chat_id, msg_id, env='test', 未软删除) 定位现有记录：
+    - 不存在：创建一条 pending 记录
+    - 已存在且 status == publishing：保持不动（避免打断正在进行的部署）
+    - 已存在且其它状态：status 重置为 pending，并覆盖 description/detail
+
+    Returns:
+        (record_id, action)，action ∈ {'created', 'reset', 'publishing'}
+    """
+    with get_db_session() as session:
+        existing = session.query(DeployRecord).filter(
+            DeployRecord.user_id == user_id,
+            DeployRecord.client_id == client_id,
+            DeployRecord.task_id == (task_id or 0),
+            DeployRecord.chat_id == (chat_id or 0),
+            DeployRecord.msg_id == (msg_id or 0),
+            DeployRecord.env == 'test',
+            DeployRecord.deleted_at.is_(None),
+        ).order_by(DeployRecord.created_at.desc()).first()
+
+        if existing is None:
+            record = DeployRecord(
+                user_id=user_id,
+                client_id=client_id,
+                msg_id=msg_id or 0,
+                task_id=task_id or 0,
+                chat_id=chat_id or 0,
+                env='test',
+                description=description,
+                status=DeployRecord.STATUS_PENDING,
+                detail=detail or {},
+            )
+            session.add(record)
+            session.flush()
+            return record.id, 'created'
+
+        if existing.status == DeployRecord.STATUS_PUBLISHING:
+            return existing.id, 'publishing'
+
+        existing.status = DeployRecord.STATUS_PENDING
+        existing.description = description
+        existing.detail = detail or {}
+        return existing.id, 'reset'
 
 
 def reset_deploy_record_to_pending(user_id: int, record_id: int) -> bool:

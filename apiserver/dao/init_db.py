@@ -59,6 +59,44 @@ def _try_create_deploy_records_client_msg_index(engine) -> None:
         logger.debug('Index %s skipped: %s', index_name, str(e)[:120])
 
 
+def _try_create_deploy_records_task_chat_msg_env_unique(engine) -> None:
+    """
+    补建 (task_id, chat_id, msg_id, env) 唯一索引。
+
+    用于 after_execute 自动测试发布的幂等 upsert；同一 (task, chat, msg) 在同一 env
+    下仅允许一条发布记录。已存在、列缺失或存在脏数据冲突时仅记录 warning。
+    """
+    table = 'ai_task_deploy_records'
+    index_name = 'uk_deploy_records_task_chat_msg_env'
+    insp = inspect(engine)
+    if table not in insp.get_table_names():
+        return
+    existing_idx = {ix.get('name') for ix in insp.get_indexes(table)}
+    if index_name in existing_idx:
+        return
+    cols = {c['name'] for c in insp.get_columns(table)}
+    required = {'task_id', 'chat_id', 'msg_id', 'env'}
+    if not required.issubset(cols):
+        return
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    f'CREATE UNIQUE INDEX `{index_name}` ON `{table}` '
+                    f'(`task_id`, `chat_id`, `msg_id`, `env`)'
+                )
+            )
+            conn.commit()
+        logger.info('Migration applied: unique index %s on %s', index_name, table)
+    except Exception as e:
+        # 存在脏数据（重复 (task,chat,msg,env)）时建索引会失败，保留为 warning
+        # 便于排查；运维清理重复记录后重启即可自动补建。
+        logger.warning(
+            'Unique index %s on %s creation failed, please clean duplicates and retry: %s',
+            index_name, table, str(e)[:200],
+        )
+
+
 def _run_migrations(engine):
     """执行增量迁移（新增字段等）"""
     migrations = [
@@ -134,6 +172,8 @@ def _run_migrations(engine):
 
     # 索引：仅在 msg_id 列存在且索引尚未创建时尝试（失败仅打 debug）
     _try_create_deploy_records_client_msg_index(engine)
+    # 唯一索引：保证 (task_id, chat_id, msg_id, env) 唯一，支撑 after_execute 自动发布的 upsert
+    _try_create_deploy_records_task_chat_msg_env_unique(engine)
 
 
 def init_database(config: DatabaseConfig):
