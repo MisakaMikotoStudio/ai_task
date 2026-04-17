@@ -398,7 +398,10 @@ function parseMsgExtra(extra) { return chatParseMsgExtra(extra); }
 function showMergeRequestModal(storeKey) {
     const body = document.getElementById('merge-request-body');
     const data = mergeRequestStore[storeKey];
-    const list = Array.isArray(data) ? data : [];
+    const list = Array.isArray(data) ? data.slice() : [];
+
+    // 有变更的仓库（merge_url 非空）排在前面
+    list.sort((a, b) => (b.merge_url ? 1 : 0) - (a.merge_url ? 1 : 0));
 
     if (list.length === 0) {
         body.innerHTML = '<div class="mr-empty-text">暂无变更记录</div>';

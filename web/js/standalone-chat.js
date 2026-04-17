@@ -807,7 +807,10 @@ async function scMergeToDefaultBranch() {
 function scShowMergeRequestModal(storeKey) {
     const body = document.getElementById('sc-merge-body');
     const data = scMergeRequestStore[storeKey];
-    const list = Array.isArray(data) ? data : [];
+    const list = Array.isArray(data) ? data.slice() : [];
+
+    // 有变更的仓库（merge_url 非空）排在前面
+    list.sort((a, b) => (b.merge_url ? 1 : 0) - (a.merge_url ? 1 : 0));
 
     if (list.length === 0) {
         body.innerHTML = '<div class="sc-mr-empty">暂无变更记录</div>';

@@ -181,6 +181,15 @@ def collect_remote_branch_diff_info(
         if not _check_remote_branch_exists(repo_dir, dev_branch, timeout_cmd, trace_id=trace_id):
             return no_diff
 
+        # 始终获取 dev_branch 的 commitId，无论是否有文件差异
+        sha = _run_git_command(
+            ["git", "rev-parse", f"origin/{dev_branch}"],
+            cwd=repo_dir, timeout=timeout_cmd, trace_id=trace_id,
+        )
+        if not sha.success:
+            return GitResult(success=False, message=f"获取 commitId 失败: {sha.message}")
+        commit_id = sha.message.strip()
+
         diff_stat = _run_git_command(
             ["git", "diff", "--stat", f"origin/{main_branch}", f"origin/{dev_branch}"],
             cwd=repo_dir, timeout=timeout_cmd, trace_id=trace_id,
@@ -190,20 +199,13 @@ def collect_remote_branch_diff_info(
 
         if not diff_stat.message.strip():
             logger.info(f"[trace_id={trace_id}] [{repo_dir}] {dev_branch} 与 {main_branch} 无实际文件差异")
-            return no_diff
-
-        sha = _run_git_command(
-            ["git", "rev-parse", f"origin/{dev_branch}"],
-            cwd=repo_dir, timeout=timeout_cmd, trace_id=trace_id,
-        )
-        if not sha.success:
-            return GitResult(success=False, message=f"获取 commitId 失败: {sha.message}")
+            return GitResult(success=True, message="no_diff", repo_name=repo_name, branch_name=dev_branch, commit_id=commit_id, merge_url='')
 
         merge_url = _build_merge_request_url(repo_dir, dev_branch, timeout_cmd)
         return GitResult(
             success=True, message="has_diff",
             repo_name=repo_name, branch_name=dev_branch,
-            commit_id=sha.message.strip(), merge_url=merge_url,
+            commit_id=commit_id, merge_url=merge_url,
         )
 
     except Exception as e:

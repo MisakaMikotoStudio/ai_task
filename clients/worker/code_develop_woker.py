@@ -233,6 +233,12 @@ class CodeDevelopWorker(BaseWorker):
                 logger.warning(f"[{self.trace_id}] 检查 {diff_label} 分支差异失败: repo={git_repo.name}, {diff_result.message}")
                 continue
             if diff_result.message == "no_diff":
+                merge_requests.append({
+                    "repo_name": git_repo.name,
+                    "branch_name": actual_branch,
+                    "latest_commitId": diff_result.commit_id or '',
+                    "merge_url": ''
+                })
                 continue
             actual_pr_url = git_workflow_utils.create_github_pr_if_not_exists(
                 repo_url=git_repo.url,
