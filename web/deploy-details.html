@@ -9,47 +9,83 @@
         body { overflow: auto; }
 
         .deploy-page {
-            max-width: 1100px;
+            width: 100%;
+            max-width: 1600px;
             margin: 0 auto;
-            padding: 32px 24px;
+            padding: 32px 32px 48px;
+            box-sizing: border-box;
         }
 
         .deploy-page-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 24px;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
         }
 
         .deploy-page-title {
-            font-size: 20px;
+            font-size: 22px;
             font-weight: 600;
             color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .deploy-page-title::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 20px;
+            border-radius: 2px;
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
         }
 
         .deploy-filter-bar {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .deploy-filter-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .deploy-filter-bar label {
-            font-size: 13px;
-            color: var(--text-secondary);
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
         }
 
         .deploy-filter-bar select {
-            padding: 6px 12px;
+            padding: 6px 28px 6px 12px;
             font-size: 13px;
             background: var(--bg-tertiary);
             color: var(--text-primary);
             border: 1px solid var(--border-color);
             border-radius: var(--border-radius);
             outline: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath fill='%238b949e' d='M5 6 0 0h10z'/%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            transition: var(--transition);
+            cursor: pointer;
+        }
+
+        .deploy-filter-bar select:hover {
+            border-color: var(--accent-primary);
         }
 
         .deploy-filter-bar select:focus {
             border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
         }
 
         .deploy-table-wrap {
@@ -57,30 +93,61 @@
             border: 1px solid var(--border-color);
             border-radius: var(--border-radius-lg);
             overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        }
+
+        .deploy-table-scroll {
+            width: 100%;
+            overflow-x: auto;
         }
 
         .deploy-table {
             width: 100%;
+            min-width: 1100px;
             border-collapse: collapse;
+            table-layout: fixed;
         }
+
+        .deploy-table col.col-id       { width: 72px; }
+        .deploy-table col.col-num      { width: 80px; }
+        .deploy-table col.col-client   { width: 140px; }
+        .deploy-table col.col-env      { width: 88px; }
+        .deploy-table col.col-desc     { width: auto; min-width: 240px; }
+        .deploy-table col.col-status   { width: 110px; }
+        .deploy-table col.col-detail   { width: 100px; }
+        .deploy-table col.col-time     { width: 160px; }
+        .deploy-table col.col-action   { width: 90px; }
 
         .deploy-table th {
             text-align: left;
-            padding: 12px 14px;
+            padding: 14px 16px;
             font-size: 12px;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
-            letter-spacing: 0.04em;
+            letter-spacing: 0.05em;
             background: var(--bg-tertiary);
             border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            white-space: nowrap;
         }
 
         .deploy-table td {
-            padding: 10px 14px;
+            padding: 12px 16px;
             font-size: 13px;
             border-bottom: 1px solid var(--border-color);
             color: var(--text-primary);
+            vertical-align: middle;
+        }
+
+        .deploy-table tbody tr {
+            transition: background-color 0.15s ease;
+        }
+
+        .deploy-table tbody tr:hover {
+            background: rgba(88, 166, 255, 0.05);
         }
 
         .deploy-table tr:last-child td {
@@ -88,36 +155,45 @@
         }
 
         .deploy-table .deploy-desc-cell {
-            max-width: 220px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            color: var(--text-secondary);
         }
 
         .deploy-table .deploy-id-cell {
-            font-family: monospace;
+            font-family: 'SF Mono', Consolas, Monaco, monospace;
             font-size: 12px;
             color: var(--text-secondary);
             white-space: nowrap;
         }
 
-        .deploy-table .deploy-client-cell {
-            max-width: 180px;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        .deploy-table .deploy-num-cell {
+            font-family: 'SF Mono', Consolas, Monaco, monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
             white-space: nowrap;
         }
 
+        .deploy-table .deploy-client-cell {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+
         .deploy-table .deploy-detail-cell {
-            font-family: monospace;
+            font-family: 'SF Mono', Consolas, Monaco, monospace;
             font-size: 12px;
             color: var(--text-muted);
         }
 
         .deploy-table .time-cell {
             white-space: nowrap;
-            color: var(--text-secondary);
+            color: var(--text-muted);
             font-size: 12px;
+            font-variant-numeric: tabular-nums;
         }
 
         /* Pagination */
@@ -272,10 +348,16 @@
             border-color: var(--accent-primary);
         }
 
+        @media (max-width: 1280px) {
+            .deploy-page { padding: 24px 20px 40px; }
+        }
+
         @media (max-width: 768px) {
-            .deploy-page { padding: 16px; }
+            .deploy-page { padding: 16px 12px 32px; }
             .deploy-page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
-            .deploy-table-wrap { overflow-x: auto; }
+            .deploy-page-title { font-size: 18px; }
+            .deploy-filter-bar { width: 100%; }
+            .deploy-filter-bar select { flex: 1; min-width: 0; }
             .detail-modal { width: 95%; }
         }
     </style>
@@ -298,49 +380,70 @@
             <h1 class="deploy-page-title">发布详情</h1>
             <div class="deploy-filter-bar">
                 <span id="msg-id-badge" style="display:none;padding:4px 10px;border-radius:10px;background:var(--bg-tertiary);border:1px solid var(--border-color);font-size:12px;color:var(--text-secondary);"></span>
-                <label for="client-filter">应用</label>
-                <select id="client-filter">
-                    <option value="">全部</option>
-                </select>
-                <label for="env-filter">环境</label>
-                <select id="env-filter">
-                    <option value="">全部</option>
-                    <option value="test">测试（预览）</option>
-                    <option value="prod">生产（发布）</option>
-                </select>
-                <label for="status-filter">状态</label>
-                <select id="status-filter">
-                    <option value="">全部</option>
-                    <option value="pending">等待发布</option>
-                    <option value="publishing">发布中</option>
-                    <option value="failed">失败</option>
-                    <option value="success">成功</option>
-                    <option value="cancel">取消</option>
-                </select>
+                <div class="deploy-filter-item">
+                    <label for="client-filter">应用</label>
+                    <select id="client-filter">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="deploy-filter-item">
+                    <label for="env-filter">环境</label>
+                    <select id="env-filter">
+                        <option value="">全部</option>
+                        <option value="test">测试（预览）</option>
+                        <option value="prod">生产（发布）</option>
+                    </select>
+                </div>
+                <div class="deploy-filter-item">
+                    <label for="status-filter">状态</label>
+                    <select id="status-filter">
+                        <option value="">全部</option>
+                        <option value="pending">等待发布</option>
+                        <option value="publishing">发布中</option>
+                        <option value="failed">失败</option>
+                        <option value="success">成功</option>
+                        <option value="cancel">取消</option>
+                    </select>
+                </div>
             </div>
         </div>
 
         <div class="deploy-table-wrap">
             <div id="deploy-loading" class="deploy-loading">加载中...</div>
             <div id="deploy-content" style="display:none">
-                <table class="deploy-table">
-                    <thead>
-                        <tr>
-                            <th>记录ID</th>
-                            <th>Task ID</th>
-                            <th>Chat ID</th>
-                            <th>Msg ID</th>
-                            <th>应用名称</th>
-                            <th>环境</th>
-                            <th>描述</th>
-                            <th>状态</th>
-                            <th>详情</th>
-                            <th>创建时间</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="deploy-tbody"></tbody>
-                </table>
+                <div class="deploy-table-scroll">
+                    <table class="deploy-table">
+                        <colgroup>
+                            <col class="col-id">
+                            <col class="col-num">
+                            <col class="col-num">
+                            <col class="col-num">
+                            <col class="col-client">
+                            <col class="col-env">
+                            <col class="col-desc">
+                            <col class="col-status">
+                            <col class="col-detail">
+                            <col class="col-time">
+                            <col class="col-action">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>记录ID</th>
+                                <th>Task ID</th>
+                                <th>Chat ID</th>
+                                <th>Msg ID</th>
+                                <th>应用名称</th>
+                                <th>环境</th>
+                                <th>描述</th>
+                                <th>状态</th>
+                                <th>详情</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deploy-tbody"></tbody>
+                    </table>
+                </div>
                 <div id="deploy-empty" class="deploy-empty" style="display:none">暂无发布记录</div>
                 <div id="deploy-pagination" class="deploy-pagination" style="display:none">
                     <span id="deploy-page-info" class="deploy-pagination-info"></span>

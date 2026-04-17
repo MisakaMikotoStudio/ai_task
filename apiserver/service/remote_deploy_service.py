@@ -16,10 +16,14 @@ import logging
 import os
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from dao.deploy_dao import get_pending_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
-from dao.client_dao import get_client_repos, get_client_deploys, get_client_servers, get_client_domains
+from dao.client_dao import (
+    get_client_repos, get_client_deploys, get_client_servers, get_client_domains,
+    get_all_active_servers_by_env,
+)
 from dao.models import DeployRecord, ClientDeploy
 from service.deploy_service import generate_deploy_toml
 from service.deploy_route_prefix import pairs_from_deploys
@@ -965,3 +969,192 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
     )
 
     _reload_host_nginx(ssh=ssh, trace_id=trace_id)
+
+
+# ============================================================
+# 测试环境过期容器清理
+# ============================================================
+
+# 测试环境容器 host_key 格式：task{task_id}chat{chat_id}msg{msg_id}
+# app 容器命名：app_{client_id}_{env}_{deploy_uuid}_{host_key}
+_TEST_APP_CONTAINER_RE = re.compile(r'^app_(\d+)_(test|prod)_(.+)_(task\d+chat\d+msg\d+)$')
+# nginx 容器命名：nginx_{client_id}_{host_key}
+_TEST_NGINX_CONTAINER_RE = re.compile(r'^nginx_(\d+)_(task\d+chat\d+msg\d+)$')
+
+# 超过多少秒视为过期（默认 1 天）
+TEST_CONTAINER_EXPIRE_SECONDS = 24 * 60 * 60
+
+
+def process_cleanup_expired_test_containers():
+    """
+    清理所有测试环境云服务器上超过 1 天的测试部署容器。
+
+    识别规则：容器名包含 `task{task_id}chat{chat_id}msg{msg_id}` 片段，
+    即 app_{cid}_test_{uuid}_{host_key} 与 nginx_{cid}_{host_key}。
+
+    清理项（按 (client_id, host_key) 分组，组内最新容器创建时间超 1 天才清理）：
+    - app 容器、nginx 容器
+    - 对应 Docker 网络 network_{cid}_{host_key}
+    - 宿主机 nginx vhost：/home/{user}/app{cid}/nginx/{host_key}.conf
+    - 内层 nginx 配置目录：/home/{user}/app{cid}/nginx/container/{host_key}/
+    - 若存在文件删除，最后 reload 宿主机 nginx
+    """
+    servers = get_all_active_servers_by_env(env='test')
+    if not servers:
+        return
+
+    # 同一台物理服务器可能被多个 client 共用，按 (ip, username, password) 去重避免重复 SSH
+    unique_servers: dict[tuple, object] = {}
+    for server in servers:
+        ip = (server.ip or '').strip()
+        username = (server.name or '').strip()
+        password = (server.password or '').strip()
+        if not ip or not username:
+            continue
+        unique_servers.setdefault((ip, username, password), server)
+
+    for (ip, username, password), _server in unique_servers.items():
+        trace_id = str(uuid.uuid4())
+        try:
+            _cleanup_expired_test_containers_on_server(
+                ip=ip, username=username, password=password, trace_id=trace_id,
+            )
+        except Exception:
+            logger.exception(
+                "[trace_id=%s] cleanup test containers failed on server ip=%s user=%s",
+                trace_id, ip, username,
+            )
+
+
+def _cleanup_expired_test_containers_on_server(
+    ip: str, username: str, password: str, trace_id: str,
+) -> None:
+    """在单台测试环境服务器上清理过期容器（主入口的 per-server 逻辑）。"""
+    with SshClient(ip=ip, username=username, password=password, trace_id=trace_id) as ssh:
+        # 单次 SSH 拉出所有候选容器名 + 创建时间（ISO）
+        list_cmd = (
+            "sudo docker ps -a --format '{{.Names}}' 2>/dev/null "
+            "| grep -E 'task[0-9]+chat[0-9]+msg[0-9]+' "
+            "| while read -r name; do "
+            "  created=$(sudo docker inspect --format '{{.Created}}' \"$name\" 2>/dev/null); "
+            "  if [ -n \"$created\" ]; then printf '%s|%s\\n' \"$name\" \"$created\"; fi; "
+            "done"
+        )
+        raw = ssh.execute_ignore_error(command=list_cmd)
+        if not raw:
+            return
+
+        # 按 (client_id, host_key) 分组候选容器
+        groups: dict[tuple, dict] = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or '|' not in line:
+                continue
+            name, created_str = line.split('|', 1)
+            name = name.strip()
+            created = _parse_docker_created_iso(created_str.strip())
+            if not created:
+                continue
+
+            m_app = _TEST_APP_CONTAINER_RE.match(name)
+            m_nginx = _TEST_NGINX_CONTAINER_RE.match(name)
+            if m_app:
+                cid = int(m_app.group(1))
+                host_key = m_app.group(4)
+                kind = 'app'
+            elif m_nginx:
+                cid = int(m_nginx.group(1))
+                host_key = m_nginx.group(2)
+                kind = 'nginx'
+            else:
+                continue
+
+            g = groups.setdefault(
+                (cid, host_key),
+                {'app': [], 'nginx': [], 'latest_created': created},
+            )
+            g[kind].append(name)
+            if created > g['latest_created']:
+                g['latest_created'] = created
+
+        if not groups:
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        expire_delta = timedelta(seconds=TEST_CONTAINER_EXPIRE_SECONDS)
+
+        removed_any_vhost = False
+        for (cid, host_key), g in groups.items():
+            age = now_utc - g['latest_created']
+            if age < expire_delta:
+                continue
+
+            logger.info(
+                "[trace_id=%s] Cleanup expired test group: ip=%s client_id=%s host_key=%s age_s=%s",
+                trace_id, ip, cid, host_key, int(age.total_seconds()),
+            )
+
+            # 删除 app + nginx 容器（容错：可能已被手动清理）
+            containers = list(g['app']) + list(g['nginx'])
+            if containers:
+                names = ' '.join(containers)
+                ssh.execute_ignore_error(command=f'sudo docker rm -f {names} 2>/dev/null')
+
+            # 删除 Docker 网络（容器删除后网络才能移除）
+            network_name = f'network_{cid}_{host_key}'
+            ssh.execute_ignore_error(command=f'sudo docker network rm {network_name} 2>/dev/null')
+
+            # 删除宿主机 vhost 与内层 nginx 配置目录
+            base_dir = f'/home/{username}/app{cid}'
+            host_conf_path = f'{base_dir}/nginx/{host_key}.conf'
+            inner_conf_dir = f'{base_dir}/nginx/container/{host_key}'
+            check_vhost = ssh.execute_ignore_error(
+                command=f'test -f {host_conf_path} && echo "exists" || echo "missing"',
+            )
+            if 'exists' in check_vhost:
+                removed_any_vhost = True
+            ssh.execute_ignore_error(command=f'sudo rm -f {host_conf_path}')
+            ssh.execute_ignore_error(command=f'sudo rm -rf {inner_conf_dir}')
+
+        # 只要有 vhost 文件被删除，就需要 reload 宿主机 nginx 让变更生效
+        if removed_any_vhost:
+            try:
+                _reload_host_nginx(ssh=ssh, trace_id=trace_id)
+            except Exception:
+                logger.exception(
+                    "[trace_id=%s] reload host nginx failed after test cleanup ip=%s",
+                    trace_id, ip,
+                )
+
+
+def _parse_docker_created_iso(s: str):
+    """
+    解析 `docker inspect --format '{{.Created}}'` 输出的 ISO 时间。
+
+    Docker 输出形如 `2024-01-15T12:34:56.123456789Z`，亚秒可能到纳秒；
+    Python `datetime.fromisoformat` 在 3.11 前不支持 `Z` 且亚秒上限为微秒，
+    这里统一做归一化后解析，失败返回 None。
+    """
+    s = (s or '').strip()
+    if not s:
+        return None
+    if s.endswith('Z'):
+        s = s[:-1] + '+00:00'
+    if '.' in s:
+        # 仅处理日期时间主体后的第一个小数点（时区偏移不含小数）
+        head, rest = s.split('.', 1)
+        digits = []
+        i = 0
+        while i < len(rest) and rest[i].isdigit():
+            digits.append(rest[i])
+            i += 1
+        frac = ''.join(digits)[:6]  # 截断到微秒
+        suffix = rest[i:]
+        s = f'{head}.{frac}{suffix}' if frac else f'{head}{suffix}'
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None

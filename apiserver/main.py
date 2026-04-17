@@ -159,8 +159,10 @@ def create_app(config: AppConfig) -> Flask:
         return send_from_directory(app.static_folder, path)
 
     # 启动生产环境部署定时调度器
-    from scheduler import start_deploy_scheduler
+    from scheduler import start_deploy_scheduler, start_test_cleanup_scheduler
     start_deploy_scheduler()
+    # 启动测试容器过期清理调度器（每小时扫描，清理创建超过 1 天的测试容器）
+    start_test_cleanup_scheduler()
 
     return app
 
