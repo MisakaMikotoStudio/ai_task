@@ -5,9 +5,9 @@
 import re
 from typing import Iterable, List, Tuple
 
-# 路径段：字母数字、点、下划线、连字符
+# 路径段：字母数字、点、下划线、连字符（首段紧跟在首字符 / 后，勿写成 /{seg} 重复否则 /api 会不合法）
 _SEGMENT = r'[a-zA-Z0-9._-]+'
-_PATH_RE = re.compile(rf'^/(/{_SEGMENT})*$')
+_PATH_RE = re.compile(rf'^/(?:$|{_SEGMENT}(?:/{_SEGMENT})*)$')
 
 
 def normalize_deploy_route_prefix(raw: str) -> str:
