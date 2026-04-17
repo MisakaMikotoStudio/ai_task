@@ -722,7 +722,8 @@ def _render_inner_nginx_conf(route_specs: list) -> str:
     Docker 内 nginx：仅 HTTP，按路径前缀转发到对应应用容器。
 
     route_specs: (规范前缀, 容器名)。前缀「/」表示整站；如「/api」对外匹配 /api/…，
-    使用 proxy_pass …/ 去掉前缀后转发到容器 :8080（应用侧按根路径提供接口）。
+    使用 proxy_pass 无 URI 后缀，将浏览器请求的完整路径原样转发到容器 :8080，
+    与 ai_task apiserver（蓝图注册在 /api/app/...）一致。若应用自行期望剥前缀，需在应用内配置 url_prefix 或改路由。
     """
     if not route_specs:
         raise RemoteDeployError('nginx 路由配置为空')
@@ -752,7 +753,7 @@ def _render_inner_nginx_conf(route_specs: list) -> str:
             parts.append('        return 308 ${uri}/$is_args$args;\n')
             parts.append('    }\n')
             parts.append(f'    location {prefix}/ {{\n')
-            parts.append(f'        proxy_pass http://{container}:8080/;\n')
+            parts.append(f'        proxy_pass http://{container}:8080;\n')
             parts.append(_INNER_PROXY_COMMON)
             parts.append('    }\n')
     parts.append('}\n')
