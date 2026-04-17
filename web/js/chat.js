@@ -999,6 +999,8 @@ async function previewApp() {
                 clientId, 'test', chatTitle, 'success',
                 { task_id: taskId, chat_id: currentChatId, msg_id: msgId },
                 msgId,
+                taskId,
+                currentChatId,
             );
             await refreshDeployRecords();
             renderFeed();
@@ -1032,6 +1034,8 @@ async function publishApp() {
             clientId, 'prod', chatTitle, 'pending',
             { task_id: taskId, chat_id: currentChatId, msg_id: msgId },
             msgId,
+            taskId,
+            currentChatId,
         );
         showToast('发布记录已创建', 'success');
         await loadMessages(currentChatId);
