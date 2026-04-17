@@ -34,7 +34,7 @@ class GitHubServiceError(Exception):
 #  认证相关
 # ──────────────────────────────────────────────────────
 
-def generate_app_jwt(app_id: str, private_key_pem: str) -> str:
+def generate_app_jwt(app_id: str, private_key_pem: str, trace_id: str = '') -> str:
     """
     使用 GitHub App ID 和私钥生成 JWT（RS256）。
 
@@ -43,6 +43,7 @@ def generate_app_jwt(app_id: str, private_key_pem: str) -> str:
     Args:
         app_id: GitHub App ID
         private_key_pem: GitHub App 私钥（PEM 格式）
+        trace_id: 链路追踪 ID，用于日志聚合
 
     Returns:
         JWT 字符串
@@ -68,17 +69,18 @@ def generate_app_jwt(app_id: str, private_key_pem: str) -> str:
         token = jwt.encode(payload, private_key_pem, algorithm='RS256')
         return token
     except Exception as e:
-        logger.error("generate_app_jwt: failed, app_id=%s, error=%s", app_id, str(e))
+        logger.error("[trace_id=%s] generate_app_jwt failed: app_id=%s, error=%s", trace_id, app_id, str(e))
         raise GitHubServiceError(f"GitHub App JWT 生成失败：{str(e)}")
 
 
-def get_installation_id(jwt_token: str, organization: str) -> int:
+def get_installation_id(jwt_token: str, organization: str, trace_id: str = '') -> int:
     """
     获取 GitHub App 在指定组织中的 Installation ID。
 
     Args:
         jwt_token: GitHub App JWT
         organization: 组织名称
+        trace_id: 链路追踪 ID，用于日志聚合
 
     Returns:
         Installation ID
@@ -92,8 +94,8 @@ def get_installation_id(jwt_token: str, organization: str) -> int:
     try:
         resp = requests.get(url, headers=headers, timeout=30)
         logger.info(
-            "get_installation_id: org=%s, status=%d",
-            organization, resp.status_code,
+            "[trace_id=%s] get_installation_id: org=%s, status=%d",
+            trace_id, organization, resp.status_code,
         )
 
         if resp.status_code == 404:
@@ -127,6 +129,7 @@ def create_installation_token(
     installation_id: int,
     repository_ids: Optional[list] = None,
     permissions: Optional[Dict[str, str]] = None,
+    trace_id: str = '',
 ) -> str:
     """
     创建 GitHub App Installation Access Token。
@@ -138,6 +141,7 @@ def create_installation_token(
         installation_id: Installation ID
         repository_ids: 限定的仓库 ID 列表（None 表示所有已安装的仓库）
         permissions: 权限范围，如 {"contents": "write", "administration": "write"}
+        trace_id: 链路追踪 ID，用于日志聚合
 
     Returns:
         Installation Access Token
@@ -156,8 +160,8 @@ def create_installation_token(
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         logger.info(
-            "create_installation_token: installation_id=%s, status=%d, scoped_repos=%s",
-            installation_id, resp.status_code,
+            "[trace_id=%s] create_installation_token: installation_id=%s, status=%d, scoped_repos=%s",
+            trace_id, installation_id, resp.status_code,
             len(repository_ids) if repository_ids else 'all',
         )
 
@@ -198,6 +202,7 @@ def create_org_repo_api(
     repo_name: str,
     description: str = '',
     private: bool = True,
+    trace_id: str = '',
 ) -> Dict:
     """
     在 GitHub 组织下创建仓库（纯 API 调用）。
@@ -227,8 +232,8 @@ def create_org_repo_api(
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         logger.info(
-            "create_org_repo_api: org=%s, repo=%s, status=%d",
-            organization, repo_name, resp.status_code,
+            "[trace_id=%s] create_org_repo_api: org=%s, repo=%s, status=%d",
+            trace_id, organization, repo_name, resp.status_code,
         )
 
         if resp.status_code == 422:
@@ -268,14 +273,14 @@ def create_org_repo_api(
         raise
     except requests.RequestException as e:
         logger.error(
-            "create_org_repo_api network error: org=%s, repo=%s, error=%s",
-            organization, repo_name, str(e),
+            "[trace_id=%s] create_org_repo_api network error: org=%s, repo=%s, error=%s",
+            trace_id, organization, repo_name, str(e),
         )
         raise GitHubServiceError(f"创建仓库网络请求失败：{str(e)}")
     except Exception as e:
         logger.error(
-            "create_org_repo_api unexpected error: org=%s, repo=%s, error=%s",
-            organization, repo_name, str(e),
+            "[trace_id=%s] create_org_repo_api unexpected error: org=%s, repo=%s, error=%s",
+            trace_id, organization, repo_name, str(e),
         )
         raise GitHubServiceError(f"创建仓库失败：{str(e)}")
 
@@ -288,6 +293,7 @@ def create_org_repo_from_template_api(
     template_repo: str,
     description: str = '',
     private: bool = True,
+    trace_id: str = '',
 ) -> Dict:
     """
     使用 GitHub 模板仓库 API 在组织下创建新仓库（纯 API 调用）。
@@ -320,8 +326,8 @@ def create_org_repo_from_template_api(
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=60)
         logger.info(
-            "create_org_repo_from_template_api: template=%s/%s, target=%s/%s, status=%d",
-            template_owner, template_repo, organization, repo_name, resp.status_code,
+            "[trace_id=%s] create_org_repo_from_template_api: template=%s/%s, target=%s/%s, status=%d",
+            trace_id, template_owner, template_repo, organization, repo_name, resp.status_code,
         )
 
         if resp.status_code == 422:
@@ -359,19 +365,19 @@ def create_org_repo_from_template_api(
         raise
     except requests.RequestException as e:
         logger.error(
-            "create_org_repo_from_template_api network error: template=%s/%s, target=%s/%s, error=%s",
-            template_owner, template_repo, organization, repo_name, str(e),
+            "[trace_id=%s] create_org_repo_from_template_api network error: template=%s/%s, target=%s/%s, error=%s",
+            trace_id, template_owner, template_repo, organization, repo_name, str(e),
         )
         raise GitHubServiceError(f"从模板创建仓库网络请求失败：{str(e)}")
     except Exception as e:
         logger.error(
-            "create_org_repo_from_template_api unexpected error: template=%s/%s, target=%s/%s, error=%s",
-            template_owner, template_repo, organization, repo_name, str(e),
+            "[trace_id=%s] create_org_repo_from_template_api unexpected error: template=%s/%s, target=%s/%s, error=%s",
+            trace_id, template_owner, template_repo, organization, repo_name, str(e),
         )
         raise GitHubServiceError(f"从模板创建仓库失败：{str(e)}")
 
 
-def get_repo_id_api(token: str, organization: str, repo_name: str) -> int:
+def get_repo_id_api(token: str, organization: str, repo_name: str, trace_id: str = '') -> int:
     """
     获取 GitHub 仓库的数字 ID。
 
@@ -391,6 +397,10 @@ def get_repo_id_api(token: str, organization: str, repo_name: str) -> int:
 
     try:
         resp = requests.get(url, headers=headers, timeout=30)
+        logger.info(
+            "[trace_id=%s] get_repo_id_api: org=%s, repo=%s, status=%d",
+            trace_id, organization, repo_name, resp.status_code,
+        )
         if resp.status_code != 200:
             raise GitHubServiceError(
                 f"获取仓库信息失败（HTTP {resp.status_code}）：{resp.text[:200]}"
@@ -429,7 +439,7 @@ def build_repo_url(organization: str, repo_name: str) -> str:
     return f"https://github.com/{organization}/{repo_name}.git"
 
 
-def get_branch_latest_commit(token: str, organization: str, repo_name: str, branch: str) -> str:
+def get_branch_latest_commit(token: str, organization: str, repo_name: str, branch: str, trace_id: str = '') -> str:
     """
     获取 GitHub 仓库指定分支的最新 commit SHA。
 
@@ -449,7 +459,10 @@ def get_branch_latest_commit(token: str, organization: str, repo_name: str, bran
     url = f"{GITHUB_API_BASE}/repos/{organization}/{repo_name}/commits/{branch}"
     try:
         resp = requests.get(url, headers=headers, timeout=30)
-        logger.info("get_branch_latest_commit: org=%s, repo=%s, branch=%s, status=%d", organization, repo_name, branch, resp.status_code)
+        logger.info(
+            "[trace_id=%s] get_branch_latest_commit: org=%s, repo=%s, branch=%s, status=%d",
+            trace_id, organization, repo_name, branch, resp.status_code,
+        )
         if resp.status_code != 200:
             raise GitHubServiceError(f"获取仓库 {repo_name} 分支 {branch} 最新提交失败（HTTP {resp.status_code}）：{resp.text[:200]}")
         return resp.json()['sha']

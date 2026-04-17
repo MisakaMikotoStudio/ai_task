@@ -1,32 +1,42 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-远程服务器部署服务 —— 生产环境定时部署执行
+远程服务器部署服务 —— 生产/测试环境定时部署执行
 
 流程概览：
-1. 查询所有 prod 环境 pending/publishing 状态的发布记录
-2. 按 client_id 分组：publishing 跳过，pending 取消旧记录、部署最新
+1. 查询所有 prod/test 环境 pending/publishing 状态的发布记录
+2. 按 client_id（prod）或 chat_id（test）分组：publishing 跳过，pending 取消旧记录、部署最新
 3. 部署步骤：commit 补充 → SSH 检查 → 目录检查 → Docker 容器部署 → Nginx 路由
+
+日志约定：所有 logger 调用第一个位置参数填充 trace_id，输出形如
+`[trace_id=xxx] ...`，便于按链路聚合。
 """
 
 import logging
 import os
 import re
-import traceback
 import uuid
-import time
 from urllib.parse import urlparse
 
 from dao.deploy_dao import get_pending_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
 from dao.client_dao import get_client_repos, get_client_deploys, get_client_servers, get_client_domains
-from dao.models import DeployRecord
+from dao.models import DeployRecord, ClientDeploy
 from service.deploy_service import generate_deploy_toml
 from service.deploy_route_prefix import pairs_from_deploys
+from dao.chat_dao import batch_get_msg_by_msgids
 from utils.git_utils import parse_github_url, get_branch_latest_commit
+from utils.ssh_utils import SshClient
+from utils.git_remote_utils import (
+    GitRemoteError,
+    build_auth_url,
+    is_git_auth_error,
+    clone_repo_with_retry,
+    fetch_or_reclone,
+    checkout_commit_with_auth_refresh,
+)
 
 logger = logging.getLogger(__name__)
 
-SSH_CONNECT_TIMEOUT = 10
 _ENV_INIT_SCRIPT_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils', 'server_env_init.sh'))
 
 
@@ -38,97 +48,138 @@ class RemoteDeployError(Exception):
 
 
 # ============================================================
-# SSH 工具函数
+# 主入口
 # ============================================================
 
-def _create_ssh_client(ip: str, username: str, password: str):
-    """创建 SSH 客户端并连接到远程服务器"""
-    import paramiko
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(hostname=ip, username=username, password=password, timeout=SSH_CONNECT_TIMEOUT, allow_agent=False, look_for_keys=False)
-    transport = client.get_transport()
-    if transport:
-        transport.set_keepalive(30)
-    return client
-
-
-def _sanitize_command(command: str) -> str:
-    """移除命令中的 token/密码等敏感信息，用于日志输出"""
-    return re.sub(r'x-access-token:[^@]+@', 'x-access-token:***@', command)
-
-
-def _ssh_exec(ssh, command: str, timeout: int | None = None) -> str:
-    """执行 SSH 命令并返回 stdout，非零退出码或超时抛出异常
-
-    Args:
-        ssh: paramiko SSHClient
-        command: 要执行的命令
-        timeout: 命令超时秒数，None 表示不限制
-
-    失败时日志与错误消息同时保留 stdout/stderr 的尾部 4000 字符。
-    docker build（2>&1 合流到 stdout）场景下，npm/pip 等工具在失败时
-    会连带打印长篇 usage/help 文本，若尾部过短会把真正的错误行挤出窗口。
+def process_pending_deploys_prod(client_id: int):
     """
-    safe_cmd = _sanitize_command(command=command)
-    start = time.time()
-    logger.info("SSH exec start: timeout=%s, cmd=%s", timeout, safe_cmd[:600])
-    stdin, stdout, stderr = ssh.exec_command(command)
-    if timeout is not None:
-        stdout.channel.settimeout(timeout)
-    try:
-        exit_status = stdout.channel.recv_exit_status()
-    except Exception:
-        raise RemoteDeployError(f"命令超时({timeout}s): {safe_cmd[:200]}")
-    elapsed_ms = int((time.time() - start) * 1000)
-    out = stdout.read().decode('utf-8', errors='replace').strip()
-    if exit_status != 0:
-        err = stderr.read().decode('utf-8', errors='replace').strip()
-        logger.error(
-            "SSH exec failed: exit=%s elapsed_ms=%s cmd=%s stdout_tail=%s stderr_tail=%s",
-            exit_status, elapsed_ms, safe_cmd[:600], out[-4000:], err[-4000:],
-        )
-        raise RemoteDeployError(f"命令失败(exit={exit_status}, elapsed_ms={elapsed_ms}): {safe_cmd[:400]}  stdout: {out[-4000:]}  stderr: {err[-4000:]}")
-    logger.info("SSH exec done: exit=0 elapsed_ms=%s cmd=%s stdout_tail=%s", elapsed_ms, safe_cmd[:600], out[-500:])
-    return out
+    处理指定应用 prod 环境的待发布记录（供调度器调用）。
 
+    - 存在 publishing 记录 → 跳过
+    - 仅 pending → 取消旧记录，部署最新
+    """
+    trace_id = str(uuid.uuid4())
+    records = get_pending_deploy_records(client_id=client_id, env='prod')
+    if not records:
+        return
 
-def _ssh_exec_ignore_error(ssh, command: str) -> str:
-    """执行 SSH 命令，忽略错误返回 stdout"""
-    stdin, stdout, stderr = ssh.exec_command(command)
-    stdout.channel.recv_exit_status()
-    return stdout.read().decode('utf-8', errors='replace').strip()
+    if any(r.status == DeployRecord.STATUS_PUBLISHING for r in records):
+        logger.info("[trace_id=%s] client_id=%s has publishing record, skip", trace_id, client_id)
+        return
 
-
-def _ssh_write_file(ssh, remote_dir: str, remote_path: str, content: str) -> None:
-    """通过 SSH 创建远程目录并写入文件"""
-    _ssh_exec(ssh=ssh, command=f'mkdir -p {remote_dir}')
-    sftp = ssh.open_sftp()
-    try:
-        with sftp.file(remote_path, 'w') as f:
-            f.write(content)
-    finally:
-        sftp.close()
-
-
-def _ssh_write_root_owned_file(ssh, remote_path: str, content: str) -> None:
-    """写入需 root 权限的路径（先写 /tmp 再 sudo mv）"""
-    tmp = f'/tmp/_ai_task_deploy_{uuid.uuid4().hex}'
-    _ssh_write_file(ssh=ssh, remote_dir='/tmp', remote_path=tmp, content=content)
-    _ssh_exec(
-        ssh=ssh,
-        command=(
-            f'sudo mv {tmp} {remote_path} && '
-            f'sudo chmod 644 {remote_path} && sudo chown root:root {remote_path}'
-        ),
+    publish_record, merge_request = _pick_latest_and_cancel_older(
+        records=records, trace_id=trace_id, scope_desc=f'client_id={client_id}',
     )
+    if not publish_record:
+        return
+
+    _run_deploy_with_failure_handler(
+        record=publish_record, trace_id=trace_id, host_key='', merge_request=merge_request,
+        scope_desc=f'client_id={client_id}',
+    )
+
+
+def process_pending_deploys_test(client_id: int):
+    """处理指定应用 test 环境的待发布记录（按 chat_id 分组）。"""
+    records = get_pending_deploy_records(client_id=client_id, env='test')
+    if not records:
+        return
+
+    chat_records: dict[int, list] = {}
+    for record in records:
+        chat_records.setdefault(record.chat_id, []).append(record)
+
+    for chat_id, chat_deploy_records in chat_records.items():
+        trace_id = str(uuid.uuid4())
+        scope_desc = f'client_id={client_id}, chat_id={chat_id}'
+
+        if any(r.status == DeployRecord.STATUS_PUBLISHING for r in chat_deploy_records):
+            logger.info("[trace_id=%s] %s has publishing record, skip", trace_id, scope_desc)
+            continue
+
+        publish_record, merge_request = _pick_latest_and_cancel_older(
+            records=chat_deploy_records, trace_id=trace_id, scope_desc=scope_desc,
+        )
+        if not publish_record:
+            continue
+
+        host_key = (
+            f'task{publish_record.task_id}'
+            f'chat{publish_record.chat_id}'
+            f'msg{publish_record.msg_id}'
+        )
+        _run_deploy_with_failure_handler(
+            record=publish_record, trace_id=trace_id, host_key=host_key,
+            merge_request=merge_request, scope_desc=scope_desc,
+        )
+
+
+def _pick_latest_and_cancel_older(records: list, trace_id: str, scope_desc: str) -> tuple:
+    """从 pending 记录中选出最新待部署记录，其余标记为 cancel。
+
+    Returns:
+        (publish_record, merge_request)，若无可部署记录则 (None, None)
+    """
+    pending = [r for r in records if r.status == DeployRecord.STATUS_PENDING]
+    if not pending:
+        return None, None
+
+    # 创建时间降序，最新在前
+    pending.sort(key=lambda r: r.created_at, reverse=True)
+    msg_ids = [r.msg_id for r in pending]
+    msgs = batch_get_msg_by_msgids(user_id=pending[0].user_id, msg_ids=msg_ids)
+    msg_dict = {m.id: m for m in msgs}
+
+    publish_record = None
+    merge_request = None
+    cancel_ids = []
+    for deploy_record in pending:
+        msg = msg_dict.get(deploy_record.msg_id)
+        if not msg:
+            continue
+        mr = (msg.extra or {}).get('merge_request')
+        if not mr:
+            continue
+        if not publish_record:
+            publish_record = deploy_record
+            merge_request = mr
+        else:
+            cancel_ids.append(deploy_record.id)
+
+    if cancel_ids:
+        cancel_ids_str = ','.join(str(rid) for rid in cancel_ids)
+        logger.info(
+            "[trace_id=%s] %s: cancelled older pending deploy record_ids=[%s] (count=%d)",
+            trace_id, scope_desc, cancel_ids_str, len(cancel_ids),
+        )
+        batch_cancel_deploy_records(record_ids=cancel_ids)
+
+    return publish_record, merge_request
+
+
+def _run_deploy_with_failure_handler(
+    record: DeployRecord, trace_id: str, host_key: str,
+    merge_request: list[dict], scope_desc: str,
+):
+    """统一的 _execute_deploy 调用包装：失败时写入 FAILED 并保留已有 detail 字段。"""
+    try:
+        _execute_deploy(record=record, trace_id=trace_id, host_key=host_key, merge_request=merge_request)
+    except Exception as e:
+        logger.exception("[trace_id=%s] %s: failed to execute deploy", trace_id, scope_desc)
+        # 用 detail_patch 仅更新 deploy_log，避免覆盖 _execute_deploy 内部已写入的
+        # trace_id / host_key / commits 等字段。
+        update_deploy_record_status(
+            record_id=record.id,
+            status=DeployRecord.STATUS_FAILED,
+            detail_patch={'deploy_log': f'部署失败：{str(e)}'},
+        )
 
 
 # ============================================================
 # 环境初始化
 # ============================================================
 
-def _init_server_env(ssh, trace_id: str):
+def _init_server_env(ssh: SshClient, trace_id: str):
     """传输并执行服务器环境初始化脚本（安装 git、docker、nginx、certbot）"""
     try:
         with open(_ENV_INIT_SCRIPT_PATH, 'r', encoding='utf-8') as f:
@@ -137,158 +188,110 @@ def _init_server_env(ssh, trace_id: str):
         raise RemoteDeployError(f"环境初始化脚本不存在: {_ENV_INIT_SCRIPT_PATH}")
 
     remote_path = '/tmp/server_env_init.sh'
-    _ssh_write_file(ssh=ssh, remote_dir='/tmp', remote_path=remote_path, content=script_content)
-    _ssh_exec(ssh=ssh, command=f'chmod +x {remote_path}')
-    logger.info("Executing server env init script on remote server, trace_id=%s", trace_id)
-    _ssh_exec(ssh=ssh, command=f'bash {remote_path}')
-    logger.info("Server env init completed successfully, trace_id=%s", trace_id)
+    ssh.write_file(remote_dir='/tmp', remote_path=remote_path, content=script_content)
+    ssh.execute(command=f'chmod +x {remote_path}')
+    logger.info("[trace_id=%s] Executing server env init script on remote server", trace_id)
+    ssh.execute(command=f'bash {remote_path}')
+    logger.info("[trace_id=%s] Server env init completed successfully", trace_id)
 
-
-# ============================================================
-# 主入口
-# ============================================================
-
-def process_pending_deploys_prod(client_id: int):
-    """
-    处理指定应用的待发布记录（供调度器调用）。
-
-    单个 client 处理规则：
-    - 存在 publishing 记录 → 跳过
-    - 仅 pending → 取消旧记录，部署最新
-    """
-    records = get_pending_deploy_records(client_id=client_id, env='prod')
-    if not records:
-        return
-
-    # 存在 publishing 记录则跳过
-    if any(r.status == DeployRecord.STATUS_PUBLISHING for r in records):
-        logger.info("client_id=%s has publishing record, skip", client_id)
-        return
-
-    pending = [r for r in records if r.status == DeployRecord.STATUS_PENDING]
-    if not pending:
-        return
-
-    # 按创建时间降序排列，最新在前
-    pending.sort(key=lambda r: r.created_at, reverse=True)
-    latest = pending[0]
-
-    # 取消所有非最新的 pending 记录
-    cancel_ids = [r.id for r in pending[1:]]
-    if cancel_ids:
-        batch_cancel_deploy_records(record_ids=cancel_ids)
-        logger.info("Cancelled %d older pending records for client_id=%s", len(cancel_ids), client_id)
-
-    # 执行最新记录的部署
-    _execute_prod_deploy(record=latest)
-
-def process_pending_deploys_test(client_id: int):
-    pass
 
 # ============================================================
 # 部署执行主流程
 # ============================================================
 
-def _execute_prod_deploy(record):
+def _execute_deploy(record: DeployRecord, trace_id: str, host_key: str, merge_request: list[dict]):
     """
-    执行单条生产环境部署记录的完整流程。
+    执行单条指定环境部署记录的完整流程。
 
     步骤：
     3.1 补充 commit 信息（GitHub API 查询默认分支最新 commit）
-    3.2 SSH 连通性检查（连接生产服务器）
+    3.2 SSH 连通性检查（连接云服务器）
     3.3 目录文件检查（创建目录、下载/更新仓库）
     3.4 遍历部署命令（Docker 镜像打包、容器启动、Nginx 路由）
     """
-    record_id = record.id
-    client_id = record.client_id
-    user_id = record.user_id
+    # 标记为 publishing，记录 host_key / trace_id
     detail = dict(record.detail or {})
-
-    # 生成 traceId 用于追踪本次部署全链路
-    trace_id = str(uuid.uuid4())
+    detail['host_key'] = host_key
     detail['trace_id'] = trace_id
+    update_deploy_record_status(record_id=record.id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
 
-    try:
-        # 标记为 publishing
-        update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
-        logger.info("Start prod deploy: record_id=%s, client_id=%s, trace_id=%s", record_id, client_id, trace_id)
+    repos = get_client_repos(client_id=record.client_id, user_id=record.user_id)
+    if not repos:
+        raise RemoteDeployError("未配置代码仓库")
 
-        # 3.1 补充 repo commit 信息
-        repos = get_client_repos(client_id=client_id, user_id=user_id)
-        commits, repo_auth = _fill_commit_info(repos=repos, trace_id=trace_id)
-        detail['commits'] = commits
-        update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
+    commits, repo_auth = _fill_commit_info(repos=repos, trace_id=trace_id, merge_request=merge_request)
 
-        # 3.2 SSH 检查
-        servers = get_client_servers(client_id=client_id, user_id=user_id)
-        prod_server = next((s for s in servers if s.env == 'prod'), None)
-        if not prod_server:
-            raise RemoteDeployError("未配置生产环境云服务器")
+    detail['commits'] = commits or {}
+    update_deploy_record_status(record_id=record.id, status=DeployRecord.STATUS_PUBLISHING, detail=detail)
+    logger.info(
+        "[trace_id=%s] Start deploy: record_id=%s, client_id=%s, env=%s, host_key=%s",
+        trace_id, record.id, record.client_id, record.env, host_key,
+    )
 
-        ip = (prod_server.ip or '').strip()
-        username = (prod_server.name or '').strip()
-        password = (prod_server.password or '').strip()
+    # 3.2 SSH 检查
+    servers = get_client_servers(client_id=record.client_id, user_id=record.user_id, env=record.env)
+    if not servers:
+        raise RemoteDeployError(f"未配置{record.env}环境云服务器")
+
+    for server in servers:
+        ip = (server.ip or '').strip()
+        username = (server.name or '').strip()
+        password = (server.password or '').strip()
         if not ip or not username:
-            raise RemoteDeployError("生产环境服务器 IP 或用户名为空")
+            raise RemoteDeployError(f"{record.env}环境服务器 IP 或用户名为空")
 
-        ssh = _create_ssh_client(ip=ip, username=username, password=password)
-        try:
-            logger.info("SSH connected: record_id=%s, ip=%s, trace_id=%s", record_id, ip, trace_id)
+        with SshClient(ip=ip, username=username, password=password, trace_id=trace_id) as ssh:
+            logger.info("[trace_id=%s] SSH connected: record_id=%s, ip=%s", trace_id, record.id, ip)
 
             # 环境初始化：传输并执行 server_env_init.sh
             _init_server_env(ssh=ssh, trace_id=trace_id)
 
             # 3.3 目录文件检查
-            _setup_directories(ssh=ssh, username=username, client_id=client_id, repos=repos, repo_auth=repo_auth, trace_id=trace_id)
+            _setup_directories(
+                ssh=ssh, username=username, client_id=record.client_id,
+                repos=repos, repo_auth=repo_auth, trace_id=trace_id,
+            )
 
             # 3.4 遍历部署命令
-            deploys = get_client_deploys(client_id=client_id, user_id=user_id)
+            deploys = get_client_deploys(client_id=record.client_id, user_id=record.user_id)
             if not deploys:
                 raise RemoteDeployError("未配置部署命令")
 
-            key = detail.get('key', '')
-            domains = get_client_domains(client_id=client_id, user_id=user_id)
-            prod_domains = [d.domain for d in domains if d.env == 'prod']
+            domains = [d.domain for d in get_client_domains(client_id=record.client_id, user_id=record.user_id, env=record.env)]
 
             container_names = []
             for deploy in deploys:
                 cname = _execute_single_deploy(
-                    ssh=ssh, username=username, client_id=client_id, record_id=record_id,
-                    deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=user_id, key=key, trace_id=trace_id,
+                    ssh=ssh, username=username, client_id=record.client_id, record_id=record.id,
+                    deploy=deploy, commits=commits, repo_auth=repo_auth, user_id=record.user_id,
+                    host_key=host_key, trace_id=trace_id, env=record.env,
                 )
                 container_names.append(cname)
 
             # 创建 nginx 容器（按 route_prefix 分流到各容器）
-            if prod_domains and container_names:
+            if domains and container_names:
                 try:
                     route_specs = pairs_from_deploys(deploys, container_names)
                 except ValueError as e:
                     raise RemoteDeployError(str(e)) from e
                 _setup_nginx_container(
-                    ssh=ssh, username=username, client_id=client_id,
-                    route_specs=route_specs, key=key, prod_domains=prod_domains, trace_id=trace_id,
+                    ssh=ssh, username=username, client_id=record.client_id,
+                    route_specs=route_specs, host_key=host_key, domains=domains, trace_id=trace_id,
                 )
 
-            # 部署成功
-            detail['deploy_log'] = '部署成功'
-            update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_SUCCESS, detail=detail)
-            logger.info("Prod deploy success: record_id=%s, client_id=%s, trace_id=%s", record_id, client_id, trace_id)
-        finally:
-            ssh.close()
-
-    except Exception as e:
-        error_msg = str(e)
-        tb = traceback.format_exc()
-        detail['deploy_log'] = f'部署失败：{error_msg}'
-        update_deploy_record_status(record_id=record_id, status=DeployRecord.STATUS_FAILED, detail=detail)
-        logger.error("Prod deploy failed: record_id=%s, client_id=%s, trace_id=%s, error=%s\n%s", record_id, client_id, trace_id, error_msg, tb)
+    # 所有服务器均部署成功后才置 SUCCESS
+    update_deploy_record_status(
+        record_id=record.id, status=DeployRecord.STATUS_SUCCESS,
+        detail_patch={'deploy_log': '部署成功'},
+    )
+    logger.info("[trace_id=%s] Deploy success: record_id=%s, client_id=%s", trace_id, record.id, record.client_id)
 
 
 # ============================================================
 # 步骤 3.1：Commit 信息补充
 # ============================================================
 
-def _fill_commit_info(repos, trace_id: str) -> tuple:
+def _fill_commit_info(repos, trace_id: str, merge_request: list[dict]) -> tuple:
     """
     查询所有仓库默认分支的最新 commitId。
 
@@ -301,31 +304,48 @@ def _fill_commit_info(repos, trace_id: str) -> tuple:
 
     commits = {}
     repo_auth = {}
+    repo_info = {}
+    if merge_request:
+        for mr in merge_request:
+            repo_info[mr['repo_name']] = {
+                'branch_name': mr['branch_name'],
+                'latest_commitId': mr['latest_commitId'],
+            }
 
     for repo in repos:
         url = repo.url
         org, repo_name = parse_github_url(url=url)
         if not org or not repo_name:
-            logger.warning("Cannot parse repo URL: %s, skip, trace_id=%s", url, trace_id)
+            logger.warning("[trace_id=%s] Cannot parse repo URL: %s, skip", trace_id, url)
             continue
 
         # 刷新 GitHub Installation Token
         try:
-            token = refresh_repo_token_by_url(repo_url=url)
+            token = refresh_repo_token_by_url(repo_url=url, trace_id=trace_id)
         except Exception as e:
             raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
 
         # 获取默认分支最新 commit
-        branch = repo.default_branch or 'main'
-        try:
-            commit_id = get_branch_latest_commit(token=token, organization=org, repo_name=repo_name, branch=branch)
-        except Exception as e:
-            raise RemoteDeployError(f"获取仓库 {repo_name} 分支 {branch} 最新提交失败：{e}")
+        if repo_name in repo_info:
+            branch_name = repo_info[repo_name]['branch_name']
+            latest_commitId = repo_info[repo_name]['latest_commitId']
+        else:
+            branch_name = repo.default_branch or 'main'
+            latest_commitId = get_branch_latest_commit(
+                token=token, organization=org, repo_name=repo_name,
+                branch=branch_name, trace_id=trace_id,
+            )
+
+        if not latest_commitId:
+            raise RemoteDeployError(f"仓库 {repo_name} 分支 {branch_name} 未返回有效 commit")
 
         repo_id_str = str(repo.id)
-        commits[repo_id_str] = {'url': url, 'branch': branch, 'commit_id': commit_id}
+        commits[repo_id_str] = {'url': url, 'branch': branch_name, 'commit_id': latest_commitId}
         repo_auth[repo_id_str] = {'token': token, 'org': org, 'repo_name': repo_name}
-        logger.info("Got commit: repo=%s, branch=%s, commit=%s, trace_id=%s", repo_name, branch, commit_id[:8], trace_id)
+        logger.info(
+            "[trace_id=%s] Got commit: repo=%s, branch=%s, commit=%s",
+            trace_id, repo_name, branch_name, latest_commitId[:8],
+        )
 
     return commits, repo_auth
 
@@ -334,34 +354,20 @@ def _fill_commit_info(repos, trace_id: str) -> tuple:
 # 步骤 3.3：目录文件检查
 # ============================================================
 
-_GIT_CLONE_TIMEOUT = 300
-_GIT_CLONE_MAX_RETRIES = 3
-_GIT_RETRY_BACKOFF_BASE_SEC = 2  # 重试退避基数，第 N 次失败 sleep 2 * 2^(N-1) 秒
-
-# 每条 git 命令前置 per-command 环境变量实现快速失败，避免跨境链路 stall 时等到 TCP 超时（~130s）才失败
-# 不写入 ~/.gitconfig，不影响服务器上其他 git 使用
-# - GIT_HTTP_LOW_SPEED_LIMIT=1000: 低于 1KB/s
-# - GIT_HTTP_LOW_SPEED_TIME=20:   持续 20 秒 → 判定失败
-_GIT_HTTP_FAIL_FAST_ENV = 'GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20'
-
-
-def _is_git_auth_error(message: str) -> bool:
-    lower_msg = (message or "").lower()
-    return (
-        "authentication failed" in lower_msg
-        or "invalid username or token" in lower_msg
-        or "password authentication is not supported" in lower_msg
-    )
-
-
 def _refresh_repo_token(repo_url: str, repo_name: str, trace_id: str) -> str:
+    """刷新仓库 token 的薄包装：失败转换为 RemoteDeployError。"""
     from service.git_service import refresh_repo_token_by_url
 
-    logger.info("Refreshing repo token: repo=%s, trace_id=%s", repo_name, trace_id)
+    logger.info("[trace_id=%s] Refreshing repo token: repo=%s", trace_id, repo_name)
     try:
-        return refresh_repo_token_by_url(repo_url=repo_url)
+        return refresh_repo_token_by_url(repo_url=repo_url, trace_id=trace_id)
     except Exception as e:
         raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
+
+
+def _token_provider(url: str, repo_name: str, trace_id: str) -> str:
+    """供 utils.git_remote_utils 注入的 token 刷新回调。"""
+    return _refresh_repo_token(repo_url=url, repo_name=repo_name, trace_id=trace_id)
 
 
 def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
@@ -374,23 +380,25 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     │   ├── {repo1}/
     │   └── {repo2}/
     └── repo_tmp/      # 部署临时文件
+    └── nginx/         # nginx 配置文件
     """
     base_dir = f'/home/{username}/app{client_id}'
     repo_dir = f'{base_dir}/repo'
     repo_tmp_dir = f'{base_dir}/repo_tmp'
+    nginx_dir = f'{base_dir}/nginx'
 
-    _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_dir}')
-    _ssh_exec(ssh=ssh, command=f'mkdir -p {repo_tmp_dir}')
+    ssh.execute(command=f'mkdir -p {repo_dir}')
+    ssh.execute(command=f'mkdir -p {repo_tmp_dir}')
+    ssh.execute(command=f'mkdir -p {nginx_dir}')
 
     # 清理历史部署遗留的低速中断配置（该配置是持久化到 ~/.gitconfig 的）
-    _ssh_exec_ignore_error(ssh=ssh, command='git config --global --unset-all http.lowSpeedLimit')
-    _ssh_exec_ignore_error(ssh=ssh, command='git config --global --unset-all http.lowSpeedTime')
-    _ssh_exec_ignore_error(ssh=ssh, command='git config --global http.postBuffer 524288000')
-    git_cfg = _ssh_exec_ignore_error(
-        ssh=ssh,
+    ssh.execute_ignore_error(command='git config --global --unset-all http.lowSpeedLimit')
+    ssh.execute_ignore_error(command='git config --global --unset-all http.lowSpeedTime')
+    ssh.execute_ignore_error(command='git config --global http.postBuffer 524288000')
+    git_cfg = ssh.execute_ignore_error(
         command='git config --global --get-regexp "^http\\.(postBuffer|lowSpeedLimit|lowSpeedTime)$" || true',
     )
-    logger.info("Remote git http config after sanitize, trace_id=%s, config=%s", trace_id, git_cfg or "<empty>")
+    logger.info("[trace_id=%s] Remote git http config after sanitize, config=%s", trace_id, git_cfg or "<empty>")
 
     for repo in repos:
         repo_id_str = str(repo.id)
@@ -402,141 +410,55 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
         token = auth['token']
         url = repo.url
         branch = repo.default_branch or 'main'
-        auth_url = url.replace('https://github.com', f'https://x-access-token:{token}@github.com')
+        auth_url = build_auth_url(url=url, token=token)
 
         target_path = f'{repo_dir}/{repo_name}'
 
-        is_valid_repo = _ssh_exec_ignore_error(
-            ssh=ssh,
+        is_valid_repo = ssh.execute_ignore_error(
             command=f'git -C {target_path} rev-parse --is-inside-work-tree 2>/dev/null || echo "invalid"',
         )
 
         try:
             if 'invalid' in is_valid_repo:
-                _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
-                _clone_repo_with_retry(
+                ssh.execute_ignore_error(command=f'rm -rf {target_path}')
+                clone_repo_with_retry(
                     ssh=ssh, auth_url=auth_url, branch=branch,
                     repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
                 )
             else:
-                _fetch_or_reclone(
+                fetch_or_reclone(
                     ssh=ssh, target_path=target_path, repo_dir=repo_dir,
                     repo_name=repo_name, branch=branch, auth_url=auth_url, trace_id=trace_id,
                 )
-        except RemoteDeployError as e:
-            if not _is_git_auth_error(e.message):
-                raise
+        except GitRemoteError as e:
+            if not is_git_auth_error(e.message):
+                raise RemoteDeployError(e.message) from e
             # token 可能在部署过程中失效，认证失败时刷新一次并重建本地仓库（re-clone 最可靠）
             new_token = _refresh_repo_token(repo_url=url, repo_name=repo_name, trace_id=trace_id)
             repo_auth[repo_id_str]['token'] = new_token
-            new_auth_url = url.replace('https://github.com', f'https://x-access-token:{new_token}@github.com')
-            logger.warning("Git auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
-            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
-            _clone_repo_with_retry(
-                ssh=ssh, auth_url=new_auth_url, branch=branch,
-                repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
-            )
-
-
-def _clone_repo_with_retry(ssh, auth_url: str, branch: str, repo_dir: str, repo_name: str, trace_id: str):
-    """clone 仓库（浅克隆 + 重试 + 指数退避），失败时清理残留目录"""
-    target_path = f'{repo_dir}/{repo_name}'
-    # --no-tags 减少拉取量；per-command 低速超时，卡住 20s 后立刻失败
-    clone_cmd = (
-        f'cd {repo_dir} && {_GIT_HTTP_FAIL_FAST_ENV} '
-        f'git clone --depth 1 --single-branch --no-tags --branch {branch} {auth_url} {repo_name}'
-    )
-
-    last_err = None
-    for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
-        logger.info(
-            "Cloning repo (attempt %d/%d): %s -> %s, trace_id=%s",
-            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, target_path, trace_id,
-        )
-        try:
-            _ssh_exec(ssh=ssh, command=clone_cmd, timeout=_GIT_CLONE_TIMEOUT)
-            return
-        except RemoteDeployError as e:
-            last_err = e
+            new_auth_url = build_auth_url(url=url, token=new_token)
             logger.warning(
-                "Clone attempt %d failed, repo=%s, trace_id=%s, detail=%s",
-                attempt, repo_name, trace_id, e.message,
+                "[trace_id=%s] Git auth failed, retry with refreshed token: repo=%s",
+                trace_id, repo_name,
             )
-            _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
-            if attempt < _GIT_CLONE_MAX_RETRIES and not _is_git_auth_error(e.message):
-                backoff = _GIT_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
-                logger.info("Clone backoff %ds before retry, repo=%s, trace_id=%s", backoff, repo_name, trace_id)
-                time.sleep(backoff)
-
-    raise RemoteDeployError(f"仓库 {repo_name} 克隆失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
-
-
-def _fetch_repo_with_retry(ssh, target_path: str, auth_url: str, repo_name: str, branch: str, trace_id: str):
-    """更新已有仓库（浅 fetch 指定分支 + 重试 + 指数退避）
-
-    相比无参数的 `git fetch origin`，只拉取目标分支的最新 1 个 commit，数据量最小化，
-    显著降低跨境链路 TLS 被中断的概率。
-    """
-    fetch_cmd = (
-        f'cd {target_path} && git remote set-url origin {auth_url} && '
-        f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {branch}'
-    )
-
-    last_err = None
-    for attempt in range(1, _GIT_CLONE_MAX_RETRIES + 1):
-        logger.info(
-            "Fetching repo (attempt %d/%d): %s, branch=%s, trace_id=%s",
-            attempt, _GIT_CLONE_MAX_RETRIES, repo_name, branch, trace_id,
-        )
-        try:
-            _ssh_exec(ssh=ssh, command=fetch_cmd, timeout=_GIT_CLONE_TIMEOUT)
-            return
-        except RemoteDeployError as e:
-            last_err = e
-            logger.warning(
-                "Fetch attempt %d failed, repo=%s, trace_id=%s, detail=%s",
-                attempt, repo_name, trace_id, e.message,
-            )
-            # 认证错误不退避、不重试，立即抛给上层刷新 token
-            if _is_git_auth_error(e.message):
-                break
-            if attempt < _GIT_CLONE_MAX_RETRIES:
-                backoff = _GIT_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
-                logger.info("Fetch backoff %ds before retry, repo=%s, trace_id=%s", backoff, repo_name, trace_id)
-                time.sleep(backoff)
-
-    raise RemoteDeployError(f"仓库 {repo_name} fetch 失败（已重试{_GIT_CLONE_MAX_RETRIES}次）：{last_err.message if last_err else 'unknown'}")
-
-
-def _fetch_or_reclone(ssh, target_path: str, repo_dir: str, repo_name: str, branch: str, auth_url: str, trace_id: str):
-    """优先增量 fetch；fetch 持续失败（非认证错误）时删除本地目录重新浅 clone。
-
-    认证错误保留原语义，抛给上层统一刷新 token 后重建。
-    """
-    try:
-        _fetch_repo_with_retry(
-            ssh=ssh, target_path=target_path, auth_url=auth_url,
-            repo_name=repo_name, branch=branch, trace_id=trace_id,
-        )
-    except RemoteDeployError as fetch_err:
-        if _is_git_auth_error(fetch_err.message):
-            raise
-        logger.warning(
-            "Fetch persistently failed for %s, fallback to re-clone, trace_id=%s, detail=%s",
-            repo_name, trace_id, fetch_err.message,
-        )
-        _ssh_exec_ignore_error(ssh=ssh, command=f'rm -rf {target_path}')
-        _clone_repo_with_retry(
-            ssh=ssh, auth_url=auth_url, branch=branch,
-            repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
-        )
+            ssh.execute_ignore_error(command=f'rm -rf {target_path}')
+            try:
+                clone_repo_with_retry(
+                    ssh=ssh, auth_url=new_auth_url, branch=branch,
+                    repo_dir=repo_dir, repo_name=repo_name, trace_id=trace_id,
+                )
+            except GitRemoteError as retry_err:
+                raise RemoteDeployError(retry_err.message) from retry_err
 
 
 # ============================================================
 # 步骤 3.4：单条部署命令执行
 # ============================================================
 
-def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, deploy, commits: dict, repo_auth: dict, user_id: int, key: str, trace_id: str) -> str:
+def _execute_single_deploy(
+    ssh: SshClient, username: str, client_id: int, record_id: int, deploy: ClientDeploy,
+    commits: dict, repo_auth: dict, user_id: int, host_key: str, trace_id: str, env: str,
+) -> str:
     """
     执行单条部署命令（ClientDeploy）：拷贝仓库、打包镜像、启动容器。
 
@@ -560,7 +482,7 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     commit_short = commit_id[:8]
     auth = repo_auth[repo_id_str]
     repo_name = auth['repo_name']
-    auth_url = commit_info['url'].replace('https://github.com', f"https://x-access-token:{auth['token']}@github.com")
+    url = commit_info['url']
 
     base_dir = f'/home/{username}/app{client_id}'
     repo_dir = f'{base_dir}/repo'
@@ -568,93 +490,103 @@ def _execute_single_deploy(ssh, username: str, client_id: int, record_id: int, d
     tmp_repo_dir = f'{tmp_dir}/{repo_name}'
     full_work_dir = f'{tmp_repo_dir}/{work_dir}' if work_dir else tmp_repo_dir
 
-    # 创建临时目录并清理旧副本。
-    # 历史部署可能遗留 root 拥有文件，先用 sudo 清理并修复权限，避免 cp 权限错误。
-    _ssh_exec(ssh=ssh, command=f'mkdir -p {tmp_dir}')
-    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo rm -rf {tmp_repo_dir} || rm -rf {tmp_repo_dir}')
-    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo chown -R {username}:{username} {tmp_dir} || true')
-    _ssh_exec(ssh=ssh, command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
-    checkout_cmd = (
-        f'cd {tmp_repo_dir} && '
-        f'git checkout {commit_id} || '
-        f'(git remote set-url origin {auth_url} && '
-        f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && git checkout {commit_id})'
-    )
     try:
-        _ssh_exec(ssh=ssh, command=checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
-    except RemoteDeployError as e:
-        if not _is_git_auth_error(e.message):
-            raise
-        new_token = _refresh_repo_token(repo_url=commit_info['url'], repo_name=repo_name, trace_id=trace_id)
-        repo_auth[repo_id_str]['token'] = new_token
-        auth_url = commit_info['url'].replace('https://github.com', f"https://x-access-token:{new_token}@github.com")
-        retry_checkout_cmd = (
-            f'cd {tmp_repo_dir} && '
-            f'git remote set-url origin {auth_url} && '
-            f'{_GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && git checkout {commit_id}'
+        # 创建临时目录并清理旧副本。
+        # 历史部署可能遗留 root 拥有文件，先用 sudo 清理并修复权限，避免 cp 权限错误。
+        ssh.execute(command=f'mkdir -p {tmp_dir}')
+        ssh.execute_ignore_error(command=f'sudo rm -rf {tmp_repo_dir} || rm -rf {tmp_repo_dir}')
+        ssh.execute_ignore_error(command=f'sudo chown -R {username}:{username} {tmp_dir} || true')
+        ssh.execute(command=f'cp -r {repo_dir}/{repo_name} {tmp_repo_dir}')
+
+        try:
+            final_token = checkout_commit_with_auth_refresh(
+                ssh=ssh, tmp_repo_dir=tmp_repo_dir, commit_id=commit_id,
+                url=url, token=auth['token'], repo_name=repo_name,
+                token_provider=_token_provider, trace_id=trace_id,
+            )
+            repo_auth[repo_id_str]['token'] = final_token
+        except GitRemoteError as e:
+            raise RemoteDeployError(e.message) from e
+
+        # Docker 镜像：检查 Dockerfile 是否存在
+        image_name = f'app{client_id}_{deploy_uuid}'
+        image_tag = commit_short
+        image_full = f'{image_name}:{image_tag}'
+
+        df_check = ssh.execute_ignore_error(
+            command=f'test -f {full_work_dir}/Dockerfile && echo "found" || echo "not_found"',
         )
-        logger.warning("Checkout auth failed, retry with refreshed token: repo=%s, trace_id=%s", repo_name, trace_id)
-        _ssh_exec(ssh=ssh, command=retry_checkout_cmd, timeout=_GIT_CLONE_TIMEOUT)
+        if 'not_found' in df_check:
+            raise RemoteDeployError(f"工作目录 {work_dir or '/'} 下未找到 Dockerfile")
 
-    # Docker 镜像：检查 Dockerfile 是否存在
-    image_name = f'app{client_id}_{deploy_uuid}'
-    image_tag = commit_short
-    image_full = f'{image_name}:{image_tag}'
-
-    df_check = _ssh_exec_ignore_error(ssh=ssh, command=f'test -f {full_work_dir}/Dockerfile && echo "found" || echo "not_found"')
-    if 'not_found' in df_check:
-        raise RemoteDeployError(f"工作目录 {work_dir or '/'} 下未找到 Dockerfile")
-
-    # 镜像打包（已存在则跳过）
-    # docker 命令统一用 sudo：ubuntu 用户首次部署尚未加入 docker 组时兜底，避免 /var/run/docker.sock 无权限
-    img_check = _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"')
-    if 'not_exists' in img_check:
-        logger.info("Building image: %s from %s, trace_id=%s", image_full, full_work_dir, trace_id)
-        # BuildKit 在默认 progress=auto 下会以步骤为单位缓冲输出，失败时容易只剩 header 一行日志，真实错误丢失。
-        # 强制 --progress=plain + 2>&1 合流，确保失败原因在 stdout tail 中完整可见；sudo -E 保留 BUILDKIT 相关环境变量。
-        build_cmd = (
-            f'cd {full_work_dir} && '
-            f'BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 DOCKER_CLI_HINTS=false '
-            f'sudo -E docker build --progress=plain -t {image_full} . 2>&1'
+        # 镜像打包（已存在则跳过）
+        # docker 命令统一用 sudo：ubuntu 用户首次部署尚未加入 docker 组时兜底，
+        # 避免 /var/run/docker.sock 无权限。
+        img_check = ssh.execute_ignore_error(
+            command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"',
         )
-        _ssh_exec(ssh=ssh, command=build_cmd, timeout=600)
-    else:
-        logger.info("Image %s already exists, skip build, trace_id=%s", image_full, trace_id)
+        if 'not_exists' in img_check:
+            # BuildKit 在默认 progress=auto 下会以步骤为单位缓冲输出，失败时容易只剩 header 一行日志，
+            # 真实错误丢失。强制 --progress=plain + 2>&1 合流，确保失败原因在 stdout tail 中完整可见；
+            # sudo -E 保留 BUILDKIT 相关环境变量。
+            build_cmd = (
+                f'cd {full_work_dir} && '
+                f'BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 DOCKER_CLI_HINTS=false '
+                f'sudo -E docker build --progress=plain -t {image_full} . 2>&1'
+            )
+            logger.info(
+                "[trace_id=%s] Building image: %s from %s, build_cmd=%s",
+                trace_id, image_full, full_work_dir, build_cmd,
+            )
+            ssh.execute(command=build_cmd, timeout=1200)
+        else:
+            logger.info("[trace_id=%s] Image %s already exists, skip build", trace_id, image_full)
 
-    # 生成 TOML 配置并写入远程服务器
-    toml_content = generate_deploy_toml(
-        client_id=client_id, user_id=user_id,
-        official_configs=deploy.official_configs or [],
-        custom_config=deploy.custom_config or '',
-        env='prod',
-    )
-    config_dir = f'{base_dir}/config{deploy_uuid}'
-    config_path = f'{config_dir}/config.toml'
-    if toml_content:
-        _ssh_write_file(ssh=ssh, remote_dir=config_dir, remote_path=config_path, content=toml_content)
+        # 生成 TOML 配置并写入远程服务器
+        toml_content = generate_deploy_toml(
+            client_id=client_id, user_id=user_id,
+            official_configs=deploy.official_configs or [],
+            custom_config=deploy.custom_config or '',
+            env=env,
+        )
+        config_dir = f'{base_dir}/config{deploy_uuid}'
+        config_path = f'{config_dir}/config.toml'
+        if toml_content:
+            ssh.write_file(remote_dir=config_dir, remote_path=config_path, content=toml_content)
 
-    # 创建 Docker 网络
-    network_name = f'network_{client_id}_{key}' if key else f'network_{client_id}'
-    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker network create {network_name} 2>/dev/null')
+        # 创建 Docker 网络
+        network_name = f'network_{client_id}_{host_key}' if host_key else f'network_{client_id}'
+        ssh.execute_ignore_error(command=f'sudo docker network create {network_name} 2>/dev/null')
 
-    # 停止并删除旧容器
-    container_name = f'app_{client_id}_{deploy_uuid}'
-    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {container_name} 2>/dev/null')
+        # 停止并删除旧容器
+        container_name = (
+            f'app_{client_id}_{env}_{deploy_uuid}_{host_key}' if host_key
+            else f'app_{client_id}_{env}_{deploy_uuid}'
+        )
+        ssh.execute_ignore_error(command=f'sudo docker rm -f {container_name} 2>/dev/null')
 
-    # 生成随机端口
-    port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1')
+        # 启动容器
+        # 应用容器不对外暴露端口：生产流量统一走「宿主 nginx → nginx 容器 → 容器网络内 {container_name}:8080」，
+        # 不需要在宿主机上再占用随机端口；排障请用 `docker exec` 或临时 `docker run --network` 接入同一网络访问。
+        mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
+        # 与模板仓库约定：APP_CONFIG_PATH 指向挂载的 /config/config.toml
+        env_opt = '-e APP_CONFIG_PATH=/config/config.toml' if toml_content else ''
+        run_cmd = (
+            f'sudo docker run -d --name {container_name} --network {network_name} '
+            f'{env_opt} {mount_opt} {image_full}'
+        )
+        if startup_command:
+            escaped_cmd = startup_command.replace("'", "'\\''")
+            run_cmd += f" sh -c '{escaped_cmd}'"
 
-    # 启动容器
-    mount_opt = f'-v {config_path}:/config/config.toml:ro' if toml_content else ''
-    run_cmd = f'sudo docker run -d --name {container_name} --network {network_name} -p {port}:8080 {mount_opt} {image_full}'
-    if startup_command:
-        escaped_cmd = startup_command.replace("'", "'\\''")
-        run_cmd += f" sh -c '{escaped_cmd}'"
+        logger.info("[trace_id=%s] Container starting: image=%s, run_cmd=%s", trace_id, image_full, run_cmd)
+        ssh.execute(command=run_cmd)
+        logger.info("[trace_id=%s] Container started: name=%s, image=%s", trace_id, container_name, image_full)
 
-    _ssh_exec(ssh=ssh, command=run_cmd)
-    logger.info("Container started: name=%s, port=%s, image=%s, trace_id=%s", container_name, port, image_full, trace_id)
-
-    return container_name
+        return container_name
+    finally:
+        # 清理本次部署的临时仓库拷贝（保留镜像），避免累积磁盘占用
+        ssh.execute_ignore_error(command=f'sudo rm -rf {tmp_dir} || rm -rf {tmp_dir}')
 
 
 # ============================================================
@@ -673,9 +605,9 @@ def _normalize_client_domain(domain: str) -> str:
     return d.split('/')[0].split(':')[0].strip()
 
 
-def _normalize_prod_domains(prod_domains: list) -> list:
+def _normalize_domains(domains: list) -> list:
     out = []
-    for raw in prod_domains or []:
+    for raw in domains or []:
         h = _normalize_client_domain(raw)
         if h and h not in out:
             out.append(h)
@@ -701,9 +633,9 @@ def _ensure_host_nginx_includes_app_vhosts(ssh, username: str, client_id: int, t
         f'# Managed by ai-task remote deploy (client_id={client_id}). Do not hand-edit.\n'
         f'include {base_nginx}/*.conf;\n'
     )
-    _ssh_write_root_owned_file(ssh=ssh, remote_path=inc_path, content=content)
-    _ssh_exec(ssh=ssh, command='sudo mkdir -p /var/www/certbot')
-    logger.info("Ensured host nginx include: path=%s trace_id=%s", inc_path, trace_id)
+    ssh.write_root_owned_file(remote_path=inc_path, content=content)
+    ssh.execute(command='sudo mkdir -p /var/www/certbot')
+    logger.info("[trace_id=%s] Ensured host nginx include: path=%s", trace_id, inc_path)
 
 
 _INNER_PROXY_COMMON = (
@@ -762,8 +694,7 @@ def _render_inner_nginx_conf(route_specs: list) -> str:
 
 def _ensure_certbot_ready(ssh, trace_id: str) -> None:
     """确保 certbot 与 nginx 插件可用，并初始化 letsencrypt 附加文件。"""
-    _ssh_exec(
-        ssh=ssh,
+    ssh.execute(
         command=(
             'if ! command -v certbot >/dev/null 2>&1; then '
             'if command -v apt-get >/dev/null 2>&1; then '
@@ -778,9 +709,8 @@ def _ensure_certbot_ready(ssh, trace_id: str) -> None:
             'fi'
         ),
     )
-    _ssh_exec(ssh=ssh, command='sudo mkdir -p /var/www/certbot')
-    _ssh_exec(
-        ssh=ssh,
+    ssh.execute(command='sudo mkdir -p /var/www/certbot')
+    ssh.execute(
         command=(
             'if [ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]; then '
             'sudo mkdir -p /etc/letsencrypt && '
@@ -796,8 +726,7 @@ def _ensure_certbot_ready(ssh, trace_id: str) -> None:
             'fi'
         ),
     )
-    _ssh_exec(
-        ssh=ssh,
+    ssh.execute(
         command=(
             'if [ ! -f /etc/letsencrypt/ssl-dhparams.pem ]; then '
             'sudo openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048; '
@@ -805,7 +734,7 @@ def _ensure_certbot_ready(ssh, trace_id: str) -> None:
         ),
         timeout=600,
     )
-    logger.info("Certbot runtime ready on host, trace_id=%s", trace_id)
+    logger.info("[trace_id=%s] Certbot runtime ready on host", trace_id)
 
 
 def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
@@ -817,8 +746,7 @@ def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
     if not pd or not re.match(r'^[a-zA-Z0-9.-]+$', pd):
         return ''
 
-    exact = _ssh_exec_ignore_error(
-        ssh=ssh,
+    exact = ssh.execute_ignore_error(
         command=(
             f"sudo test -f '/etc/letsencrypt/live/{pd}/fullchain.pem' "
             f"&& sudo test -f '/etc/letsencrypt/live/{pd}/privkey.pem' "
@@ -828,8 +756,7 @@ def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
     if exact:
         return exact
 
-    wildcard = _ssh_exec_ignore_error(
-        ssh=ssh,
+    wildcard = ssh.execute_ignore_error(
         command=(
             "sudo bash -c '"
             f"for d in /etc/letsencrypt/live/{pd}*; do "
@@ -852,15 +779,13 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
 
     cert_base = f'/etc/letsencrypt/live/{primary}'
     crt = f'{cert_base}/fullchain.pem'
-    key = f'{cert_base}/privkey.pem'
 
     domain_flags = ' '.join(f'-d {d}' for d in server_names.split() if d)
     if not domain_flags:
         raise RemoteDeployError('证书签发失败：server_name 为空')
 
     # 使用 webroot 模式，依赖 80 端口可达与 DNS 正确。
-    _ssh_exec(
-        ssh=ssh,
+    ssh.execute(
         command=(
             f'sudo certbot certonly --webroot -w /var/www/certbot '
             f'--register-unsafely-without-email --agree-tos -n '
@@ -875,7 +800,7 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
             f'证书签发后仍未找到证书 lineage（期望路径之一含 {crt}）。'
             f'请检查 DNS、80 端口，并在服务器执行: sudo certbot certificates; sudo ls -la /etc/letsencrypt/live/'
         )
-    logger.info("Certificate ensured for domains=%s trace_id=%s", server_names, trace_id)
+    logger.info("[trace_id=%s] Certificate ensured for domains=%s", trace_id, server_names)
     return cert_lineage_after
 
 
@@ -955,11 +880,11 @@ def _render_host_nginx_vhost(server_names: str, upstream_port: str, primary_for_
 
 
 def _reload_host_nginx(ssh, trace_id: str) -> None:
-    _ssh_exec(ssh=ssh, command='sudo nginx -t && sudo systemctl reload nginx')
-    logger.info("Host nginx reloaded, trace_id=%s", trace_id)
+    ssh.execute(command='sudo nginx -t && sudo systemctl reload nginx')
+    logger.info("[trace_id=%s] Host nginx reloaded", trace_id)
 
 
-def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list, key: str, prod_domains: list, trace_id: str):
+def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list, host_key: str, domains: list, trace_id: str):
     """
     创建 Nginx 容器用于 Docker 网络内路由，并在宿主机写入 HTTPS vhost + reload。
 
@@ -971,26 +896,26 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
 
     route_specs: [(规范路径前缀, 容器名), ...]，与 ClientDeploy.route_prefix 一致。
     """
-    if not prod_domains or not route_specs:
+    if not domains or not route_specs:
         return
 
-    norm_domains = _normalize_prod_domains(prod_domains)
+    norm_domains = _normalize_domains(domains)
     if not norm_domains:
         raise RemoteDeployError('生产环境域名配置无效（无法解析为 hostname）')
 
     base_dir = f'/home/{username}/app{client_id}'
 
     # 与 _execute_single_deploy 中 Docker 网络/容器命名一致（沿用原始 key 的真值判断与插值）
-    if key:
-        network_name = f'network_{client_id}_{key}'
-        nginx_name = f'nginx_{client_id}_{key}'
-        key_stripped = (key or '').strip()
-        if not key_stripped:
+    if host_key:
+        network_name = f'network_{client_id}_{host_key}'
+        nginx_name = f'nginx_{client_id}_{host_key}'
+        host_key_stripped = (host_key or '').strip()
+        if not host_key_stripped:
             raise RemoteDeployError('发布 key 无效（仅空白字符）')
-        key_fs = _sanitize_key_for_nginx_filename(key_stripped)
-        server_names = ' '.join(f'{key_stripped}.{d}' for d in norm_domains)
-        host_conf_basename = f'{key_fs}.conf'
-        inner_segment = key_fs
+        host_key_fs = _sanitize_key_for_nginx_filename(host_key_stripped)
+        server_names = ' '.join(f'{host_key_stripped}.{d}' for d in norm_domains)
+        host_conf_basename = f'{host_key_fs}.conf'
+        inner_segment = host_key_fs
     else:
         network_name = f'network_{client_id}'
         nginx_name = f'nginx_{client_id}'
@@ -1004,7 +929,7 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
 
     # 在证书签发前，先放置 HTTP challenge vhost 并 reload，避免 webroot 校验 404。
     acme_conf = _render_acme_http_only_vhost(server_names=server_names)
-    _ssh_write_file(ssh=ssh, remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=acme_conf)
+    ssh.write_file(remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=acme_conf)
     _ensure_host_nginx_includes_app_vhosts(
         ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
     )
@@ -1015,28 +940,28 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
     inner_conf_dir = f'{base_dir}/nginx/container/{inner_segment}'
     inner_conf_path = f'{inner_conf_dir}/default.conf'
     inner_conf = _render_inner_nginx_conf(route_specs=route_specs)
-    _ssh_write_file(ssh=ssh, remote_dir=inner_conf_dir, remote_path=inner_conf_path, content=inner_conf)
+    ssh.write_file(remote_dir=inner_conf_dir, remote_path=inner_conf_path, content=inner_conf)
 
-    nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1').strip()
+    nginx_port = ssh.execute(command='shuf -i 10000-60000 -n 1').strip()
 
     host_conf = _render_host_nginx_vhost(
         server_names=server_names,
         upstream_port=nginx_port,
         primary_for_cert=primary_for_cert,
     )
-    _ssh_write_file(ssh=ssh, remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=host_conf)
+    ssh.write_file(remote_dir=f'{base_dir}/nginx', remote_path=host_conf_path, content=host_conf)
 
-    _ssh_exec_ignore_error(ssh=ssh, command=f'sudo docker rm -f {nginx_name} 2>/dev/null')
+    ssh.execute_ignore_error(command=f'sudo docker rm -f {nginx_name} 2>/dev/null')
 
-    _ssh_exec(ssh=ssh, command=(
+    ssh.execute(command=(
         f'sudo docker run -d --name {nginx_name} --network {network_name} '
         f'-p {nginx_port}:80 '
         f'-v {inner_conf_path}:/etc/nginx/conf.d/default.conf:ro '
         f'nginx:alpine'
     ))
     logger.info(
-        "Nginx container started: name=%s, port=%s, server_name=%s, host_vhost=%s routes=%s trace_id=%s",
-        nginx_name, nginx_port, server_names, host_conf_path, route_specs, trace_id,
+        "[trace_id=%s] Nginx container started: name=%s, port=%s, server_name=%s, host_vhost=%s, routes=%s",
+        trace_id, nginx_name, nginx_port, server_names, host_conf_path, route_specs,
     )
 
     _reload_host_nginx(ssh=ssh, trace_id=trace_id)
