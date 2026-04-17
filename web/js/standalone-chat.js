@@ -890,7 +890,13 @@ async function scPublishApp() {
     try {
         const res = await chatAPI.createMessage(0, scSelectedChatId, prompt);
         const msgId = res.data ? res.data.id : null;
-        await deployAPI.createRecord(clientId, 'prod', chatTitle, 'pending', {task_id: 0, chat_id: scSelectedChatId, msg_id: msgId});
+        await deployAPI.createRecord(
+            clientId, 'prod', chatTitle, 'pending',
+            { task_id: 0, chat_id: scSelectedChatId, msg_id: msgId },
+            msgId,
+            0,
+            scSelectedChatId,
+        );
         showToast('发布记录已创建', 'success');
         await scLoadMessages(scSelectedChatId);
         scCurrentPage = 1;

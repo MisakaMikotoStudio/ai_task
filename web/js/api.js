@@ -567,8 +567,16 @@ const deployAPI = {
         if (status) params.set('status', status);
         return request(`/app/deploy/records?${params.toString()}`);
     },
-    async createRecord(clientId, env, description, status, detail, msgId = 0) {
-        const body = JSON.stringify({ env, description, status, detail, msg_id: msgId || 0 });
+    async createRecord(clientId, env, description, status, detail, msgId = 0, taskId = 0, chatId = 0) {
+        const body = JSON.stringify({
+            env,
+            description,
+            status,
+            detail,
+            msg_id: msgId || 0,
+            task_id: taskId || 0,
+            chat_id: chatId || 0,
+        });
         return request(`/app/deploy/client/${clientId}/records`, { method: 'POST', body });
     },
     async getRecordsByMsgIds(clientId, msgIds) {

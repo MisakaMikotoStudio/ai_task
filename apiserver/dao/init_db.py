@@ -9,9 +9,28 @@ import logging
 from config_model import DatabaseConfig
 from .connection import init_connection, get_engine
 from .models import Base, User, Client, Task
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 logger = logging.getLogger(__name__)
+
+
+def _add_column_if_missing(engine, table: str, column: str, column_ddl: str) -> None:
+    """
+    为已存在的表安全增加列（兼容标准 MySQL：无 ADD COLUMN IF NOT EXISTS）。
+
+    create_all 不会给已有表补新列，故升级库依赖此逻辑。
+    """
+    insp = inspect(engine)
+    if table not in insp.get_table_names():
+        return
+    existing = {c['name'] for c in insp.get_columns(table)}
+    if column in existing:
+        return
+    sql = f'ALTER TABLE `{table}` ADD COLUMN {column_ddl}'
+    with engine.connect() as conn:
+        conn.execute(text(sql))
+        conn.commit()
+    logger.info('Migration applied: %s.%s', table, column)
 
 
 def _run_migrations(engine):
@@ -35,12 +54,6 @@ def _run_migrations(engine):
         ADD COLUMN IF NOT EXISTS `work_dir` VARCHAR(512) NULL DEFAULT ''
         COMMENT '工作目录路径，启动命令在此目录下运行'
         """,
-        # ClientDeploy 表增加 route_prefix 字段（生产 nginx 按前缀分流）
-        """
-        ALTER TABLE ai_task_client_deploys
-        ADD COLUMN IF NOT EXISTS `route_prefix` VARCHAR(128) NOT NULL DEFAULT ''
-        COMMENT '生产 nginx 路径前缀；空或/表示根；如/api 将路径前缀去掉后转发到容器'
-        """,
         # DeployRecord 表增加 msg_id 字段（关联 chat message）
         """
         ALTER TABLE ai_task_deploy_records
@@ -61,6 +74,30 @@ def _run_migrations(engine):
             except Exception as e:
                 # 字段已存在等情况忽略
                 logger.debug("Migration skipped (may already exist): %s", str(e)[:100])
+
+    # route_prefix：标准 MySQL 不支持 ADD COLUMN IF NOT EXISTS，单独用探测 + ALTER
+    _add_column_if_missing(
+        engine,
+        table='ai_task_client_deploys',
+        column='route_prefix',
+        column_ddl=(
+            "`route_prefix` VARCHAR(128) NOT NULL DEFAULT '' "
+            "COMMENT '生产 nginx 路径前缀；空或/表示根；如/api 将路径前缀去掉后转发到容器'"
+        ),
+    )
+
+    _add_column_if_missing(
+        engine,
+        table='ai_task_deploy_records',
+        column='task_id',
+        column_ddl="`task_id` INT NOT NULL DEFAULT 0 COMMENT '关联任务ID，0 表示未关联'",
+    )
+    _add_column_if_missing(
+        engine,
+        table='ai_task_deploy_records',
+        column='chat_id',
+        column_ddl="`chat_id` INT NOT NULL DEFAULT 0 COMMENT '关联 Chat ID，0 表示未关联'",
+    )
 
 
 def init_database(config: DatabaseConfig):

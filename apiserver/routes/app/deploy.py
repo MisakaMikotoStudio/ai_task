@@ -134,26 +134,57 @@ def create_deploy_record_api(client_id):
     if not isinstance(detail, dict):
         return jsonify({'code': 400, 'message': 'detail 必须是字典'}), 400
 
-    # msg_id 可选，默认 0；兼容 body.msg_id 或 detail.msg_id
+    def _parse_nonneg_int(val):
+        if val is None or val == '':
+            return 0
+        try:
+            n = int(val)
+        except (TypeError, ValueError):
+            return None
+        if n < 0:
+            return -1
+        return n
+
+    # msg_id / task_id / chat_id：可选，默认 0；兼容 body 顶层或 detail 内
     msg_id_raw = data.get('msg_id')
     if msg_id_raw is None:
         msg_id_raw = detail.get('msg_id')
-    msg_id = 0
-    if msg_id_raw is not None and msg_id_raw != '':
-        try:
-            msg_id = int(msg_id_raw)
-        except (TypeError, ValueError):
-            return jsonify({'code': 400, 'message': 'msg_id 必须为整数'}), 400
-        if msg_id < 0:
-            return jsonify({'code': 400, 'message': 'msg_id 不能为负数'}), 400
+    task_id_raw = data.get('task_id')
+    if task_id_raw is None:
+        task_id_raw = detail.get('task_id')
+    chat_id_raw = data.get('chat_id')
+    if chat_id_raw is None:
+        chat_id_raw = detail.get('chat_id')
 
-    # 同步写入 detail.msg_id（保持 detail 中的冗余字段，便于老前端兼容）
+    msg_id = _parse_nonneg_int(msg_id_raw, 'msg_id')
+    if msg_id is None:
+        return jsonify({'code': 400, 'message': 'msg_id 必须为整数'}), 400
+    if msg_id < 0:
+        return jsonify({'code': 400, 'message': 'msg_id 不能为负数'}), 400
+
+    task_id = _parse_nonneg_int(task_id_raw, 'task_id')
+    if task_id is None:
+        return jsonify({'code': 400, 'message': 'task_id 必须为整数'}), 400
+    if task_id < 0:
+        return jsonify({'code': 400, 'message': 'task_id 不能为负数'}), 400
+
+    chat_id = _parse_nonneg_int(chat_id_raw, 'chat_id')
+    if chat_id is None:
+        return jsonify({'code': 400, 'message': 'chat_id 必须为整数'}), 400
+    if chat_id < 0:
+        return jsonify({'code': 400, 'message': 'chat_id 不能为负数'}), 400
+
+    # 同步写入 detail（便于老前端只读 detail）
     if msg_id:
         detail['msg_id'] = msg_id
+    if task_id:
+        detail['task_id'] = task_id
+    if chat_id:
+        detail['chat_id'] = chat_id
 
     record_id = create_deploy_record(
         user_id=user_id, client_id=client_id, env=env, description=description,
-        status=status, detail=detail, msg_id=msg_id,
+        status=status, detail=detail, msg_id=msg_id, task_id=task_id, chat_id=chat_id,
     )
     return jsonify({'code': 201, 'message': '发布记录创建成功', 'data': {'id': record_id}}), 201
 
