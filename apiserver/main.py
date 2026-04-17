@@ -159,6 +159,10 @@ def create_app(config: AppConfig) -> Flask:
         return send_from_directory(app.static_folder, path)
 
     # 启动生产环境部署定时调度器
+    # 把完整 AppConfig 注入 remote_deploy_service，供后台调度线程访问
+    # （调度不在 Flask 请求上下文里，不能用 current_app.config）
+    from service.remote_deploy_service import set_app_config as set_deploy_app_config
+    set_deploy_app_config(config)
     from scheduler import start_deploy_scheduler, start_test_cleanup_scheduler
     start_deploy_scheduler()
     # 启动测试容器过期清理调度器（每小时扫描，清理创建超过 1 天的测试容器）

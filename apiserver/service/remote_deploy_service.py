@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
+from config_model import AppConfig, TencentDnsConfig
 from dao.deploy_dao import get_pending_deploy_records, update_deploy_record_status, batch_cancel_deploy_records
 from dao.client_dao import (
     get_client_repos, get_client_deploys, get_client_servers, get_client_domains,
@@ -39,8 +40,32 @@ from utils.git_remote_utils import (
     fetch_or_reclone,
     checkout_commit_with_auth_refresh,
 )
+from utils.tencent_dns_utils import (
+    TencentDnsError,
+    ensure_a_records_for_fqdns,
+    is_configured as is_tencent_dns_configured,
+)
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────
+# 模块级 AppConfig 持有者
+# 部署调度是后台线程，不在 Flask 请求上下文里，不能用 current_app.config 取配置。
+# 由 main.create_app() 在启动调度器之前调用 set_app_config() 注入一次即可。
+# ──────────────────────────────────────────────────────
+_app_config: "AppConfig | None" = None
+
+
+def set_app_config(config: "AppConfig") -> None:
+    """由 main.create_app() 在启动阶段调用，注入全局应用配置供后台调度使用。"""
+    global _app_config
+    _app_config = config
+
+
+def _get_tencent_dns_config() -> "TencentDnsConfig | None":
+    if _app_config is None:
+        return None
+    return getattr(_app_config, 'tencent_dns', None)
 
 _ENV_INIT_SCRIPT_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils', 'server_env_init.sh'))
 
@@ -842,6 +867,41 @@ def _render_inner_nginx_conf(route_specs: list) -> str:
     return ''.join(parts)
 
 
+def _ensure_dns_for_server_names(ssh, server_names: str, trace_id: str) -> None:
+    """在 certbot 签证书前，自动把 server_names 中每个 FQDN 的 A 记录写入 DNSPod。
+
+    - 未配置凭据/managed_zones 或未命中 managed_zones 时：静默跳过（保留原有 prod 流程：域名由客户自管）
+    - 任意一个 FQDN 命中 managed_zones 但 API 调用失败：抛 RemoteDeployError，让整条部署标为失败
+      （否则 certbot 紧接着就会因 DNS 未就绪而失败，错误原因反而被埋得更深）
+    - 变更后的传播等待在 ensure_a_records_for_fqdns 内部统一 sleep 一次
+    """
+    dns_config = _get_tencent_dns_config()
+    if not is_tencent_dns_configured(config=dns_config):
+        return
+
+    fqdns = [d for d in (server_names or '').split() if d]
+    if not fqdns:
+        return
+
+    target_ip = (ssh.ip or '').strip()
+    if not target_ip:
+        raise RemoteDeployError('自动 DNS 解析失败：目标服务器 IP 为空')
+
+    try:
+        results = ensure_a_records_for_fqdns(
+            config=dns_config, fqdns=fqdns, ip=target_ip, trace_id=trace_id,
+        )
+    except TencentDnsError as e:
+        raise RemoteDeployError(f'自动 DNS 解析失败（DNSPod）：{e}') from e
+
+    # 全部 fqdn 都属于非托管域时，视为用户手动维护 DNS；记一条 info 即可
+    if results and all(v == 'unmanaged' for v in results.values()):
+        logger.info(
+            '[trace_id=%s] tencent_dns: all fqdns unmanaged, rely on user-managed DNS: %s',
+            trace_id, fqdns,
+        )
+
+
 def _ensure_certbot_ready(ssh, trace_id: str) -> None:
     """确保 certbot 与 nginx 插件可用，并初始化 letsencrypt 附加文件。
 
@@ -1085,6 +1145,13 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
         inner_segment = 'default'
 
     _ensure_certbot_ready(ssh=ssh, trace_id=trace_id)
+
+    # certbot HTTP-01 依赖公网 DNS 能解析到本台服务器。test 预览子域名是动态生成的，
+    # 必须在签证书前把 A 记录写入 DNSPod，否则会触发 NXDOMAIN 导致 challenge 失败。
+    # 未配置或未命中 managed_zones 时自动跳过，保持向后兼容。
+    _ensure_dns_for_server_names(
+        ssh=ssh, server_names=server_names, trace_id=trace_id,
+    )
 
     host_conf_path = f'{base_dir}/nginx/{host_conf_basename}'
 
