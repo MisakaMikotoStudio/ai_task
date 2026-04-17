@@ -13,13 +13,25 @@ from .models import Client, DeployRecord
 logger = logging.getLogger(__name__)
 
 
-def create_deploy_record(user_id: int, client_id: int, env: str, description: str, status: str, detail: dict, msg_id: int = 0) -> int:
+def create_deploy_record(
+    user_id: int,
+    client_id: int,
+    env: str,
+    description: str,
+    status: str,
+    detail: dict,
+    msg_id: int = 0,
+    task_id: int = 0,
+    chat_id: int = 0,
+) -> int:
     """创建发布记录，返回记录 ID"""
     with get_db_session() as session:
         record = DeployRecord(
             user_id=user_id,
             client_id=client_id,
             msg_id=msg_id or 0,
+            task_id=task_id or 0,
+            chat_id=chat_id or 0,
             env=env,
             description=description,
             status=status,

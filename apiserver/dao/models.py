@@ -848,10 +848,12 @@ class DeployRecord(Base):
     user_id = Column(Integer, nullable=False, comment='所属用户ID')
     client_id = Column(Integer, nullable=False, comment='关联客户端ID')
     msg_id = Column(Integer, nullable=False, default=0, server_default='0', comment='关联 chat 消息ID，0 表示未关联')
+    task_id = Column(Integer, nullable=False, default=0, server_default='0', comment='关联任务ID，0 表示未关联')
+    chat_id = Column(Integer, nullable=False, default=0, server_default='0', comment='关联 Chat ID，0 表示未关联')
     env = Column(String(16), nullable=False, comment='环境标识：test/prod')
     description = Column(String(255), nullable=False, default='', comment='发布描述')
     status = Column(String(20), nullable=False, default='pending', comment='发布状态：pending/publishing/failed/success/cancel')
-    detail = Column(JSON, default=dict, comment='发布详情（task_id, chat_id, msg_id 等）')
+    detail = Column(JSON, default=dict, comment='发布详情（扩展字段、日志等；task/chat/msg 见独立列）')
     deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
     updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
@@ -884,6 +886,8 @@ class DeployRecord(Base):
             'id': self.id,
             'client_id': self.client_id,
             'msg_id': self.msg_id or 0,
+            'task_id': self.task_id or 0,
+            'chat_id': self.chat_id or 0,
             'env': self.env,
             'description': self.description or '',
             'status': self.status,
