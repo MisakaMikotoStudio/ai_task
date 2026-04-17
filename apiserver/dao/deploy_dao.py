@@ -134,15 +134,40 @@ def get_pending_deploy_client_ids() -> List[int]:
         return [row[0] for row in rows]
 
 
-def update_deploy_record_status(record_id: int, status: str, detail: dict = None) -> bool:
-    """更新发布记录的状态和详情（供调度器使用，不校验 user_id）"""
+def update_deploy_record_status(
+    record_id: int,
+    status: str,
+    detail: dict = None,
+    detail_patch: dict = None,
+) -> bool:
+    """更新发布记录的状态和详情（供调度器使用，不校验 user_id）
+
+    Args:
+        record_id: 记录 ID
+        status: 新状态
+        detail: 整体覆盖 detail（与 detail_patch 二选一）
+        detail_patch: 仅合并指定字段到现有 detail（读-改-写语义），
+            用于只想追加/更新少量字段（如 deploy_log）而不丢失
+            调度过程已写入的 trace_id/host_key/commits 等。
+    """
     with get_db_session() as session:
+        if detail_patch is not None:
+            record = session.query(DeployRecord).filter(
+                DeployRecord.id == record_id,
+            ).first()
+            if not record:
+                return False
+            merged = dict(record.detail or {})
+            merged.update(detail_patch)
+            record.status = status
+            record.detail = merged
+            return True
+
         update_data = {DeployRecord.status: status}
         if detail is not None:
             update_data[DeployRecord.detail] = detail
         affected = session.query(DeployRecord).filter(
             DeployRecord.id == record_id,
-            DeployRecord.deleted_at.is_(None),
         ).update(update_data)
         return affected > 0
 

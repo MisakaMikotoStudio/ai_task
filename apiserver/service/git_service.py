@@ -73,7 +73,7 @@ def _get_resource_config(resource: Resource) -> Dict[str, str]:
     }
 
 
-def _get_installation_token_for_org(resource: Resource) -> str:
+def _get_installation_token_for_org(resource: Resource, trace_id: str = '') -> str:
     """
     获取组织级别的 Installation Access Token（用于创建仓库等操作）。
 
@@ -87,8 +87,8 @@ def _get_installation_token_for_org(resource: Resource) -> str:
         GitHubServiceError: 获取失败
     """
     config = _get_resource_config(resource=resource)
-    jwt_token = generate_app_jwt(app_id=config['app_id'], private_key_pem=config['private_key'])
-    installation_id = get_installation_id(jwt_token=jwt_token, organization=config['organization'])
+    jwt_token = generate_app_jwt(app_id=config['app_id'], private_key_pem=config['private_key'], trace_id=trace_id)
+    installation_id = get_installation_id(jwt_token=jwt_token, organization=config['organization'], trace_id=trace_id)
     return create_installation_token(
         jwt_token=jwt_token,
         installation_id=installation_id,
@@ -97,10 +97,11 @@ def _get_installation_token_for_org(resource: Resource) -> str:
             'contents': 'write',
             'metadata': 'read',
         },
+        trace_id=trace_id,
     )
 
 
-def create_org_repo(resource: Resource, repo_name: str, description: str = '', private: bool = True) -> Dict:
+def create_org_repo(resource: Resource, repo_name: str, description: str = '', private: bool = True, trace_id: str = '') -> Dict:
     """
     在 GitHub 组织下创建仓库。
 
@@ -118,7 +119,7 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
     """
     config = _get_resource_config(resource=resource)
     organization = config['organization']
-    installation_token = _get_installation_token_for_org(resource=resource)
+    installation_token = _get_installation_token_for_org(resource=resource, trace_id=trace_id)
 
     return create_org_repo_api(
         token=installation_token,
@@ -126,6 +127,7 @@ def create_org_repo(resource: Resource, repo_name: str, description: str = '', p
         repo_name=repo_name,
         description=description,
         private=private,
+        trace_id=trace_id,
     )
 
 
@@ -136,6 +138,7 @@ def create_org_repo_from_template(
     template_repo: str,
     description: str = '',
     private: bool = True,
+    trace_id: str = '',
 ) -> Dict:
     """
     使用 GitHub 模板仓库 API 在组织下创建新仓库。
@@ -156,7 +159,7 @@ def create_org_repo_from_template(
     """
     config = _get_resource_config(resource=resource)
     organization = config['organization']
-    installation_token = _get_installation_token_for_org(resource=resource)
+    installation_token = _get_installation_token_for_org(resource=resource, trace_id=trace_id)
 
     return create_org_repo_from_template_api(
         token=installation_token,
@@ -166,10 +169,11 @@ def create_org_repo_from_template(
         template_repo=template_repo,
         description=description,
         private=private,
+        trace_id=trace_id,
     )
 
 
-def create_repo_scoped_token(resource: Resource, repo_name: str) -> str:
+def create_repo_scoped_token(resource: Resource, repo_name: str, trace_id: str = '') -> str:
     """
     为指定仓库创建仅具有 admin 权限的 Installation Access Token。
 
@@ -190,23 +194,27 @@ def create_repo_scoped_token(resource: Resource, repo_name: str) -> str:
     jwt_token = generate_app_jwt(
         app_id=config['app_id'],
         private_key_pem=config['private_key'],
+        trace_id=trace_id,
     )
 
     # 2. 获取 Installation ID
     installation_id = get_installation_id(
         jwt_token=jwt_token,
         organization=organization,
+        trace_id=trace_id,
     )
 
     # 3. 获取仓库 ID
     org_token = create_installation_token(
         jwt_token=jwt_token,
         installation_id=installation_id,
+        trace_id=trace_id,
     )
     repo_id = get_repo_id_api(
         token=org_token,
         organization=organization,
         repo_name=repo_name,
+        trace_id=trace_id,
     )
 
     # 4. 创建仅对该仓库有效的 scoped Installation Token
@@ -219,11 +227,12 @@ def create_repo_scoped_token(resource: Resource, repo_name: str) -> str:
             'metadata': 'read',
             'administration': 'write',
         },
+        trace_id=trace_id,
     )
 
     logger.info(
-        "create_repo_scoped_token: org=%s, repo=%s, repo_id=%s, token created",
-        organization, repo_name, repo_id,
+        "[trace_id=%s] create_repo_scoped_token: org=%s, repo=%s, repo_id=%s, token created",
+        trace_id, organization, repo_name, repo_id,
     )
     return scoped_token
 
@@ -236,6 +245,7 @@ def setup_repo_for_user(
     is_docs_repo: bool = False,
     template_owner: str = '',
     template_repo: str = '',
+    trace_id: str = '',
 ) -> Dict:
     """
     为用户创建仓库并生成 scoped access token 的组合流程。
@@ -264,8 +274,8 @@ def setup_repo_for_user(
     organization = config['organization']
 
     logger.info(
-        "setup_repo_for_user: user_id=%s, org=%s, repo=%s, is_docs=%s, template=%s/%s",
-        user_id, organization, repo_name, is_docs_repo,
+        "[trace_id=%s] setup_repo_for_user: user_id=%s, org=%s, repo=%s, is_docs=%s, template=%s/%s",
+        trace_id, user_id, organization, repo_name, is_docs_repo,
         template_owner or '-', template_repo or '-',
     )
 
@@ -283,16 +293,17 @@ def setup_repo_for_user(
                 template_repo=template_repo,
                 description=repo_desc,
                 private=True,
+                trace_id=trace_id,
             )
             logger.info(
-                "setup_repo_for_user: created from template %s/%s, user_id=%s, repo=%s",
-                template_owner, template_repo, user_id, repo_name,
+                "[trace_id=%s] setup_repo_for_user: created from template %s/%s, user_id=%s, repo=%s",
+                trace_id, template_owner, template_repo, user_id, repo_name,
             )
         except GitHubServiceError as e:
             logger.warning(
-                "setup_repo_for_user: template creation failed, falling back to empty repo, "
+                "[trace_id=%s] setup_repo_for_user: template creation failed, falling back to empty repo, "
                 "user_id=%s, repo=%s, template=%s/%s, error=%s",
-                user_id, repo_name, template_owner, template_repo, e.message,
+                trace_id, user_id, repo_name, template_owner, template_repo, e.message,
             )
 
     if repo_info is None:
@@ -301,14 +312,15 @@ def setup_repo_for_user(
             repo_name=repo_name,
             description=repo_desc,
             private=True,
+            trace_id=trace_id,
         )
 
     # 2. 创建仅对该仓库有效的 scoped token
-    token = create_repo_scoped_token(resource=resource, repo_name=repo_name)
+    token = create_repo_scoped_token(resource=resource, repo_name=repo_name, trace_id=trace_id)
 
     logger.info(
-        "setup_repo_for_user: completed, user_id=%s, repo=%s/%s",
-        user_id, organization, repo_name,
+        "[trace_id=%s] setup_repo_for_user: completed, user_id=%s, repo=%s/%s",
+        trace_id, user_id, organization, repo_name,
     )
 
     return {
@@ -321,12 +333,13 @@ def setup_repo_for_user(
     }
 
 
-def refresh_repo_token_by_url(repo_url: str) -> str:
+def refresh_repo_token_by_url(repo_url: str, trace_id: str = '') -> str:
     """
     根据仓库 URL 重新生成 scoped Installation Access Token。
 
     Args:
         repo_url: 仓库 URL（如 https://github.com/org/repo.git）
+        trace_id: 链路追踪 ID，用于日志聚合
 
     Returns:
         新的 scoped token
@@ -353,10 +366,10 @@ def refresh_repo_token_by_url(repo_url: str) -> str:
             f"未找到组织 {org} 对应的代码仓库资源，无法刷新 token"
         )
 
-    new_token = create_repo_scoped_token(resource=matched_resource, repo_name=repo_name)
+    new_token = create_repo_scoped_token(resource=matched_resource, repo_name=repo_name, trace_id=trace_id)
 
     logger.info(
-        "refresh_repo_token_by_url: org=%s, repo=%s, token refreshed",
-        org, repo_name,
+        "[trace_id=%s] refresh_repo_token_by_url: org=%s, repo=%s, token refreshed",
+        trace_id, org, repo_name,
     )
     return new_token

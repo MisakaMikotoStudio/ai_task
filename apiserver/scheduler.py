@@ -41,33 +41,30 @@ def start_deploy_scheduler():
 def _deploy_loop():
     """调度主循环：轮询 → 执行 → 清理 session → 等待"""
     from dao.connection import remove_session
+    from dao.deploy_dao import get_pending_deploy_client_ids
+    from service.remote_deploy_service import process_pending_deploys_prod, process_pending_deploys_test
+
+    def _run_one(client_id: int):
+        try:
+            process_pending_deploys_prod(client_id=client_id)
+            process_pending_deploys_test(client_id=client_id)
+        except Exception:
+            logger.exception("Deploy task failed: client_id=%s", client_id)
+        finally:
+            try:
+                remove_session()
+            except Exception:
+                pass
 
     while True:
         try:
-            from dao.deploy_dao import get_pending_deploy_client_ids
-            from service.remote_deploy_service import process_pending_deploys_prod, process_pending_deploys_test
-
             client_ids = get_pending_deploy_client_ids()
-            if not client_ids:
-                continue
-            max_workers = max(1, min(len(client_ids), MAX_DEPLOY_WORKERS))
-
-            def _run_one(client_id: int):
-                try:
-                    process_pending_deploys_prod(client_id=client_id)
-                    process_pending_deploys_test(client_id=client_id)
-                except Exception:
-                    logger.exception("Deploy task failed: client_id=%s", client_id)
-                finally:
-                    try:
-                        remove_session()
-                    except Exception:
-                        pass
-
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(_run_one, client_id) for client_id in client_ids]
-                for fut in as_completed(futures):
-                    fut.result()
+            if client_ids:
+                max_workers = max(1, min(len(client_ids), MAX_DEPLOY_WORKERS))
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [executor.submit(_run_one, client_id) for client_id in client_ids]
+                    for fut in as_completed(futures):
+                        fut.result()
         except Exception:
             logger.exception("Deploy scheduler iteration error")
         finally:

@@ -640,9 +640,16 @@ def apply_client_env_var_sync(
 VALID_ENVS = ('test', 'prod')
 
 
-def get_client_servers(client_id: int, user_id: int) -> List[ClientServer]:
+def get_client_servers(client_id: int, user_id: int, env: str = None) -> List[ClientServer]:
     """获取客户端云服务器配置（所有环境）"""
     with get_db_session() as session:
+        if env:
+            return session.query(ClientServer).filter(
+                ClientServer.client_id == client_id,
+                ClientServer.user_id == user_id,
+                ClientServer.env == env,
+                ClientServer.deleted_at.is_(None),
+            ).all()
         return session.query(ClientServer).filter(
             ClientServer.client_id == client_id,
             ClientServer.user_id == user_id,
@@ -695,9 +702,16 @@ def delete_client_server_by_env(client_id: int, user_id: int, env: str) -> None:
         ).update({ClientServer.deleted_at: now}, synchronize_session=False)
 
 
-def get_client_domains(client_id: int, user_id: int) -> List[ClientDomain]:
+def get_client_domains(client_id: int, user_id: int, env: str = None) -> List[ClientDomain]:
     """获取客户端域名配置（所有环境）"""
     with get_db_session() as session:
+        if env:
+            return session.query(ClientDomain).filter(
+                ClientDomain.client_id == client_id,
+                ClientDomain.user_id == user_id,
+                ClientDomain.env == env,
+                ClientDomain.deleted_at.is_(None),
+            ).all()
         return session.query(ClientDomain).filter(
             ClientDomain.client_id == client_id,
             ClientDomain.user_id == user_id,

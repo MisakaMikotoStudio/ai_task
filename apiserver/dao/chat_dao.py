@@ -227,7 +227,17 @@ def get_standalone_chats(
             'page_num': page_num,
             'items': result,
         }
-
+    
+def batch_get_msg_by_msgids(user_id: int, msg_ids: List[int]) -> List[ChatMessage]:
+    """批量获取消息列表"""
+    if not msg_ids:
+        return []
+    with get_db_session() as session:
+        return session.query(ChatMessage).filter(
+            ChatMessage.user_id == user_id,
+            ChatMessage.id.in_(msg_ids),
+            ChatMessage.deleted_at.is_(None)
+        ).all()
 
 def get_running_chat_messages_by_client(user_id: int, client_id: int) -> List[Dict]:
     """获取指定客户端下需要处理的对话消息（按 task/chat 聚合）
