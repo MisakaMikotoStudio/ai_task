@@ -147,7 +147,7 @@ def _init_server_env(ssh, trace_id: str):
 # 主入口
 # ============================================================
 
-def process_pending_deploys(client_id: int):
+def process_pending_deploys_prod(client_id: int):
     """
     处理指定应用的待发布记录（供调度器调用）。
 
@@ -155,13 +155,13 @@ def process_pending_deploys(client_id: int):
     - 存在 publishing 记录 → 跳过
     - 仅 pending → 取消旧记录，部署最新
     """
-    records = get_pending_deploy_records(client_id=client_id)
+    records = get_pending_deploy_records(client_id=client_id, env='prod')
     if not records:
         return
 
     # 存在 publishing 记录则跳过
     if any(r.status == DeployRecord.STATUS_PUBLISHING for r in records):
-        logger.debug("client_id=%s has publishing record, skip", client_id)
+        logger.info("client_id=%s has publishing record, skip", client_id)
         return
 
     pending = [r for r in records if r.status == DeployRecord.STATUS_PENDING]
@@ -181,6 +181,8 @@ def process_pending_deploys(client_id: int):
     # 执行最新记录的部署
     _execute_prod_deploy(record=latest)
 
+def process_pending_deploys_test(client_id: int):
+    pass
 
 # ============================================================
 # 部署执行主流程

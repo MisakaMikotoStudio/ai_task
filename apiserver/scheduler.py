@@ -45,7 +45,7 @@ def _deploy_loop():
     while True:
         try:
             from dao.deploy_dao import get_pending_deploy_client_ids
-            from service.remote_deploy_service import process_pending_deploys
+            from service.remote_deploy_service import process_pending_deploys_prod, process_pending_deploys_test
 
             client_ids = get_pending_deploy_client_ids()
             if not client_ids:
@@ -54,7 +54,8 @@ def _deploy_loop():
 
             def _run_one(client_id: int):
                 try:
-                    process_pending_deploys(client_id=client_id)
+                    process_pending_deploys_prod(client_id=client_id)
+                    process_pending_deploys_test(client_id=client_id)
                 except Exception:
                     logger.exception("Deploy task failed: client_id=%s", client_id)
                 finally:
