@@ -329,6 +329,7 @@
                             <th>记录ID</th>
                             <th>Task ID</th>
                             <th>Chat ID</th>
+                            <th>Msg ID</th>
                             <th>应用名称</th>
                             <th>环境</th>
                             <th>描述</th>
@@ -505,10 +506,12 @@
             const clientName = record.client_name ? escapeHtml(record.client_name) : '-';
             const tid = record.task_id != null ? record.task_id : 0;
             const cid = record.chat_id != null ? record.chat_id : 0;
+            const mid = record.msg_id != null ? record.msg_id : 0;
             return `<tr>
                 <td class="deploy-id-cell">#${record.id}</td>
                 <td class="deploy-num-cell">${tid}</td>
                 <td class="deploy-num-cell">${cid}</td>
+                <td class="deploy-num-cell">${mid}</td>
                 <td class="deploy-client-cell" title="${clientName}">${clientName}</td>
                 <td><span class="env-badge env-${record.env}">${envLabel}</span></td>
                 <td class="deploy-desc-cell" title="${escapeHtml(record.description)}">${escapeHtml(record.description)}</td>
