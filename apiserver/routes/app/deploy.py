@@ -156,19 +156,19 @@ def create_deploy_record_api(client_id):
     if chat_id_raw is None:
         chat_id_raw = detail.get('chat_id')
 
-    msg_id = _parse_nonneg_int(msg_id_raw, 'msg_id')
+    msg_id = _parse_nonneg_int(msg_id_raw)
     if msg_id is None:
         return jsonify({'code': 400, 'message': 'msg_id 必须为整数'}), 400
     if msg_id < 0:
         return jsonify({'code': 400, 'message': 'msg_id 不能为负数'}), 400
 
-    task_id = _parse_nonneg_int(task_id_raw, 'task_id')
+    task_id = _parse_nonneg_int(task_id_raw)
     if task_id is None:
         return jsonify({'code': 400, 'message': 'task_id 必须为整数'}), 400
     if task_id < 0:
         return jsonify({'code': 400, 'message': 'task_id 不能为负数'}), 400
 
-    chat_id = _parse_nonneg_int(chat_id_raw, 'chat_id')
+    chat_id = _parse_nonneg_int(chat_id_raw)
     if chat_id is None:
         return jsonify({'code': 400, 'message': 'chat_id 必须为整数'}), 400
     if chat_id < 0:
