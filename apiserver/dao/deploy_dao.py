@@ -100,11 +100,12 @@ def get_latest_deploy_records_by_msg_ids(user_id: int, client_id: int, msg_ids: 
     return result
 
 
-def get_pending_deploy_records(client_id: int) -> List[DeployRecord]:
+def get_pending_deploy_records(client_id: int, env: str) -> List[DeployRecord]:
     """获取指定应用待发布和发布中的记录（跨用户，供调度器使用）"""
     with get_db_session() as session:
         records = session.query(DeployRecord).filter(
             DeployRecord.client_id == client_id,
+            DeployRecord.env == env,
             DeployRecord.status.in_([DeployRecord.STATUS_PENDING, DeployRecord.STATUS_PUBLISHING]),
             DeployRecord.deleted_at.is_(None),
         ).order_by(DeployRecord.created_at.desc()).all()
