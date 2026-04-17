@@ -112,6 +112,43 @@ def get_latest_deploy_records_by_msg_ids(user_id: int, client_id: int, msg_ids: 
     return result
 
 
+def get_latest_deploy_record_by_msg_env(user_id: int, client_id: int, msg_id: int, env: str) -> "DeployRecord | None":
+    """获取指定 (user, client, msg_id, env) 下最新一条未删除的发布记录。"""
+    if not msg_id:
+        return None
+    with get_db_session() as session:
+        return session.query(DeployRecord).filter(
+            DeployRecord.user_id == user_id,
+            DeployRecord.client_id == client_id,
+            DeployRecord.msg_id == msg_id,
+            DeployRecord.env == env,
+            DeployRecord.deleted_at.is_(None),
+        ).order_by(DeployRecord.created_at.desc()).first()
+
+
+def reset_deploy_record_to_pending(user_id: int, record_id: int) -> bool:
+    """将发布记录重置为 pending（状态不是 publishing 时生效）。
+
+    与 retry_deploy_record 不同：此处不限定必须是 failed/cancel，
+    只要不是 publishing（防止打断进行中的部署）即可重置为 pending。
+    已经是 pending 时也视为成功（幂等）。
+    """
+    with get_db_session() as session:
+        record = session.query(DeployRecord).filter(
+            DeployRecord.id == record_id,
+            DeployRecord.user_id == user_id,
+            DeployRecord.deleted_at.is_(None),
+        ).first()
+        if not record:
+            return False
+        if record.status == DeployRecord.STATUS_PUBLISHING:
+            return False
+        if record.status == DeployRecord.STATUS_PENDING:
+            return True
+        record.status = DeployRecord.STATUS_PENDING
+        return True
+
+
 def get_pending_deploy_records(client_id: int, env: str) -> List[DeployRecord]:
     """获取指定应用待发布和发布中的记录（跨用户，供调度器使用）"""
     with get_db_session() as session:
