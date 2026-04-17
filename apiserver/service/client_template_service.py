@@ -187,6 +187,7 @@ def _create_default_deploys(user_id: int, client_id: int) -> None:
         startup_command=apiserver_command,
         official_configs=['app_name', 'domain', 'database', 'payment', 'oss'],
         custom_config='',
+        route_prefix='/api',
     )
     logger.info(
         "_create_default_deploys: apiserver deploy created, client_id=%s, uuid=%s",
@@ -201,6 +202,7 @@ def _create_default_deploys(user_id: int, client_id: int) -> None:
         startup_command=web_command,
         official_configs=['app_name'],
         custom_config='',
+        route_prefix='',
     )
     logger.info(
         "_create_default_deploys: web deploy created, client_id=%s, uuid=%s",

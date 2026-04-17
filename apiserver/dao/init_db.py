@@ -35,6 +35,12 @@ def _run_migrations(engine):
         ADD COLUMN IF NOT EXISTS `work_dir` VARCHAR(512) NULL DEFAULT ''
         COMMENT '工作目录路径，启动命令在此目录下运行'
         """,
+        # ClientDeploy 表增加 route_prefix 字段（生产 nginx 按前缀分流）
+        """
+        ALTER TABLE ai_task_client_deploys
+        ADD COLUMN IF NOT EXISTS `route_prefix` VARCHAR(128) NOT NULL DEFAULT ''
+        COMMENT '生产 nginx 路径前缀；空或/表示根；如/api 将路径前缀去掉后转发到容器'
+        """,
         # DeployRecord 表增加 msg_id 字段（关联 chat message）
         """
         ALTER TABLE ai_task_deploy_records

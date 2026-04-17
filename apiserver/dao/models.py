@@ -710,6 +710,7 @@ class ClientDeploy(Base):
     uuid = Column(String(6), nullable=False, unique=True, comment='6位随机数字唯一标识')
     repo_id = Column(Integer, nullable=True, comment='关联仓库ID（ai_task_client_repos.id）')
     work_dir = Column(String(512), nullable=True, default='', comment='工作目录路径，启动命令在此目录下运行')
+    route_prefix = Column(String(128), nullable=False, default='', comment='生产 nginx 路径前缀；空或/表示根；如/api 将 /api/… 反代并去掉前缀后转发到容器:8080')
     startup_command = Column(Text, nullable=False, default='', comment='启动命令')
     official_configs = Column(JSON, nullable=False, comment='官方配置选项列表，如 ["app_name","domain","database","payment","oss"]')
     custom_config = Column(Text, nullable=True, comment='用户自定义 TOML 配置')
@@ -732,6 +733,7 @@ class ClientDeploy(Base):
             'uuid': self.uuid or '',
             'repo_id': self.repo_id,
             'work_dir': self.work_dir or '',
+            'route_prefix': self.route_prefix or '',
             'startup_command': self.startup_command or '',
             'official_configs': self.official_configs or [],
             'custom_config': self.custom_config or '',
