@@ -80,6 +80,28 @@ class DefaultDatabaseConfig:
 
 
 @dataclass
+class TencentDnsConfig:
+    """腾讯云 DNSPod 解析配置（用于 test 预览子域名自动签发证书前补 A 记录）
+
+    部署时若目标 FQDN 落在 `managed_zones` 中任意根域下，将自动调用 DNSPod
+    API 增加/更新一条 A 记录指向目标服务器 IP；未匹配则跳过。
+    未配置 secret_id/secret_key 或 managed_zones 时整体跳过（向后兼容）。
+    """
+    secret_id: str = ""
+    secret_key: str = ""
+    # 本平台在 DNSPod 上拥有管理权的根域名列表，形如 ["yuban.site"]
+    # 代码按最长后缀匹配识别子域名，例如 fqdn=x.template-web-test.yuban.site + root=yuban.site
+    # → subdomain=x.template-web-test
+    managed_zones: list = field(default_factory=list)
+    # 记录 TTL（秒）；DNSPod 免费套餐下限 600
+    ttl: int = 600
+    # 记录线路，默认「默认」；境外节点可用「境外」
+    record_line: str = "默认"
+    # 新建/更新 A 记录后等待生效的秒数（让从 NS 同步完成，避免 certbot 紧接着查到 NXDOMAIN）
+    propagation_wait_seconds: int = 10
+
+
+@dataclass
 class AppConfig:
     """应用总配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -88,6 +110,7 @@ class AppConfig:
     alipay: AlipayConfig = field(default_factory=AlipayConfig)
     oss: OssConfig = field(default_factory=OssConfig)
     default_database: DefaultDatabaseConfig = field(default_factory=DefaultDatabaseConfig)
+    tencent_dns: TencentDnsConfig = field(default_factory=TencentDnsConfig)
 
     @classmethod
     def from_toml(cls, path: str) -> "AppConfig":
@@ -102,6 +125,7 @@ class AppConfig:
             alipay=AlipayConfig(**data.get("alipay", {})),
             oss=OssConfig(**data.get("oss", {})),
             default_database=DefaultDatabaseConfig(**data.get("default_database", {})),
+            tencent_dns=TencentDnsConfig(**data.get("tencent_dns", {})),
         )
 
 

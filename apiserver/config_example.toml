@@ -64,6 +64,26 @@ app_username = "app_user"
 # 为应用数据库分配的访问密码
 app_password = "your-app-password"
 
+[tencent_dns]
+# 腾讯云 DNSPod 自动解析
+# 用途：test 环境每条消息都会生成形如 {host_key}.{客户域名} 的预览子域名，
+# 证书由 Let's Encrypt HTTP-01 挑战签发，依赖公网 DNS 能解析到本台测试服务器。
+# 部署流程会在 certbot 签证书前自动把 A 记录写入 DNSPod。
+# 留空 secret_id/secret_key 或 managed_zones 即跳过，流程保持原状。
+# 腾讯云 API 密钥（建议单独建一个仅有 DNSPod 权限的子账号）
+secret_id = ""
+secret_key = ""
+# 平台在 DNSPod 上拥有管理权的根域名列表；部署时按最长后缀匹配。
+# 例子：客户测试域名 = "template-web-test.yuban.site"，此处填 "yuban.site" 即可，
+# 生成子域名 task0chat1msg14.template-web-test 自动识别。
+managed_zones = ["yuban.site"]
+# 记录 TTL（秒），DNSPod 免费套餐下限 600
+ttl = 600
+# 线路：一般「默认」；跨境业务可改「境外」
+record_line = "默认"
+# 新建/修改记录后等待 NS 同步的秒数；紧接着跑 certbot，太短会 NXDOMAIN
+propagation_wait_seconds = 10
+
 [oss]
 # 是否启用 OSS（腾讯云 COS）
 enabled = false
