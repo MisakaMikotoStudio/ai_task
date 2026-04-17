@@ -252,11 +252,13 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
         get_client_deploys, add_client_deploy, update_client_deploy,
         soft_delete_client_deploys,
     )
+    from service.deploy_route_prefix import normalize_deploy_route_prefix, validate_unique_route_prefixes
 
     if not isinstance(deploys_data, list):
         raise DeployConfigError('部署配置必须是数组')
 
     keep_ids = []
+    normalized_prefixes = []
 
     for idx, deploy in enumerate(deploys_data):
         num = idx + 1
@@ -268,6 +270,11 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
         custom_config = deploy.get('custom_config') or ''
         repo_id = deploy.get('repo_id') or None
         work_dir = (deploy.get('work_dir') or '').strip()
+        route_prefix = (deploy.get('route_prefix') or '').strip()
+        try:
+            normalized_prefixes.append(normalize_deploy_route_prefix(route_prefix))
+        except ValueError as e:
+            raise DeployConfigError(f'部署配置 #{num}：{e}') from e
 
         # repo_id 转为 int 或 None
         if repo_id is not None:
@@ -291,7 +298,7 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
             update_client_deploy(
                 deploy_id=deploy_id, client_id=client_id, user_id=user_id,
                 startup_command=startup_command, official_configs=official_configs, custom_config=custom_config,
-                repo_id=repo_id, work_dir=work_dir,
+                repo_id=repo_id, work_dir=work_dir, route_prefix=route_prefix,
             )
             keep_ids.append(deploy_id)
         else:
@@ -300,9 +307,14 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
             new_id = add_client_deploy(
                 client_id=client_id, user_id=user_id, uuid=uuid,
                 startup_command=startup_command, official_configs=official_configs, custom_config=custom_config,
-                repo_id=repo_id, work_dir=work_dir,
+                repo_id=repo_id, work_dir=work_dir, route_prefix=route_prefix,
             )
             keep_ids.append(new_id)
+
+    try:
+        validate_unique_route_prefixes(normalized_prefixes)
+    except ValueError as e:
+        raise DeployConfigError(str(e)) from e
 
     # 软删除被移除的记录
     soft_delete_client_deploys(client_id=client_id, user_id=user_id, exclude_ids=keep_ids)

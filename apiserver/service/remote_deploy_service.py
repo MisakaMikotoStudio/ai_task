@@ -21,6 +21,7 @@ from dao.deploy_dao import get_pending_deploy_records, update_deploy_record_stat
 from dao.client_dao import get_client_repos, get_client_deploys, get_client_servers, get_client_domains
 from dao.models import DeployRecord
 from service.deploy_service import generate_deploy_toml
+from service.deploy_route_prefix import pairs_from_deploys
 from utils.git_utils import parse_github_url, get_branch_latest_commit
 
 logger = logging.getLogger(__name__)
@@ -257,11 +258,15 @@ def _execute_prod_deploy(record):
                 )
                 container_names.append(cname)
 
-            # 创建 nginx 容器
+            # 创建 nginx 容器（按 route_prefix 分流到各容器）
             if prod_domains and container_names:
+                try:
+                    route_specs = pairs_from_deploys(deploys, container_names)
+                except ValueError as e:
+                    raise RemoteDeployError(str(e)) from e
                 _setup_nginx_container(
                     ssh=ssh, username=username, client_id=client_id,
-                    container_names=container_names, key=key, prod_domains=prod_domains, trace_id=trace_id,
+                    route_specs=route_specs, key=key, prod_domains=prod_domains, trace_id=trace_id,
                 )
 
             # 部署成功
@@ -701,26 +706,57 @@ def _ensure_host_nginx_includes_app_vhosts(ssh, username: str, client_id: int, t
     logger.info("Ensured host nginx include: path=%s trace_id=%s", inc_path, trace_id)
 
 
-def _render_inner_nginx_conf(primary_container: str) -> str:
-    """Docker 内 nginx：仅 HTTP，按容器名转发到应用"""
-    return (
-        'server {\n'
-        '    listen 80;\n'
-        '    listen [::]:80;\n'
-        '    server_name _;\n'
-        '\n'
-        '    location / {\n'
-        f'        proxy_pass http://{primary_container}:8080;\n'
-        '        proxy_http_version 1.1;\n'
-        '        proxy_set_header Host $host;\n'
-        '        proxy_set_header X-Real-IP $remote_addr;\n'
-        '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
-        '        proxy_set_header X-Forwarded-Proto $scheme;\n'
-        '        proxy_read_timeout 3600s;\n'
-        '        proxy_send_timeout 3600s;\n'
-        '    }\n'
-        '}\n'
-    )
+_INNER_PROXY_COMMON = (
+    '        proxy_http_version 1.1;\n'
+    '        proxy_set_header Host $host;\n'
+    '        proxy_set_header X-Real-IP $remote_addr;\n'
+    '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
+    '        proxy_set_header X-Forwarded-Proto $scheme;\n'
+    '        proxy_read_timeout 3600s;\n'
+    '        proxy_send_timeout 3600s;\n'
+)
+
+
+def _render_inner_nginx_conf(route_specs: list) -> str:
+    """
+    Docker 内 nginx：仅 HTTP，按路径前缀转发到对应应用容器。
+
+    route_specs: (规范前缀, 容器名)。前缀「/」表示整站；如「/api」对外匹配 /api/…，
+    使用 proxy_pass …/ 去掉前缀后转发到容器 :8080（应用侧按根路径提供接口）。
+    """
+    if not route_specs:
+        raise RemoteDeployError('nginx 路由配置为空')
+    non_root = [(p, c) for p, c in route_specs if p != '/']
+    root = [(p, c) for p, c in route_specs if p == '/']
+    if len(root) > 1:
+        raise RemoteDeployError('多个部署使用了根路由前缀 /')
+    non_root.sort(key=lambda x: (-len(x[0]), x[0]))
+    ordered = non_root + root
+
+    parts = [
+        'server {\n',
+        '    listen 80;\n',
+        '    listen [::]:80;\n',
+        '    server_name _;\n',
+        '\n',
+    ]
+    for prefix, container in ordered:
+        if prefix == '/':
+            parts.append('    location / {\n')
+            parts.append(f'        proxy_pass http://{container}:8080;\n')
+            parts.append(_INNER_PROXY_COMMON)
+            parts.append('    }\n')
+        else:
+            parts.append(f'    location = {prefix} {{\n')
+            # 相对路径 308，避免内层 nginx 上 $scheme 为 http 时把 HTTPS 站点重定向成 http
+            parts.append('        return 308 ${uri}/$is_args$args;\n')
+            parts.append('    }\n')
+            parts.append(f'    location {prefix}/ {{\n')
+            parts.append(f'        proxy_pass http://{container}:8080/;\n')
+            parts.append(_INNER_PROXY_COMMON)
+            parts.append('    }\n')
+    parts.append('}\n')
+    return ''.join(parts)
 
 
 def _ensure_certbot_ready(ssh, trace_id: str) -> None:
@@ -922,7 +958,7 @@ def _reload_host_nginx(ssh, trace_id: str) -> None:
     logger.info("Host nginx reloaded, trace_id=%s", trace_id)
 
 
-def _setup_nginx_container(ssh, username: str, client_id: int, container_names: list, key: str, prod_domains: list, trace_id: str):
+def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list, key: str, prod_domains: list, trace_id: str):
     """
     创建 Nginx 容器用于 Docker 网络内路由，并在宿主机写入 HTTPS vhost + reload。
 
@@ -931,8 +967,10 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
     - nginx/container/{inner}/default.conf — 挂载进容器，反代到应用容器:8080
 
     宿主机通过 /etc/nginx/conf.d/ai_task_app_{client_id}.conf 包含 nginx/*.conf。
+
+    route_specs: [(规范路径前缀, 容器名), ...]，与 ClientDeploy.route_prefix 一致。
     """
-    if not prod_domains or not container_names:
+    if not prod_domains or not route_specs:
         return
 
     norm_domains = _normalize_prod_domains(prod_domains)
@@ -973,10 +1011,9 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
 
     primary_for_cert = _ensure_domain_certificate(ssh=ssh, server_names=server_names, trace_id=trace_id)
 
-    primary_container = container_names[0]
     inner_conf_dir = f'{base_dir}/nginx/container/{inner_segment}'
     inner_conf_path = f'{inner_conf_dir}/default.conf'
-    inner_conf = _render_inner_nginx_conf(primary_container=primary_container)
+    inner_conf = _render_inner_nginx_conf(route_specs=route_specs)
     _ssh_write_file(ssh=ssh, remote_dir=inner_conf_dir, remote_path=inner_conf_path, content=inner_conf)
 
     nginx_port = _ssh_exec(ssh=ssh, command='shuf -i 10000-60000 -n 1').strip()
@@ -997,8 +1034,8 @@ def _setup_nginx_container(ssh, username: str, client_id: int, container_names: 
         f'nginx:alpine'
     ))
     logger.info(
-        "Nginx container started: name=%s, port=%s, server_name=%s, host_vhost=%s trace_id=%s",
-        nginx_name, nginx_port, server_names, host_conf_path, trace_id,
+        "Nginx container started: name=%s, port=%s, server_name=%s, host_vhost=%s routes=%s trace_id=%s",
+        nginx_name, nginx_port, server_names, host_conf_path, route_specs, trace_id,
     )
 
     _reload_host_nginx(ssh=ssh, trace_id=trace_id)

@@ -255,6 +255,7 @@ async function wizardSaveAll() {
         id: d.id || undefined,
         repo_id: d.repo_id || null,
         work_dir: (d.work_dir || '').trim(),
+        route_prefix: (d.route_prefix != null ? String(d.route_prefix) : '').trim(),
         startup_command: (d.startup_command || '').trim(),
         official_configs: d.official_configs || [],
         custom_config: d.custom_config || '',
@@ -781,7 +782,7 @@ function wizardRenderDeployStep(isView) {
         addBtn.style.display = isView ? 'none' : '';
         addBtn.onclick = () => {
             const defaultRepo = cfgReposList.find(r => !r.docs_repo);
-            cfgDeploysList.push({ startup_command: '', official_configs: [], custom_config: '', repo_id: defaultRepo ? (defaultRepo.id || null) : null, work_dir: '' });
+            cfgDeploysList.push({ startup_command: '', official_configs: [], custom_config: '', repo_id: defaultRepo ? (defaultRepo.id || null) : null, work_dir: '', route_prefix: '' });
             wizardRenderDeployList();
         };
     }
@@ -798,6 +799,8 @@ function wizardSyncDeploysFromDOM() {
         if (repoSelect) d.repo_id = repoSelect.value ? parseInt(repoSelect.value, 10) : null;
         const workdirInput = card.querySelector('.deploy-workdir-input');
         if (workdirInput) d.work_dir = workdirInput.value;
+        const prefixInput = card.querySelector('.deploy-route-prefix-input');
+        if (prefixInput) d.route_prefix = prefixInput.value;
         const cmdInput = card.querySelector('.deploy-cmd-input');
         if (cmdInput) d.startup_command = cmdInput.value;
         const customInput = card.querySelector('.deploy-custom-input');
@@ -847,14 +850,18 @@ function wizardRenderDeployList() {
                 <span class="infra-card-label">#${idx + 1} ${uuidDisplay}</span>
                 <div style="display:flex;gap:8px;align-items:center;">${previewBtn}${executeBtn}${deleteBtn}</div>
             </div>
-            <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div class="form-group" style="flex:1;">
+            <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                <div class="form-group" style="flex:1;min-width:140px;">
                     <label>代码仓库</label>
                     <select class="deploy-repo-select" ${disAttr}><option value="">不选择</option>${repoOptions}</select>
                 </div>
-                <div class="form-group" style="flex:1;">
+                <div class="form-group" style="flex:1;min-width:120px;">
                     <label>工作目录</label>
                     <input type="text" class="deploy-workdir-input" value="${escapeHtml(d.work_dir || '')}" placeholder="如 src/server" ${disAttr}>
+                </div>
+                <div class="form-group" style="flex:1;min-width:120px;">
+                    <label>路由前缀</label>
+                    <input type="text" class="deploy-route-prefix-input" value="${escapeHtml(d.route_prefix != null ? d.route_prefix : '')}" placeholder="空=根路径 / ，如 /api" ${disAttr}>
                 </div>
             </div>
             <div class="form-group">
@@ -883,6 +890,8 @@ function wizardRenderDeployList() {
             if (customInput) d.custom_config = customInput.value;
             const workdirInput = card.querySelector('.deploy-workdir-input');
             if (workdirInput) d.work_dir = workdirInput.value;
+            const prefixInput = card.querySelector('.deploy-route-prefix-input');
+            if (prefixInput) d.route_prefix = prefixInput.value;
         });
         const repoSelect = card.querySelector('.deploy-repo-select');
         if (repoSelect) {
