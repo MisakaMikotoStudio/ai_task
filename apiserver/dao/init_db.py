@@ -33,6 +33,32 @@ def _add_column_if_missing(engine, table: str, column: str, column_ddl: str) -> 
     logger.info('Migration applied: %s.%s', table, column)
 
 
+def _try_create_deploy_records_client_msg_index(engine) -> None:
+    """补建 (client_id, msg_id) 索引；已存在或不可创建时忽略。"""
+    table = 'ai_task_deploy_records'
+    index_name = 'idx_deploy_records_client_msg'
+    insp = inspect(engine)
+    if table not in insp.get_table_names():
+        return
+    existing_idx = {ix.get('name') for ix in insp.get_indexes(table)}
+    if index_name in existing_idx:
+        return
+    cols = {c['name'] for c in insp.get_columns(table)}
+    if 'msg_id' not in cols or 'client_id' not in cols:
+        return
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    f'CREATE INDEX `{index_name}` ON `{table}` (`client_id`, `msg_id`)'
+                )
+            )
+            conn.commit()
+        logger.info('Migration applied: index %s on %s', index_name, table)
+    except Exception as e:
+        logger.debug('Index %s skipped: %s', index_name, str(e)[:120])
+
+
 def _run_migrations(engine):
     """执行增量迁移（新增字段等）"""
     migrations = [
@@ -86,6 +112,13 @@ def _run_migrations(engine):
         ),
     )
 
+    # 发布记录表：标准 MySQL 下带 IF NOT EXISTS 的 ALTER 会整句失败，用探测补列
+    _add_column_if_missing(
+        engine,
+        table='ai_task_deploy_records',
+        column='msg_id',
+        column_ddl="`msg_id` INT NOT NULL DEFAULT 0 COMMENT '关联 chat 消息ID，0 表示未关联'",
+    )
     _add_column_if_missing(
         engine,
         table='ai_task_deploy_records',
@@ -98,6 +131,9 @@ def _run_migrations(engine):
         column='chat_id',
         column_ddl="`chat_id` INT NOT NULL DEFAULT 0 COMMENT '关联 Chat ID，0 表示未关联'",
     )
+
+    # 索引：仅在 msg_id 列存在且索引尚未创建时尝试（失败仅打 debug）
+    _try_create_deploy_records_client_msg_index(engine)
 
 
 def init_database(config: DatabaseConfig):
