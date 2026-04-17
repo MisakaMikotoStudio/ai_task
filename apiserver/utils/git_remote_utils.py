@@ -14,18 +14,37 @@ import time
 logger = logging.getLogger(__name__)
 
 
-# clone/fetch 单次命令超时（秒）
-GIT_CLONE_TIMEOUT = 300
+# clone/fetch 单次命令 SSH 层 channel 超时（秒）
+# 作为兜底上限，实际生效的更短时限是下面的 GIT_ATTEMPT_HARD_TIMEOUT_SEC。
+GIT_CLONE_TIMEOUT = 120
 # 网络类失败重试次数
 GIT_CLONE_MAX_RETRIES = 3
 # 重试退避基数：第 N 次失败 sleep BASE * 2^(N-1) 秒
-GIT_RETRY_BACKOFF_BASE_SEC = 2
+GIT_RETRY_BACKOFF_BASE_SEC = 1
+
+# 单次 git 调用的硬时限（秒），通过 coreutils `timeout` 包裹。
+# 目的是避免跨境 TCP connect 阶段一直卡到内核默认 ~130s 才失败。
+# 低于该时限时 git 自身的 LOW_SPEED 或 connectTimeout 会先触发失败；
+# 超过该时限则由 `timeout` 以 SIGTERM 强制终止并以 exit=124 返回。
+GIT_ATTEMPT_HARD_TIMEOUT_SEC = 45
+
+# libcurl 连接阶段超时（秒），通过 `git -c http.connectTimeout=...` 注入。
+# git >= 2.30 映射到 CURLOPT_CONNECTTIMEOUT，覆盖 LOW_SPEED 不生效的 TCP 握手阶段。
+GIT_HTTP_CONNECT_TIMEOUT_SEC = 10
 
 # 每条 git 命令前置 per-command 环境变量实现快速失败，避免跨境链路 stall
 # 到 TCP 超时（~130s）才失败；不写入 ~/.gitconfig，不影响服务器其他 git 使用。
 # - GIT_HTTP_LOW_SPEED_LIMIT=1000: 低于 1KB/s
 # - GIT_HTTP_LOW_SPEED_TIME=20:   持续 20 秒 → 判定失败
 GIT_HTTP_FAIL_FAST_ENV = 'GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20'
+
+# 包裹在每条 git 子命令前的"硬截断 + 连接超时"前缀
+# 使用时放在 `git ...` 前即可，注意 shell 顺序：
+#   timeout 45 git -c http.connectTimeout=10 <subcmd>
+_GIT_ATTEMPT_PREFIX = (
+    f'timeout {GIT_ATTEMPT_HARD_TIMEOUT_SEC} '
+    f'git -c http.connectTimeout={GIT_HTTP_CONNECT_TIMEOUT_SEC}'
+)
 
 
 class GitRemoteError(Exception):
@@ -63,10 +82,11 @@ def clone_repo_with_retry(
 ) -> None:
     """clone 仓库（浅克隆 + 重试 + 指数退避），失败时清理残留目录。"""
     target_path = f'{repo_dir}/{repo_name}'
-    # --no-tags 减少拉取量；per-command 低速超时，卡住 20s 后立刻失败
+    # --no-tags 减少拉取量；per-command 低速超时 + connectTimeout + 外层 timeout 三重兜底，
+    # 确保单次 attempt 最长不超过 GIT_ATTEMPT_HARD_TIMEOUT_SEC 秒
     clone_cmd = (
-        f'cd {repo_dir} && {GIT_HTTP_FAIL_FAST_ENV} '
-        f'git clone --depth 1 --single-branch --no-tags --branch {branch} {auth_url} {repo_name}'
+        f'cd {repo_dir} && {GIT_HTTP_FAIL_FAST_ENV} {_GIT_ATTEMPT_PREFIX} '
+        f'clone --depth 1 --single-branch --no-tags --branch {branch} {auth_url} {repo_name}'
     )
 
     last_err = None
@@ -117,7 +137,8 @@ def fetch_repo_with_retry(
     """
     fetch_cmd = (
         f'cd {target_path} && git remote set-url origin {auth_url} && '
-        f'{GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {branch}'
+        f'{GIT_HTTP_FAIL_FAST_ENV} {_GIT_ATTEMPT_PREFIX} '
+        f'fetch --depth 1 --no-tags origin {branch}'
     )
 
     last_err = None
@@ -178,6 +199,12 @@ def fetch_or_reclone(
             "[trace_id=%s] Fetch persistently failed for %s, fallback to re-clone, detail=%s",
             trace_id, repo_name, fetch_err.message,
         )
+        # 结构化指标日志：便于 ELK/Loki 等按 metric 关键字聚合统计跨境网络劣化频率。
+        # 字段以 key=value 形式扁平化，避免污染主调用链 INFO 日志的可读性。
+        logger.warning(
+            "[trace_id=%s] metric=git_fetch_fallback_reclone repo=%s branch=%s retries=%d",
+            trace_id, repo_name, branch, GIT_CLONE_MAX_RETRIES,
+        )
         ssh.execute_ignore_error(command=f'rm -rf {target_path}')
         clone_repo_with_retry(
             ssh=ssh, auth_url=auth_url, branch=branch,
@@ -206,7 +233,8 @@ def checkout_commit_with_auth_refresh(
         f'cd {tmp_repo_dir} && '
         f'git checkout {commit_id} || '
         f'(git remote set-url origin {auth_url} && '
-        f'{GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && '
+        f'{GIT_HTTP_FAIL_FAST_ENV} {_GIT_ATTEMPT_PREFIX} '
+        f'fetch --depth 1 --no-tags origin {commit_id} && '
         f'git checkout {commit_id})'
     )
     try:
@@ -226,7 +254,8 @@ def checkout_commit_with_auth_refresh(
         retry_cmd = (
             f'cd {tmp_repo_dir} && '
             f'git remote set-url origin {new_auth_url} && '
-            f'{GIT_HTTP_FAIL_FAST_ENV} git fetch --depth 1 --no-tags origin {commit_id} && '
+            f'{GIT_HTTP_FAIL_FAST_ENV} {_GIT_ATTEMPT_PREFIX} '
+            f'fetch --depth 1 --no-tags origin {commit_id} && '
             f'git checkout {commit_id}'
         )
         ssh.execute(command=retry_cmd, timeout=GIT_CLONE_TIMEOUT)

@@ -15,8 +15,10 @@ from dao.deploy_dao import (
     cancel_deploy_record,
     retry_deploy_record,
     get_latest_deploy_records_by_msg_ids,
+    get_latest_deploy_record_by_msg_env,
+    reset_deploy_record_to_pending,
 )
-from dao.client_dao import get_client_by_id
+from dao.client_dao import get_client_by_id, get_client_domains
 from dao.models import DeployRecord
 
 logger = logging.getLogger(__name__)
@@ -198,6 +200,99 @@ def cancel_deploy_record_api(record_id):
         return jsonify({'code': 400, 'message': '记录不存在、无权限或状态不允许取消'}), 400
 
     return jsonify({'code': 200, 'message': '发布记录已取消'})
+
+
+@deploy_bp.route('/client/<int:client_id>/preview', methods=['POST'])
+def preview_chat_message_api(client_id):
+    """
+    chat 消息预览：
+    1. SSH 登录应用测试环境服务器，检查 docker 网络是否存在
+       - 存在：返回 ready + 预览 URL `http://{host_key}.{test_domain}`
+       - 不存在：查找/创建 test 环境发布记录，触发后台部署，返回 deploying
+
+    host_key 格式：task{task_id}chat{chat_id}msg{msg_id}
+    """
+    from service.remote_deploy_service import check_test_docker_network_exists
+
+    user_id = request.user_info.user_id
+    client = get_client_by_id(client_id, user_id)
+    if not client:
+        return jsonify({'code': 404, 'message': '客户端不存在或无权限'}), 404
+
+    data = request.get_json(silent=True) or {}
+
+    def _parse_nonneg(val):
+        try:
+            n = int(val)
+        except (TypeError, ValueError):
+            return None
+        return n if n >= 0 else None
+
+    task_id = _parse_nonneg(data.get('task_id'))
+    chat_id = _parse_nonneg(data.get('chat_id'))
+    msg_id = _parse_nonneg(data.get('msg_id'))
+    if task_id is None or chat_id is None or msg_id is None:
+        return jsonify({'code': 400, 'message': 'task_id/chat_id/msg_id 必须为非负整数'}), 400
+    if msg_id <= 0 or chat_id <= 0:
+        return jsonify({'code': 400, 'message': '缺少有效的 chat_id/msg_id'}), 400
+
+    description = (data.get('description') or '').strip() or f'预览 chat{chat_id}msg{msg_id}'
+    if len(description) > 255:
+        description = description[:255]
+
+    domains = [d.domain for d in get_client_domains(client_id=client_id, user_id=user_id, env='test')]
+    domain_values = [d.strip() for d in domains if d and d.strip()]
+    if not domain_values:
+        return jsonify({'code': 400, 'message': '未配置应用测试环境域名'}), 400
+
+    host_key = f'task{task_id}chat{chat_id}msg{msg_id}'
+    preview_url = f'http://{host_key}.{domain_values[0]}'
+
+    try:
+        network_ready = check_test_docker_network_exists(
+            client_id=client_id, user_id=user_id, host_key=host_key,
+        )
+    except Exception:
+        logger.exception('check test docker network failed: client_id=%s host_key=%s', client_id, host_key)
+        network_ready = False
+
+    if network_ready:
+        return jsonify({
+            'code': 200,
+            'data': {'status': 'ready', 'url': preview_url, 'host_key': host_key},
+        })
+
+    # docker 网络不存在：触发测试环境部署流程
+    existing = get_latest_deploy_record_by_msg_env(
+        user_id=user_id, client_id=client_id, msg_id=msg_id, env='test',
+    )
+    if existing is None:
+        record_id = create_deploy_record(
+            user_id=user_id, client_id=client_id, env='test',
+            description=description, status=DeployRecord.STATUS_PENDING,
+            detail={'task_id': task_id, 'chat_id': chat_id, 'msg_id': msg_id, 'source': 'preview'},
+            msg_id=msg_id, task_id=task_id, chat_id=chat_id,
+        )
+        action = 'created'
+    else:
+        record_id = existing.id
+        if existing.status == DeployRecord.STATUS_PUBLISHING:
+            action = 'publishing'
+        else:
+            ok = reset_deploy_record_to_pending(user_id=user_id, record_id=record_id)
+            action = 'reset' if ok else 'publishing'
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'status': 'deploying',
+            'url': preview_url,
+            'host_key': host_key,
+            'record_id': record_id,
+            'action': action,
+            'message': '服务正在部署，请稍后几分钟查看。',
+        },
+    })
 
 
 @deploy_bp.route('/records/<int:record_id>/retry', methods=['PATCH'])
