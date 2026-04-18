@@ -1321,6 +1321,84 @@ def _reload_host_nginx(ssh, trace_id: str) -> None:
     logger.info("[trace_id=%s] Host nginx reloaded", trace_id)
 
 
+_AI_TASK_INCLUDE_RE = re.compile(r'^/etc/nginx/conf\.d/ai_task_app_(\d+)\.conf$')
+
+
+def _purge_conflicting_cross_client_nginx_includes(
+    ssh, username: str, client_id: int, server_names: str, trace_id: str,
+) -> None:
+    """摘除其它 client 下声明了相同 server_name 的 ai-task include 文件。
+
+    ai-task 每个 client 通过 `/etc/nginx/conf.d/ai_task_app_{cid}.conf` include
+    `/home/{user}/app{cid}/nginx/*.conf`。当两个 client 在同一台服务器上配了相同的
+    生产域名时，nginx reload 会出现 duplicate server_name，按文件加载顺序（字典序小的
+    先加载）命中老 client 的 vhost，流量被路由到已经不活跃或跑着别的代码的旧应用。
+
+    这里只删 `/etc/nginx/conf.d/ai_task_app_{other_cid}.conf`，保留
+    `/home/{user}/app{other_cid}/nginx/*.conf` 原始文件：
+    - 宿主 nginx 立刻不再加载老 client 的 vhost，通过本次部署末尾的 reload 生效；
+    - 老 client 若后续再部署到这台机器，`_ensure_host_nginx_includes_app_vhosts` 会把
+      include 文件重新写回，不丢数据也不影响冷迁回来；
+    - 同步清掉本进程内 `_server_host_include_done` 的 `(ip, other_cid)` 缓存，避免老
+      client 下一次部署走进"已 ensured"快捷路径却没重新写文件。
+
+    仅做 include 层面的清理（保守策略）；若需要同时清掉老 client 的 `.conf` 原文件，
+    应由独立的"应用卸载"流程负责。
+    """
+    my_names = {tok for tok in (server_names or '').split() if tok}
+    if not my_names:
+        return
+
+    ls_out = ssh.execute_ignore_error(
+        command='sudo ls -1 /etc/nginx/conf.d/ai_task_app_*.conf 2>/dev/null',
+    )
+    include_paths = [line.strip() for line in (ls_out or '').splitlines() if line.strip()]
+    if not include_paths:
+        return
+
+    for inc_path in include_paths:
+        m = _AI_TASK_INCLUDE_RE.match(inc_path)
+        if not m:
+            continue
+        other_cid = int(m.group(1))
+        if other_cid == client_id:
+            continue
+
+        other_dir = f'/home/{username}/app{other_cid}/nginx'
+        # glob 无匹配时 grep 会报错到 stderr，已用 2>/dev/null 丢弃；
+        # execute_ignore_error 吞掉非零退出码，只拿 stdout。
+        grep_out = ssh.execute_ignore_error(
+            command=(
+                f"sudo grep -hE '^[[:space:]]*server_name[[:space:]]+' "
+                f"{other_dir}/*.conf 2>/dev/null"
+            ),
+        )
+        other_names: "set[str]" = set()
+        for line in (grep_out or '').splitlines():
+            stripped = line.strip()
+            if not stripped.lower().startswith('server_name'):
+                continue
+            rest = stripped[len('server_name'):].strip().rstrip(';').strip()
+            for tok in rest.split():
+                tok = tok.strip()
+                if tok:
+                    other_names.add(tok)
+
+        collisions = my_names & other_names
+        if not collisions:
+            continue
+
+        ssh.execute_ignore_error(command=f'sudo rm -f {inc_path}')
+        with _server_init_lock:
+            _server_host_include_done.discard((ssh.ip, other_cid))
+        logger.warning(
+            "[trace_id=%s] Purged cross-client nginx include to resolve "
+            "duplicate server_name: other_client_id=%s path=%s collisions=%s "
+            "my_server_names=%s",
+            trace_id, other_cid, inc_path, sorted(collisions), sorted(my_names),
+        )
+
+
 def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list, host_key: str, domains: list, trace_id: str):
     """
     创建 Nginx 容器用于 Docker 网络内路由，并在宿主机写入 HTTPS vhost + reload。
@@ -1359,6 +1437,13 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
         server_names = ' '.join(norm_domains)
         host_conf_basename = 'default.conf'
         inner_segment = 'default'
+
+    # 先摘掉其它 client 在本机声明了相同 server_name 的 include，避免 duplicate
+    # server_name 让老应用抢走流量。本次部署末尾的 _reload_host_nginx 会让变更生效。
+    _purge_conflicting_cross_client_nginx_includes(
+        ssh=ssh, username=username, client_id=client_id,
+        server_names=server_names, trace_id=trace_id,
+    )
 
     _ensure_certbot_ready(ssh=ssh, trace_id=trace_id)
 
