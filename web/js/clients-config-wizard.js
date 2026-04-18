@@ -9,7 +9,8 @@ const WIZARD_STEPS = [
     { id: 3, label: '云服务器', required: false },
     { id: 4, label: '域名',     required: false },
     { id: 5, label: '数据库',   required: false },
-    { id: 6, label: '部署',     required: false },
+    { id: 6, label: '特殊账号', required: false },
+    { id: 7, label: '部署',     required: false },
 ];
 
 // 当前向导状态
@@ -33,6 +34,9 @@ let cfgDomainCurrentEnv = 'test';
 let cfgDatabasesByEnv = { test: [], prod: [] };
 let cfgDatabaseCurrentEnv = 'test';
 
+// 特殊账号：列表，不区分环境；[{ name, password }]
+let cfgSpecialAccountsList = [];
+
 // 部署配置：列表，不区分环境
 let cfgDeploysList = [];
 // 当前预览的 deploy 索引
@@ -50,8 +54,25 @@ function cfgResetClientConfigState() {
     cfgDomainCurrentEnv = 'test';
     cfgDatabasesByEnv = { test: [], prod: [] };
     cfgDatabaseCurrentEnv = 'test';
+    cfgSpecialAccountsList = [];
     cfgDeploysList = [];
     cfgDeployPreviewIdx = null;
+}
+
+// 生成 16 位随机密码：字母+数字（与后端 generate_special_account_password 保持同类字符集）
+function cfgGenerateRandomPassword(length) {
+    const len = length || 16;
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let out = '';
+    // 浏览器里有 crypto.getRandomValues 就走它，避免 Math.random 的弱随机
+    if (window.crypto && window.crypto.getRandomValues) {
+        const buf = new Uint32Array(len);
+        window.crypto.getRandomValues(buf);
+        for (let i = 0; i < len; i++) out += alphabet[buf[i] % alphabet.length];
+    } else {
+        for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+    return out;
 }
 
 function backToClients() {
@@ -119,6 +140,11 @@ async function openClientConfig(id, mode) {
             cfgDomainsByEnv.prod = (infra.domains && infra.domains.prod) || [];
             cfgDatabasesByEnv.test = (infra.databases && infra.databases.test) || [];
             cfgDatabasesByEnv.prod = (infra.databases && infra.databases.prod) || [];
+            // 特殊账号：后端返回 [{id, client_id, name, password, ...}]，前端只关心 name/password
+            cfgSpecialAccountsList = (infra.special_accounts || []).map(a => ({
+                name: a.name || '',
+                password: a.password || '',
+            }));
             cfgDeploysList = (infra.deploys || []).map(d => ({ ...d }));
         } catch (error) {
             showToast(error.message, 'error');
@@ -128,6 +154,10 @@ async function openClientConfig(id, mode) {
         document.getElementById('cfg-client-name').value = '';
         agentSelect.value = agentOptions[0] || 'claude sdk';
         document.getElementById('cfg-client-official-cloud-deploy').value = '0';
+        // 新建应用：默认给一个 admin 特殊账号，16 位随机密码。
+        // 后端 client_template_service / client_service 也有兜底，但前端先给一条，
+        // 便于用户一进来就能看到默认账号并自行修改。
+        cfgSpecialAccountsList = [{ name: 'admin', password: cfgGenerateRandomPassword(16) }];
     }
 
     // 初始化向导
@@ -169,7 +199,8 @@ function wizardRenderStepContent(stepIndex) {
         case 3: wizardRenderServerStep(isView); break;
         case 4: wizardRenderDomainStep(isView); break;
         case 5: wizardRenderDatabaseStep(isView); break;
-        case 6: wizardRenderDeployStep(isView); break;
+        case 6: wizardRenderSpecialAccountsStep(isView); break;
+        case 7: wizardRenderDeployStep(isView); break;
     }
 }
 
@@ -185,7 +216,8 @@ function wizardSyncCurrentStepFromDOM(stepIndex) {
         case 1: wizardSyncEnvVarsFromDOM(); break;
         case 3: wizardSyncServerFromDOM(); break;
         case 4: wizardSyncDomainsFromDOM(); break;
-        case 6: wizardSyncDeploysFromDOM(); break;
+        case 6: wizardSyncSpecialAccountsFromDOM(); break;
+        case 7: wizardSyncDeploysFromDOM(); break;
     }
 }
 
@@ -215,6 +247,10 @@ async function wizardSaveAll() {
     const envVarsErr = wizardValidateEnvVars();
     if (envVarsErr) { showToast(envVarsErr, 'error'); wizardGoToStep(1); return; }
 
+    // 3.1 验证特殊账号：name 必填且去重（后端也会兜底校验，这里提示体验更好）
+    const saErr = wizardValidateSpecialAccounts();
+    if (saErr) { showToast(saErr, 'error'); wizardGoToStep(6); return; }
+
     // 构建仓库数据
     const repos = cfgReposList.map(r => ({
         desc: (r.desc || '').trim(),
@@ -239,11 +275,17 @@ async function wizardSaveAll() {
         custom_config: d.custom_config || '',
     }));
 
+    // 构建特殊账号（前端只留 name/password，其它字段由后端管理）
+    const specialAccounts = cfgSpecialAccountsList
+        .map(a => ({ name: (a.name || '').trim(), password: a.password == null ? '' : String(a.password) }))
+        .filter(a => a.name);
+
     // 构建基础设施配置
     const infrastructure = {
         servers: cfgServersByEnv,
         domains: cfgDomainsByEnv,
         databases: cfgDatabasesByEnv,
+        special_accounts: specialAccounts,
         deploys: deploys,
     };
 
@@ -681,12 +723,132 @@ function cfgDeleteDatabase(idx) {
 }
 
 
-// ---- Step 6: 部署 ----
+// ---- Step 6: 特殊账号 ----
+
+function wizardRenderSpecialAccountsStep(isView) {
+    const addBtn = document.getElementById('add-special-account-btn');
+    if (addBtn) {
+        addBtn.style.display = isView ? 'none' : '';
+        addBtn.onclick = () => {
+            wizardSyncSpecialAccountsFromDOM();
+            // 新增的账号默认给 16 位随机密码，减少空密码误填
+            cfgSpecialAccountsList.push({ name: '', password: cfgGenerateRandomPassword(16) });
+            wizardRenderSpecialAccountsList();
+        };
+    }
+    wizardRenderSpecialAccountsList();
+}
+
+function wizardSyncSpecialAccountsFromDOM() {
+    const list = document.getElementById('special-accounts-list');
+    if (!list) return;
+    const cards = list.querySelectorAll('.special-account-card');
+    cfgSpecialAccountsList = [];
+    cards.forEach(card => {
+        const name = card.querySelector('.sa-name-input')?.value || '';
+        const password = card.querySelector('.sa-password-input')?.value || '';
+        cfgSpecialAccountsList.push({ name, password });
+    });
+}
+
+function wizardValidateSpecialAccounts() {
+    const seen = new Set();
+    for (let i = 0; i < cfgSpecialAccountsList.length; i++) {
+        const a = cfgSpecialAccountsList[i];
+        const name = (a.name || '').trim();
+        const n = i + 1;
+        if (!name) return `特殊账号 #${n} 账号名不能为空`;
+        if (name.length > 64) return `特殊账号 #${n} 账号名长度不能超过 64 个字符`;
+        const password = a.password == null ? '' : String(a.password);
+        if (!password) return `特殊账号 #${n}（${name}）的密码不能为空`;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return `特殊账号名称重复：${name}`;
+        seen.add(key);
+    }
+    return null;
+}
+
+function wizardRenderSpecialAccountsList() {
+    const list = document.getElementById('special-accounts-list');
+    const empty = document.getElementById('special-accounts-empty');
+    if (!list) return;
+    const isView = (cfgClientMode === 'view');
+    const items = cfgSpecialAccountsList;
+
+    if (items.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    const disAttr = isView ? 'disabled' : '';
+
+    list.innerHTML = items.map((acc, idx) => {
+        const deleteBtn = isView ? '' : `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteSpecialAccount(${idx})">删除</button>`;
+        const regenBtn = isView ? '' : `<button type="button" class="btn-action" onclick="cfgRegenSpecialAccountPassword(${idx})" title="生成 16 位随机密码">重新生成</button>`;
+        return `
+        <div class="special-account-card infra-card" data-sa-idx="${idx}">
+            <div class="infra-card-header">
+                <span class="infra-card-label">#${idx + 1} 特殊账号</span>
+                <div style="display:flex;gap:8px;align-items:center;">${regenBtn}${deleteBtn}</div>
+            </div>
+            <div class="infra-form-grid">
+                <div class="form-group">
+                    <label>账号名</label>
+                    <input type="text" class="sa-name-input" value="${escapeHtml(acc.name || '')}" placeholder="如 admin" maxlength="64" ${disAttr}>
+                </div>
+                <div class="form-group">
+                    <label>密码（明文）</label>
+                    <div class="password-input-wrap">
+                        <input type="password" class="sa-password-input" value="${escapeHtml(acc.password || '')}" placeholder="账号密码" ${disAttr}>
+                        <button type="button" class="password-toggle-btn sa-password-toggle" title="显示/隐藏密码" tabindex="-1">&#128065;&#65039;</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.special-account-card').forEach(card => {
+        const idx = parseInt(card.dataset.saIdx);
+        card.addEventListener('input', (e) => {
+            if (idx >= cfgSpecialAccountsList.length) return;
+            const acc = cfgSpecialAccountsList[idx];
+            if (e.target.classList.contains('sa-name-input')) acc.name = e.target.value;
+            if (e.target.classList.contains('sa-password-input')) acc.password = e.target.value;
+        });
+        const toggleBtn = card.querySelector('.sa-password-toggle');
+        const pwdInput = card.querySelector('.sa-password-input');
+        if (toggleBtn && pwdInput) {
+            toggleBtn.addEventListener('click', () => {
+                const showing = pwdInput.type === 'text';
+                pwdInput.type = showing ? 'password' : 'text';
+                toggleBtn.innerHTML = showing ? '&#128065;&#65039;' : '&#128584;';
+            });
+        }
+    });
+}
+
+function cfgDeleteSpecialAccount(idx) {
+    wizardSyncSpecialAccountsFromDOM();
+    cfgSpecialAccountsList.splice(idx, 1);
+    wizardRenderSpecialAccountsList();
+}
+
+function cfgRegenSpecialAccountPassword(idx) {
+    wizardSyncSpecialAccountsFromDOM();
+    if (idx < 0 || idx >= cfgSpecialAccountsList.length) return;
+    cfgSpecialAccountsList[idx].password = cfgGenerateRandomPassword(16);
+    wizardRenderSpecialAccountsList();
+}
+
+
+// ---- Step 7: 部署 ----
 
 const DEPLOY_OFFICIAL_OPTIONS = [
     { key: 'app_name', label: '应用名' },
     { key: 'domain', label: '域名' },
     { key: 'database', label: '数据库' },
+    { key: 'special_accounts', label: '特殊账号' },
 ];
 
 function wizardRenderDeployStep(isView) {

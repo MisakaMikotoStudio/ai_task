@@ -1479,7 +1479,8 @@
                             <div class="wizard-sidebar-tab" data-step="3">云服务器</div>
                             <div class="wizard-sidebar-tab" data-step="4">域名</div>
                             <div class="wizard-sidebar-tab" data-step="5">数据库</div>
-                            <div class="wizard-sidebar-tab" data-step="6">部署</div>
+                            <div class="wizard-sidebar-tab" data-step="6">特殊账号</div>
+                            <div class="wizard-sidebar-tab" data-step="7">部署</div>
                         </div>
 
                     <!-- 右侧步骤内容 -->
@@ -1622,8 +1623,23 @@
                             </div>
                         </div>
 
-                        <!-- Step 6: 部署 -->
+                        <!-- Step 6: 特殊账号 -->
                         <div id="wizard-step-6" class="wizard-step-panel">
+                            <div class="config-section">
+                                <div class="config-section-toolbar">
+                                    <div class="config-section-intro">
+                                        <div class="config-section-title">特殊账号</div>
+                                        <div class="config-section-subtitle">内置/保留账号（如 admin）。新建应用时会自动添加一个 admin，密码为 16 位随机字符串，可直接编辑或新增；不区分环境。部署时会和 apiserver 的 special_accounts 官方配置一起下发。</div>
+                                    </div>
+                                    <button class="btn-secondary config-add-btn" id="add-special-account-btn" type="button">+ 新增账号</button>
+                                </div>
+                                <div id="special-accounts-list" class="infra-list"></div>
+                                <div id="special-accounts-empty" class="empty-state" style="display:none;"><p>暂无特殊账号</p></div>
+                            </div>
+                        </div>
+
+                        <!-- Step 7: 部署 -->
+                        <div id="wizard-step-7" class="wizard-step-panel">
                             <div class="config-section">
                                 <div class="config-section-toolbar">
                                     <div class="config-section-intro">
