@@ -602,8 +602,8 @@ const deployAPI = {
         const body = JSON.stringify({ description: description || '' });
         return request(`/app/deploy/client/${clientId}/publish-prod`, { method: 'POST', body });
     },
-    async previewRecord(recordId) {
-        return request(`/app/deploy/records/${recordId}/preview`, { method: 'POST', body: '{}' });
+    async viewRecord(recordId) {
+        return request(`/app/deploy/records/${recordId}/view`, { method: 'POST', body: '{}' });
     },
     async publishProdFromRecord(recordId) {
         return request(`/app/deploy/records/${recordId}/publish-prod`, { method: 'POST', body: '{}' });

@@ -217,7 +217,7 @@ def preview_chat_message_api(client_id):
 
     host_key 格式：task{task_id}chat{chat_id}msg{msg_id}
     """
-    from service.remote_deploy_service import check_test_docker_network_exists
+    from service.remote_deploy_service import check_docker_network_exists
 
     user_id = request.user_info.user_id
     client = get_client_by_id(client_id, user_id)
@@ -254,8 +254,8 @@ def preview_chat_message_api(client_id):
     preview_url = f'https://{host_key}.{domain_values[0]}'
 
     try:
-        network_ready = check_test_docker_network_exists(
-            client_id=client_id, user_id=user_id, host_key=host_key,
+        network_ready = check_docker_network_exists(
+            client_id=client_id, user_id=user_id, env='test', host_key=host_key,
         )
     except Exception:
         logger.exception('check test docker network failed: client_id=%s host_key=%s', client_id, host_key)
@@ -377,10 +377,10 @@ def _build_merge_request_for_client(client_id: int, user_id: int) -> list:
 @deploy_bp.route('/client/<int:client_id>/publish-prod', methods=['POST'])
 def publish_prod_api(client_id):
     """
-    「发布生产」入口：
+    「发布生产」入口（实际先发布到测试环境，验证 OK 后再通过行内按钮提升到生产）：
     1. 根据描述新建一条独立 ChatMessage（task_id=0, chat_id=0, client_id=当前应用,
        input=描述, status=completed, extra.merge_request=仓库最新 commit 列表）
-    2. 新建一条 prod 环境发布记录（task_id=0, chat_id=0, msg_id=上述 msg_id, status=pending）
+    2. 新建一条 test 环境发布记录（task_id=0, chat_id=0, msg_id=上述 msg_id, status=pending）
     """
     user_id = request.user_info.user_id
     client = get_client_by_id(client_id, user_id)
@@ -419,58 +419,67 @@ def publish_prod_api(client_id):
         'merge_request': merge_request,
     }
     record_id = create_deploy_record(
-        user_id=user_id, client_id=client_id, env='prod',
+        user_id=user_id, client_id=client_id, env='test',
         description=description[:255], status=DeployRecord.STATUS_PENDING,
         detail=detail, msg_id=msg_id, task_id=0, chat_id=0,
     )
 
     return jsonify({
         'code': 201,
-        'message': '发布生产记录创建成功',
+        'message': '发布记录创建成功（先发布到测试环境，验证后可在记录行点击「发布生产」）',
         'data': {'record_id': record_id, 'msg_id': msg_id},
     }), 201
 
 
-@deploy_bp.route('/records/<int:record_id>/preview', methods=['POST'])
-def preview_record_api(record_id):
+@deploy_bp.route('/records/<int:record_id>/view', methods=['POST'])
+def view_record_api(record_id):
     """
-    基于已有发布记录的预览：
-    - 仅允许 env=test 的记录
-    - 存在对应 docker 网络：返回 ready + 预览 URL
-    - 不存在：将记录重置为 pending（若可重置），提示正在重新发布
+    基于已有发布记录的「查看」：
+    - 任意环境（test / prod）的发布记录均可调用
+    - 检查目标环境对应 docker 网络是否存在：
+      - 存在：返回 ready + 跳转 URL
+        * test 环境：URL = https://{task{tid}chat{cid}msg{mid}}.{test_domain}
+        * prod 环境：URL = https://{prod_domain}
+      - 不存在：将记录重置为 pending（若可重置），提示正在重新发布
     """
-    from service.remote_deploy_service import check_test_docker_network_exists
+    from service.remote_deploy_service import check_docker_network_exists
 
     user_id = request.user_info.user_id
     record = get_deploy_record_by_id(user_id=user_id, record_id=record_id)
     if not record:
         return jsonify({'code': 404, 'message': '发布记录不存在或无权限'}), 404
-    if record.env != 'test':
-        return jsonify({'code': 400, 'message': '仅测试环境记录支持预览'}), 400
+
+    env = (record.env or '').strip()
+    if env not in ('test', 'prod'):
+        return jsonify({'code': 400, 'message': f'不支持的环境：{env}'}), 400
 
     client_id = record.client_id
     task_id = record.task_id or 0
     chat_id = record.chat_id or 0
     msg_id = record.msg_id or 0
-    if msg_id <= 0:
-        return jsonify({'code': 400, 'message': '记录缺少 msg_id，无法预览'}), 400
 
-    domains = [d.domain for d in get_client_domains(client_id=client_id, user_id=user_id, env='test')]
+    domains = [d.domain for d in get_client_domains(client_id=client_id, user_id=user_id, env=env)]
     domain_values = [d.strip() for d in domains if d and d.strip()]
     if not domain_values:
-        return jsonify({'code': 400, 'message': '未配置应用测试环境域名'}), 400
+        return jsonify({'code': 400, 'message': f'未配置应用{("测试" if env == "test" else "生产")}环境域名'}), 400
 
-    host_key = f'task{task_id}chat{chat_id}msg{msg_id}'
-    preview_url = f'https://{host_key}.{domain_values[0]}'
+    if env == 'test':
+        if msg_id <= 0:
+            return jsonify({'code': 400, 'message': '记录缺少 msg_id，无法查看'}), 400
+        host_key = f'task{task_id}chat{chat_id}msg{msg_id}'
+        view_url = f'https://{host_key}.{domain_values[0]}'
+    else:
+        host_key = ''
+        view_url = f'https://{domain_values[0]}'
 
     try:
-        network_ready = check_test_docker_network_exists(
-            client_id=client_id, user_id=user_id, host_key=host_key,
+        network_ready = check_docker_network_exists(
+            client_id=client_id, user_id=user_id, env=env, host_key=host_key,
         )
     except Exception:
         logger.exception(
-            'preview_record: check test docker network failed, record_id=%s host_key=%s',
-            record_id, host_key,
+            'view_record: check docker network failed, record_id=%s env=%s host_key=%s',
+            record_id, env, host_key,
         )
         network_ready = False
 
@@ -478,8 +487,8 @@ def preview_record_api(record_id):
         return jsonify({
             'code': 200,
             'data': {
-                'status': 'ready', 'url': preview_url, 'host_key': host_key,
-                'record_id': record.id,
+                'status': 'ready', 'url': view_url, 'host_key': host_key,
+                'record_id': record.id, 'env': env,
             },
         })
 
@@ -494,9 +503,10 @@ def preview_record_api(record_id):
         'code': 200,
         'data': {
             'status': 'deploying',
-            'url': preview_url,
+            'url': view_url,
             'host_key': host_key,
             'record_id': record.id,
+            'env': env,
             'action': action,
             'message': '服务正在重新发布，请稍后查看',
         },
