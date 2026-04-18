@@ -11,13 +11,14 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # 官方配置可选项
-VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database']
+VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database', 'special_accounts']
 
 # 官方配置选项的中文标签（前端展示用）
 OFFICIAL_CONFIG_LABELS = {
     'app_name': '应用名',
     'domain': '域名',
     'database': '数据库',
+    'special_accounts': '特殊账号',
 }
 
 
@@ -125,7 +126,14 @@ def _dict_to_toml_inner(data: dict, prefix: str) -> str:
 
 
 def _toml_value(val) -> str:
-    """将 Python 值转为 TOML 值字面量"""
+    """将 Python 值转为 TOML 值字面量。
+
+    bool / int / float / str / list / dict 都会按 TOML 字面量格式输出；
+    dict 走 "inline table"（{k = v, ...}），嵌到 list 里就是合法的
+    "array of inline tables" —— 用这种方式放 special_accounts 而不是
+    [[auth.special_accounts]]，避免 _dict_to_toml 的 section 构造逻辑被
+    list[dict] 打断。
+    """
     if isinstance(val, bool):
         return 'true' if val else 'false'
     if isinstance(val, int):
@@ -135,6 +143,11 @@ def _toml_value(val) -> str:
     if isinstance(val, str):
         escaped = val.replace('\\', '\\\\').replace('"', '\\"')
         return f'"{escaped}"'
+    if isinstance(val, dict):
+        items = ', '.join(
+            f'{k} = {_toml_value(val=v)}' for k, v in val.items()
+        )
+        return '{' + items + '}'
     if isinstance(val, list):
         items = ', '.join(_toml_value(val=v) for v in val)
         return f'[{items}]'
@@ -154,7 +167,10 @@ def generate_official_toml(client_id: int, user_id: int, official_configs: list,
     Returns:
         包含官方配置的字典
     """
-    from dao.client_dao import get_client_by_id, get_client_domains, get_client_databases
+    from dao.client_dao import (
+        get_client_by_id, get_client_domains, get_client_databases,
+        get_client_special_accounts,
+    )
 
     result = {}
 
@@ -182,6 +198,17 @@ def generate_official_toml(client_id: int, user_id: int, official_configs: list,
                 'password': db.password or '',
                 'database': db.db_name or '',
             }
+
+    if 'special_accounts' in official_configs:
+        # 目标 apiserver 约定读取 [auth].special_accounts（数组，元素为 {name, password}）
+        # 这里不区分环境：特殊账号在 test/prod 下完全一致
+        accounts = get_client_special_accounts(client_id=client_id, user_id=user_id)
+        if accounts:
+            result.setdefault('auth', {})
+            result['auth']['special_accounts'] = [
+                {'name': acc.name or '', 'password': acc.password or ''}
+                for acc in accounts
+            ]
 
     return result
 

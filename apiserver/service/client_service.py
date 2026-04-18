@@ -319,6 +319,15 @@ def save_client(user_id: int, data: dict, client_id: Optional[int] = None) -> in
     if infra_data and isinstance(infra_data, dict):
         save_all_infrastructure(client_id=cid, user_id=user_id, data=infra_data)
 
+    # 新建场景兜底：若 client 目前没有任何特殊账号，自动创建 admin（16 位随机密码）。
+    # 前端新建向导默认会填一条 admin，但老客户端直连 API 或极端场景里可能漏传，
+    # 这里再做一次兜底，保证 apiserver 的 special_accounts 勾选项不会空转。
+    if client_id is None:
+        from dao.client_dao import get_client_special_accounts
+        from service.client_template_service import _create_default_special_accounts
+        if not get_client_special_accounts(client_id=cid, user_id=user_id):
+            _create_default_special_accounts(user_id=user_id, client_id=cid)
+
     return cid
 
 
