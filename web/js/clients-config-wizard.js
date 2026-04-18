@@ -785,7 +785,7 @@ function wizardRenderSpecialAccountsList() {
 
     list.innerHTML = items.map((acc, idx) => {
         const deleteBtn = isView ? '' : `<button type="button" class="btn-action btn-delete" onclick="cfgDeleteSpecialAccount(${idx})">删除</button>`;
-        const regenBtn = isView ? '' : `<button type="button" class="btn-action" onclick="cfgRegenSpecialAccountPassword(${idx})" title="生成 16 位随机密码">重新生成</button>`;
+        const regenBtn = isView ? '' : `<button type="button" class="btn-action btn-reset" onclick="cfgRegenSpecialAccountPassword(${idx})" title="生成 16 位随机密码">重新生成</button>`;
         return `
         <div class="special-account-card infra-card" data-sa-idx="${idx}">
             <div class="infra-card-header">
