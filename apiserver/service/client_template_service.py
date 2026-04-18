@@ -5,6 +5,7 @@
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from dao.client_dao import (
     add_client_database,
@@ -13,6 +14,7 @@ from dao.client_dao import (
     update_client_database,
     VALID_ENVS,
 )
+from dao.connection import remove_session
 from service.client_service import AVAILABLE_AGENTS, ClientSaveError
 
 logger = logging.getLogger(__name__)
@@ -20,24 +22,35 @@ logger = logging.getLogger(__name__)
 VALID_APP_TYPES = ['web']
 
 
+def _run_in_thread(fn, *args, **kwargs):
+    """
+    在子线程中执行任务的通用包装：
+    - 任务执行完成后清理该线程的 scoped_session，避免连接泄漏
+    - 任务抛出的异常仍会通过 Future 重新抛出，由调用方决定如何处理
+    """
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        try:
+            remove_session()
+        except Exception:
+            pass
+
+
 def create_client_from_template(user_id: int, app_types: list, app_name: str = '') -> int:
     """
-    从模板生成默认应用：创建 Client，创建默认仓库（文档 + 代码），然后在 test/prod 环境下各创建一个默认数据库。
+    从模板生成默认应用：创建 Client，并并发创建默认仓库（文档 + 代码）与 test/prod 默认数据库。
 
     流程：
     1. 使用用户指定的名称或自动生成不重复的应用名称
     2. 创建 Client 记录
-    3. 创建默认仓库：
-       a. 随机选择一个 code_repo 类型的资源
-       b. 文档仓库 {user_id}_docs：检查是否已存在，不存在则创建
-       c. 代码仓库 {user_id}_app_{timestamp}：创建新仓库
-       d. 绑定仓库到应用
-    4. 对于 test、prod 两个环境：
-       a. 查找可用的 MySQL Resource
-       b. 生成 db_name = {env}_{user_id}_{yyyyMMddHHmmss}
-       c. 写入 ClientDatabase 记录
-       d. 调用资源服务在云上创建数据库 + 专属账号
-       e. 回写连接信息到 ClientDatabase
+    3. 预解析 code_repo 资源（docs 与 code 仓库共用同一个 GitHub 组织）
+    4. 并发执行互不依赖的慢操作：
+       - 创建文档仓库（GitHub API + DB 写入）
+       - 创建业务代码仓库（GitHub API + DB 写入，返回 repo_id）
+       - test 环境 MySQL 创建（Aliyun API + DB 写入）
+       - prod 环境 MySQL 创建（Aliyun API + DB 写入）
+    5. 等待所有并发任务完成后，基于业务代码仓库 ID 创建默认 deploy 配置
 
     Args:
         user_id: 用户 ID
@@ -51,9 +64,6 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
         ClientSaveError: 校验失败或创建失败
     """
     import time
-    from datetime import datetime, timezone
-    from dao.resource_dao import get_online_resources_by_type_source
-    from service.resource_mysql_service import create_database_with_name, ResourceMySQLError
 
     # 校验 app_types
     if not app_types or not isinstance(app_types, list):
@@ -92,56 +102,13 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
         user_id, client_id, app_types,
     )
 
-    # 创建默认仓库，返回代码仓库 ID（用于绑定到默认 deploy 配置）
-    code_repo_id = _create_default_repos(
-        user_id=user_id, client_id=client_id, timestamp=timestamp,
+    # 预解析 code_repo 资源（docs 与 code 仓库共用同一个组织，避免随机选到不同资源）
+    repo_ctx = _resolve_code_repo_context(user_id=user_id)
+
+    # 并发执行互不依赖的慢操作（GitHub/Aliyun 网络调用）
+    code_repo_id = _run_create_tasks_parallel(
+        user_id=user_id, client_id=client_id, timestamp=timestamp, repo_ctx=repo_ctx,
     )
-
-    # 为 test、prod 两个环境分别创建数据库
-    for env in VALID_ENVS:
-        # 从资源管理中获取可用的 MySQL 资源
-        resources = get_online_resources_by_type_source(type='mysql', source='aliyun', env=env)
-        if not resources:
-            logger.warning(
-                "create_client_from_template: no mysql resource for env=%s, user_id=%s, skipping",
-                env, user_id,
-            )
-            continue
-
-        resource = resources[0]
-        db_name = f"{env}_{user_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-
-        # 先写入 ClientDatabase 记录
-        record_id = add_client_database(
-            client_id=client_id, user_id=user_id, env=env, db_name=db_name, db_type='mysql',
-        )
-        logger.info(
-            "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s, resource_id=%s",
-            record_id, env, db_name, resource.id,
-        )
-
-        # 调用资源服务在云上创建数据库 + 专属账号
-        try:
-            result = create_database_with_name(resource=resource, user_id=user_id, db_name=db_name)
-            # 回写连接信息
-            update_client_database(
-                record_id=record_id,
-                user_id=user_id,
-                host=result['instance_url'],
-                port=result.get('port', 3306),
-                username=result['account_name'],
-                password=result['account_password'],
-            )
-            logger.info(
-                "create_client_from_template: cloud db created, env=%s, db_name=%s, host=%s",
-                env, db_name, result['instance_url'],
-            )
-        except ResourceMySQLError as e:
-            logger.error(
-                "create_client_from_template: cloud db creation failed, env=%s, db_name=%s, resource_id=%s, error=%s",
-                env, db_name, resource.id, e.message,
-            )
-            # 不阻断其他环境的创建，继续处理
 
     # 为 web 类型应用创建默认部署配置（apiserver + web），均绑定到业务代码仓库
     if 'web' in app_types:
@@ -150,6 +117,111 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
         )
 
     return client_id
+
+
+def _run_create_tasks_parallel(user_id: int, client_id: int, timestamp: int, repo_ctx):
+    """
+    并发执行以下互不依赖的任务，提升应用创建速度：
+    - 文档仓库创建
+    - 业务代码仓库创建（返回 client_repo 记录 ID）
+    - 对每个环境分别创建默认 MySQL
+
+    单个任务失败只记录日志、不影响其他任务（与原串行版本的语义一致）。
+
+    Returns:
+        业务代码仓库的 client_repo 记录 ID；若未创建成功则返回 None
+    """
+    envs = list(VALID_ENVS)
+    # 4 个固定任务：docs 仓库 + code 仓库 + 每个 env 一个 DB
+    max_workers = 2 + len(envs)
+
+    code_repo_id = None
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        docs_future = executor.submit(
+            _run_in_thread, _create_docs_repo_task, repo_ctx, user_id, client_id,
+        )
+        code_future = executor.submit(
+            _run_in_thread, _create_code_repo_task, repo_ctx, user_id, client_id, timestamp,
+        )
+        db_futures = {
+            env: executor.submit(_run_in_thread, _create_env_database_task, user_id, client_id, env)
+            for env in envs
+        }
+
+        # 代码仓库 ID 是后续 deploy 的依赖，单独收集
+        try:
+            code_repo_id = code_future.result()
+        except Exception:
+            logger.exception(
+                "create_client_from_template: code repo task failed, user_id=%s, client_id=%s",
+                user_id, client_id,
+            )
+            code_repo_id = None
+
+        try:
+            docs_future.result()
+        except Exception:
+            logger.exception(
+                "create_client_from_template: docs repo task failed, user_id=%s, client_id=%s",
+                user_id, client_id,
+            )
+
+        for env, fut in db_futures.items():
+            try:
+                fut.result()
+            except Exception:
+                logger.exception(
+                    "create_client_from_template: db task failed, user_id=%s, client_id=%s, env=%s",
+                    user_id, client_id, env,
+                )
+
+    return code_repo_id
+
+
+def _create_env_database_task(user_id: int, client_id: int, env: str) -> None:
+    """
+    为单个环境创建默认 MySQL：查资源 → 写记录 → 调云创建 → 回写连接信息。
+    业务异常（资源缺失、云创建失败）只记日志不抛出，保持与原串行逻辑一致。
+    """
+    from datetime import datetime, timezone
+    from dao.resource_dao import get_online_resources_by_type_source
+    from service.resource_mysql_service import create_database_with_name, ResourceMySQLError
+
+    resources = get_online_resources_by_type_source(type='mysql', source='aliyun', env=env)
+    if not resources:
+        logger.warning(
+            "create_client_from_template: no mysql resource for env=%s, user_id=%s, skipping",
+            env, user_id,
+        )
+        return
+
+    resource = resources[0]
+    db_name = f"{env}_{user_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+
+    record_id = add_client_database(
+        client_id=client_id, user_id=user_id, env=env, db_name=db_name, db_type='mysql',
+    )
+    logger.info(
+        "create_client_from_template: db record created, record_id=%s, env=%s, db_name=%s, resource_id=%s",
+        record_id, env, db_name, resource.id,
+    )
+
+    try:
+        result = create_database_with_name(resource=resource, user_id=user_id, db_name=db_name)
+        update_client_database(
+            record_id=record_id, user_id=user_id,
+            host=result['instance_url'], port=result.get('port', 3306),
+            username=result['account_name'], password=result['account_password'],
+        )
+        logger.info(
+            "create_client_from_template: cloud db created, env=%s, db_name=%s, host=%s",
+            env, db_name, result['instance_url'],
+        )
+    except ResourceMySQLError as e:
+        logger.error(
+            "create_client_from_template: cloud db creation failed, env=%s, db_name=%s, resource_id=%s, error=%s",
+            env, db_name, resource.id, e.message,
+        )
 
 
 def _create_default_deploys(user_id: int, client_id: int, code_repo_id: int = None) -> None:
@@ -199,27 +271,21 @@ CODE_REPO_DESCRIPTION = (
 )
 
 
-def _create_default_repos(user_id: int, client_id: int, timestamp: int):
+def _resolve_code_repo_context(user_id: int):
     """
-    为默认应用创建文档仓库和代码仓库，并返回代码仓库的 client_repo 记录 ID。
-
-    流程：
-    1. 随机选择一个 code_repo 类型的资源
-    2. 文档仓库（{user_id}_docs）：检查数据库是否已存在，不存在则创建
-    3. 代码仓库（{user_id}_app_{timestamp}）：直接创建
-    4. 绑定仓库记录到应用
+    随机选择一个 code_repo 资源并解析组织名，供 docs/code 仓库共享使用。
+    若没有可用资源或资源配置不完整，返回 None 且仅记日志。
 
     Returns:
-        代码仓库的 client_repo 记录 ID；若未创建成功则返回 None
+        dict(resource=..., organization=...) 或 None
     """
     import random
     from dao.resource_dao import get_online_resources_by_type_source
 
-    # 1. 随机选择一个 code_repo 资源
     code_repo_resources = get_online_resources_by_type_source(type='code_repo', source='github')
     if not code_repo_resources:
         logger.warning(
-            "_create_default_repos: no code_repo resource available, user_id=%s, skipping repo creation",
+            "_resolve_code_repo_context: no code_repo resource available, user_id=%s",
             user_id,
         )
         return None
@@ -229,26 +295,36 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int):
     organization = (extra.get('organization') or '').strip()
     if not organization:
         logger.error(
-            "_create_default_repos: code_repo resource id=%s missing organization, user_id=%s",
+            "_resolve_code_repo_context: code_repo resource id=%s missing organization, user_id=%s",
             resource.id, user_id,
         )
         return None
+    return {'resource': resource, 'organization': organization}
 
-    # 2. 文档仓库: {user_id}_docs
-    docs_repo_name = f"{user_id}_docs"
-    _ensure_and_bind_repo(
-        resource=resource, organization=organization, user_id=user_id, client_id=client_id,
-        repo_name=docs_repo_name, is_docs_repo=True, description=DOCS_REPO_DESCRIPTION,
+
+def _create_docs_repo_task(repo_ctx, user_id: int, client_id: int):
+    """文档仓库创建任务（GitHub API + DB 写入）。"""
+    if not repo_ctx:
+        return None
+    return _ensure_and_bind_repo(
+        resource=repo_ctx['resource'], organization=repo_ctx['organization'],
+        user_id=user_id, client_id=client_id,
+        repo_name=f"{user_id}_docs",
+        is_docs_repo=True, description=DOCS_REPO_DESCRIPTION,
     )
 
-    # 3. 代码仓库: {user_id}_app_{timestamp}（从模板创建）
-    code_repo_name = f"{user_id}_app_{timestamp}"
-    code_repo_id = _ensure_and_bind_repo(
-        resource=resource, organization=organization, user_id=user_id, client_id=client_id,
-        repo_name=code_repo_name, is_docs_repo=False, description=CODE_REPO_DESCRIPTION,
+
+def _create_code_repo_task(repo_ctx, user_id: int, client_id: int, timestamp: int):
+    """业务代码仓库创建任务（GitHub API + DB 写入），返回 client_repo 记录 ID。"""
+    if not repo_ctx:
+        return None
+    return _ensure_and_bind_repo(
+        resource=repo_ctx['resource'], organization=repo_ctx['organization'],
+        user_id=user_id, client_id=client_id,
+        repo_name=f"{user_id}_app_{timestamp}",
+        is_docs_repo=False, description=CODE_REPO_DESCRIPTION,
         template_owner='MisakaMikotoStudio', template_repo='template',
     )
-    return code_repo_id
 
 
 def _ensure_and_bind_repo(
