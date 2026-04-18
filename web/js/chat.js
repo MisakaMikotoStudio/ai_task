@@ -487,7 +487,6 @@ function updateComposerState() {
     const mergeTaskBtn = document.getElementById('merge-to-task-btn');
     const mergeDefaultBtn = document.getElementById('merge-to-default-btn');
     const previewBtn = document.getElementById('preview-btn');
-    const publishBtn = document.getElementById('publish-btn');
     const showMerge = !!clientConfigCache;
 
     if (runningMessageId) {
@@ -497,7 +496,6 @@ function updateComposerState() {
         if (mergeTaskBtn) mergeTaskBtn.style.display = 'none';
         if (mergeDefaultBtn) mergeDefaultBtn.style.display = 'none';
         if (previewBtn) previewBtn.style.display = 'none';
-        if (publishBtn) publishBtn.style.display = 'none';
         stopBtn.style.display = 'flex';
         hintEl.className = 'composer-hint warn';
         hintText.textContent = '当前有 Chat 消息正在执行，无法输入新消息';
@@ -510,7 +508,6 @@ function updateComposerState() {
         if (mergeTaskBtn) mergeTaskBtn.style.display = (showMerge && !isStandaloneMode) ? 'flex' : 'none';
         if (mergeDefaultBtn) mergeDefaultBtn.style.display = showMerge ? 'flex' : 'none';
         if (previewBtn) previewBtn.style.display = showMerge ? 'flex' : 'none';
-        if (publishBtn) publishBtn.style.display = showMerge ? 'flex' : 'none';
         stopBtn.style.display = 'none';
         hintEl.className = 'composer-hint';
         hintText.textContent = '尽管问，带图也行';
@@ -996,7 +993,7 @@ async function previewApp() {
         if (data.status === 'ready' && data.url) {
             window.open(data.url, '_blank');
         } else if (data.status === 'deploying') {
-            showToast(data.message || '服务正在部署，请稍后几分钟查看。', 'success');
+            showToast(data.message || '服务正在部署，请稍后5分钟查看', 'success');
         } else {
             showToast('预览请求返回异常', 'error');
         }
@@ -1009,40 +1006,6 @@ async function previewApp() {
     }
 }
 
-async function publishApp() {
-    if (!currentChatId) { showToast('请先选择或新建一个 Chat', 'error'); return; }
-
-    const prompt = _buildMergeToDefaultBranchPrompt();
-    if (!prompt) { showToast('未获取到仓库配置信息', 'error'); return; }
-
-    const clientId = _getClientId();
-    if (!clientId) { showToast('未找到关联的应用', 'error'); return; }
-
-    const chat = chatsCache.find(c => c.id === currentChatId);
-    const chatTitle = chat ? chat.title : `Chat ${currentChatId}`;
-
-    const btn = document.getElementById('publish-btn');
-    btn.disabled = true;
-    try {
-        const res = await chatAPI.createMessage(taskId, currentChatId, prompt);
-        const msgId = res.data ? res.data.id : null;
-        await deployAPI.createRecord(
-            clientId, 'prod', chatTitle, 'pending',
-            { task_id: taskId, chat_id: currentChatId, msg_id: msgId },
-            msgId,
-            taskId,
-            currentChatId,
-        );
-        showToast('发布记录已创建', 'success');
-        await loadMessages(currentChatId);
-        await loadChats();
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        btn.disabled = false;
-    }
-}
-
 // ===== Deploy badges =====
 function _renderDeployBadges(msgId) {
     const bucket = deployRecordsByMsg[String(msgId)] || {};
@@ -1050,7 +1013,6 @@ function _renderDeployBadges(msgId) {
     if (!clientId) return '';
     const order = [
         { env: 'test', label: '预览' },
-        { env: 'prod', label: '发布' },
     ];
     return order.map(({ env, label }) => {
         const record = bucket[env];

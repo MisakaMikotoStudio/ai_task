@@ -207,7 +207,7 @@ def preview_chat_message_api(client_id):
     """
     chat 消息预览：
     1. SSH 登录应用测试环境服务器，检查 docker 网络是否存在
-       - 存在：返回 ready + 预览 URL `http://{host_key}.{test_domain}`
+       - 存在：返回 ready + 预览 URL `https://{host_key}.{test_domain}`
        - 不存在：查找/创建 test 环境发布记录，触发后台部署，返回 deploying
 
     host_key 格式：task{task_id}chat{chat_id}msg{msg_id}
@@ -246,7 +246,7 @@ def preview_chat_message_api(client_id):
         return jsonify({'code': 400, 'message': '未配置应用测试环境域名'}), 400
 
     host_key = f'task{task_id}chat{chat_id}msg{msg_id}'
-    preview_url = f'http://{host_key}.{domain_values[0]}'
+    preview_url = f'https://{host_key}.{domain_values[0]}'
 
     try:
         network_ready = check_test_docker_network_exists(
@@ -263,6 +263,9 @@ def preview_chat_message_api(client_id):
         })
 
     # docker 网络不存在：触发测试环境部署流程
+    # - 无记录：新建一条 pending 记录
+    # - 有记录且状态 ∈ {publishing, pending}：保持不动，提示"正在发布中"
+    # - 有记录且状态 ∉ {publishing, pending}：复用原记录，重置为 pending
     existing = get_latest_deploy_record_by_msg_env(
         user_id=user_id, client_id=client_id, msg_id=msg_id, env='test',
     )
@@ -274,13 +277,13 @@ def preview_chat_message_api(client_id):
             msg_id=msg_id, task_id=task_id, chat_id=chat_id,
         )
         action = 'created'
+    elif existing.status in (DeployRecord.STATUS_PUBLISHING, DeployRecord.STATUS_PENDING):
+        record_id = existing.id
+        action = 'publishing'
     else:
         record_id = existing.id
-        if existing.status == DeployRecord.STATUS_PUBLISHING:
-            action = 'publishing'
-        else:
-            ok = reset_deploy_record_to_pending(user_id=user_id, record_id=record_id)
-            action = 'reset' if ok else 'publishing'
+        ok = reset_deploy_record_to_pending(user_id=user_id, record_id=record_id)
+        action = 'reset' if ok else 'publishing'
 
     return jsonify({
         'code': 200,
@@ -290,7 +293,7 @@ def preview_chat_message_api(client_id):
             'host_key': host_key,
             'record_id': record_id,
             'action': action,
-            'message': '服务正在部署，请稍后几分钟查看。',
+            'message': '服务正在部署，请稍后5分钟查看',
         },
     })
 
