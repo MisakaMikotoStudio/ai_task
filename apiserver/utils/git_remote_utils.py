@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 # clone/fetch 单次命令 SSH 层 channel 超时（秒）
-# 作为兜底上限，实际生效的更短时限是下面的 GIT_ATTEMPT_HARD_TIMEOUT_SEC。
-GIT_CLONE_TIMEOUT = 120
+# 作为兜底上限，必须大于 GIT_ATTEMPT_HARD_TIMEOUT_SEC，使内层 `timeout` 先生效、
+# 外层 SSH channel 只是最后防线。
+GIT_CLONE_TIMEOUT = 180
 # 网络类失败重试次数
 GIT_CLONE_MAX_RETRIES = 3
 # 重试退避基数：第 N 次失败 sleep BASE * 2^(N-1) 秒
@@ -26,7 +27,8 @@ GIT_RETRY_BACKOFF_BASE_SEC = 1
 # 目的是避免跨境 TCP connect 阶段一直卡到内核默认 ~130s 才失败。
 # 低于该时限时 git 自身的 LOW_SPEED 或 connectTimeout 会先触发失败；
 # 超过该时限则由 `timeout` 以 SIGTERM 强制终止并以 exit=124 返回。
-GIT_ATTEMPT_HARD_TIMEOUT_SEC = 45
+# 跨境链路 TLS 协商 + packfile 协商在抖动时经常需要 60~90s，放到 120s 给足余量。
+GIT_ATTEMPT_HARD_TIMEOUT_SEC = 120
 
 # libcurl 连接阶段超时（秒），通过 `git -c http.connectTimeout=...` 注入。
 # git >= 2.30 映射到 CURLOPT_CONNECTTIMEOUT，覆盖 LOW_SPEED 不生效的 TCP 握手阶段。
@@ -35,12 +37,33 @@ GIT_HTTP_CONNECT_TIMEOUT_SEC = 10
 # 每条 git 命令前置 per-command 环境变量实现快速失败，避免跨境链路 stall
 # 到 TCP 超时（~130s）才失败；不写入 ~/.gitconfig，不影响服务器其他 git 使用。
 # - GIT_HTTP_LOW_SPEED_LIMIT=1000: 低于 1KB/s
-# - GIT_HTTP_LOW_SPEED_TIME=20:   持续 20 秒 → 判定失败
-GIT_HTTP_FAIL_FAST_ENV = 'GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20'
+# - GIT_HTTP_LOW_SPEED_TIME=60:   持续 60 秒 → 判定失败
+# 阈值按"跨境链路抖动可容忍"调优：20s 过于激进，业务高峰期经常在 TLS 协商阶段
+# 速率不足 1KB/s 但仍可恢复，60s 能覆盖绝大多数瞬态慢速窗口而不会让真正死连接拖到
+# GIT_ATTEMPT_HARD_TIMEOUT_SEC 才被杀。
+GIT_HTTP_FAIL_FAST_ENV = 'GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=60'
+
+# fetch/clone 失败时，stderr 中出现下列片段视为"本地仓库损坏"，此时才允许删库重克隆。
+# 单纯的慢速/超时（Operation too slow、exit=124）不触发 re-clone，避免丢弃本地缓存。
+_REPO_CORRUPT_SIGNATURES = (
+    'not a git repository',
+    'bad object',
+    'object file is empty',
+    'loose object',
+    'unable to read tree',
+    'fsck error',
+    'broken link',
+)
+
+
+def _is_repo_corrupt_error(message: str) -> bool:
+    """根据 stderr 判断是否为本地仓库损坏（而非网络慢/超时）。"""
+    low = (message or '').lower()
+    return any(sig in low for sig in _REPO_CORRUPT_SIGNATURES)
 
 # 包裹在每条 git 子命令前的"硬截断 + 连接超时"前缀
 # 使用时放在 `git ...` 前即可，注意 shell 顺序：
-#   timeout 45 git -c http.connectTimeout=10 <subcmd>
+#   timeout {GIT_ATTEMPT_HARD_TIMEOUT_SEC} git -c http.connectTimeout={GIT_HTTP_CONNECT_TIMEOUT_SEC} <subcmd>
 _GIT_ATTEMPT_PREFIX = (
     f'timeout {GIT_ATTEMPT_HARD_TIMEOUT_SEC} '
     f'git -c http.connectTimeout={GIT_HTTP_CONNECT_TIMEOUT_SEC}'
@@ -122,30 +145,51 @@ def clone_repo_with_retry(
     )
 
 
+def has_commit_locally(ssh, target_path: str, commit_id: str) -> bool:
+    """探测本地仓库是否已经包含指定 commit，命中时可完全跳过远端 fetch。
+
+    用 `git cat-file -e <commit>^{commit}` 而不是 `rev-parse --verify`：
+    前者在对象不存在时静默返回非 0，不会产生迷惑性 stderr；且要求对象确实是 commit
+    类型，避免同前缀 blob/tree 误判。
+    """
+    cid = (commit_id or '').strip()
+    if not cid:
+        return False
+    probe_cmd = (
+        f'git -C {target_path} cat-file -e {cid}^{{commit}} '
+        f'2>/dev/null && echo "hit" || echo "miss"'
+    )
+    out = ssh.execute_ignore_error(command=probe_cmd) or ''
+    return 'hit' in out
+
+
 def fetch_repo_with_retry(
     ssh,
     target_path: str,
     auth_url: str,
     repo_name: str,
-    branch: str,
+    ref: str,
     trace_id: str,
+    ref_kind: str = 'branch',
 ) -> None:
-    """更新已有仓库（浅 fetch 指定分支 + 重试 + 指数退避）。
+    """更新已有仓库（浅 fetch 指定 ref + 重试 + 指数退避）。
 
-    相比无参数的 `git fetch origin`，只拉取目标分支的最新 1 个 commit，
-    数据量最小化，显著降低跨境链路 TLS 被中断的概率。
+    ref 既可以是分支名（`ref_kind='branch'`），也可以是 commit SHA（`ref_kind='commit'`）。
+    `git fetch --depth 1 origin <commit_id>` 要求服务端开启 `uploadpack.allowReachableSHA1InWant`
+    （GitHub 默认开启），命中时只拉取单个 commit + 其 tree/blob，数据量最小化，
+    显著降低跨境链路被中断的概率。
     """
     fetch_cmd = (
         f'cd {target_path} && git remote set-url origin {auth_url} && '
         f'{GIT_HTTP_FAIL_FAST_ENV} {_GIT_ATTEMPT_PREFIX} '
-        f'fetch --depth 1 --no-tags origin {branch}'
+        f'fetch --depth 1 --no-tags origin {ref}'
     )
 
     last_err = None
     for attempt in range(1, GIT_CLONE_MAX_RETRIES + 1):
         logger.info(
-            "[trace_id=%s] Fetching repo (attempt %d/%d): %s, branch=%s",
-            trace_id, attempt, GIT_CLONE_MAX_RETRIES, repo_name, branch,
+            "[trace_id=%s] Fetching repo (attempt %d/%d): %s, %s=%s",
+            trace_id, attempt, GIT_CLONE_MAX_RETRIES, repo_name, ref_kind, ref,
         )
         try:
             ssh.execute(command=fetch_cmd, timeout=GIT_CLONE_TIMEOUT)
@@ -182,28 +226,61 @@ def fetch_or_reclone(
     branch: str,
     auth_url: str,
     trace_id: str,
+    commit_id: str = '',
 ) -> None:
-    """优先增量 fetch；fetch 持续失败（非认证错误）时删除本地目录重新浅 clone。
+    """保证本地仓库包含目标 ref（优先 commit_id，兜底分支）可用于后续 checkout。
 
-    认证错误保留原语义，抛给上层统一刷新 token 后重建。
+    决策顺序：
+    1. 若传入 `commit_id` 且本地已含该 commit → 输出 cache_hit metric，零远端请求；
+    2. 否则优先按 `commit_id`（若提供）fetch 单个 commit，未提供则 fetch 分支；
+    3. fetch 失败：
+       - 认证错误 → 抛给上层刷新 token；
+       - 本地仓库损坏（_is_repo_corrupt_error）→ 删库重 clone；
+       - 其他（纯网络慢/超时）→ 保留本地缓存，直接抛错让本次部署失败后下轮重试。
     """
+    if commit_id and has_commit_locally(ssh=ssh, target_path=target_path, commit_id=commit_id):
+        logger.info(
+            "[trace_id=%s] metric=git_fetch_local_cache_hit repo=%s commit=%s",
+            trace_id, repo_name, commit_id[:8],
+        )
+        return
+
+    if commit_id:
+        fetch_ref = commit_id
+        ref_kind = 'commit'
+    else:
+        fetch_ref = branch
+        ref_kind = 'branch'
+
     try:
         fetch_repo_with_retry(
             ssh=ssh, target_path=target_path, auth_url=auth_url,
-            repo_name=repo_name, branch=branch, trace_id=trace_id,
+            repo_name=repo_name, ref=fetch_ref, trace_id=trace_id, ref_kind=ref_kind,
         )
     except GitRemoteError as fetch_err:
         if is_git_auth_error(fetch_err.message):
             raise
+
+        if not _is_repo_corrupt_error(fetch_err.message):
+            # 纯网络层失败：保留本地缓存，不做破坏性的删库重克隆（re-clone 数据量更大、
+            # 跨境链路下成功率反而更低）。抛给上层让本次部署失败，下一轮调度再试。
+            logger.warning(
+                "[trace_id=%s] metric=git_fetch_network_failure_no_reclone "
+                "repo=%s %s=%s retries=%d",
+                trace_id, repo_name, ref_kind, fetch_ref, GIT_CLONE_MAX_RETRIES,
+            )
+            raise
+
         logger.warning(
-            "[trace_id=%s] Fetch persistently failed for %s, fallback to re-clone, detail=%s",
+            "[trace_id=%s] Fetch persistently failed for %s (repo corrupt signal), "
+            "fallback to re-clone, detail=%s",
             trace_id, repo_name, fetch_err.message,
         )
         # 结构化指标日志：便于 ELK/Loki 等按 metric 关键字聚合统计跨境网络劣化频率。
         # 字段以 key=value 形式扁平化，避免污染主调用链 INFO 日志的可读性。
         logger.warning(
-            "[trace_id=%s] metric=git_fetch_fallback_reclone repo=%s branch=%s retries=%d",
-            trace_id, repo_name, branch, GIT_CLONE_MAX_RETRIES,
+            "[trace_id=%s] metric=git_fetch_fallback_reclone repo=%s %s=%s retries=%d",
+            trace_id, repo_name, ref_kind, fetch_ref, GIT_CLONE_MAX_RETRIES,
         )
         ssh.execute_ignore_error(command=f'rm -rf {target_path}')
         clone_repo_with_retry(

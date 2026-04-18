@@ -6066,6 +6066,40 @@ textarea:focus {
     opacity: 1;
 }
 
+.password-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-input-wrap input {
+    padding-right: 36px !important;
+    flex: 1;
+}
+
+.password-toggle-btn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    line-height: 1;
+    opacity: 0.6;
+}
+
+.password-toggle-btn:hover {
+    opacity: 1;
+}
+
+.password-toggle-btn:disabled {
+    cursor: pointer;
+    opacity: 0.6;
+}
+
 .resource-env-checkboxes {
     display: flex;
     gap: 16px;
