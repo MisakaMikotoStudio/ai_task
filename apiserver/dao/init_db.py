@@ -175,6 +175,14 @@ def _run_migrations(engine):
     # 唯一索引：保证 (task_id, chat_id, msg_id, env) 唯一，支撑 after_execute 自动发布的 upsert
     _try_create_deploy_records_task_chat_msg_env_unique(engine)
 
+    # ChatMessage 表：新增 client_id 字段（支持「发布生产」等独立消息归属应用）
+    _add_column_if_missing(
+        engine,
+        table='ai_task_chat_message',
+        column='client_id',
+        column_ddl="`client_id` INT NOT NULL DEFAULT 0 COMMENT '关联客户端ID'",
+    )
+
 
 def init_database(config: DatabaseConfig):
     """

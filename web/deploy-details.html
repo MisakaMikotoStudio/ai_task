@@ -351,6 +351,152 @@
             border-color: var(--accent-primary);
         }
 
+        /* 顶部「发布生产」按钮 */
+        .btn-publish-prod {
+            padding: 6px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+        }
+
+        .btn-publish-prod:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+
+        .btn-publish-prod:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 行内操作按钮（预览/发布生产等） */
+        .deploy-row-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .btn-row-action {
+            padding: 4px 10px;
+            font-size: 12px;
+            line-height: 1.4;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .btn-row-action:hover:not(:disabled) {
+            color: var(--text-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-row-action.btn-row-preview {
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-row-action.btn-row-publish-prod {
+            color: #fff;
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+            border-color: transparent;
+        }
+
+        .btn-row-action.btn-row-publish-prod:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+
+        /* 发布生产描述输入弹窗 */
+        .publish-modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius-lg);
+            width: 92%;
+            max-width: 560px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .publish-modal-body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .publish-modal-body label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .publish-modal-body textarea {
+            width: 100%;
+            min-height: 140px;
+            resize: vertical;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .publish-modal-body textarea:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+        }
+
+        .publish-modal-counter {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-align: right;
+        }
+
+        .publish-modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 12px 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .publish-modal-footer button {
+            padding: 6px 16px;
+            font-size: 13px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: var(--transition);
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .publish-modal-footer button.primary {
+            color: #fff;
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+            border-color: transparent;
+        }
+
+        .publish-modal-footer button:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+
+        .publish-modal-footer button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         @media (max-width: 1280px) {
             .deploy-page { padding: 24px 20px 40px; }
         }
@@ -378,11 +524,29 @@
             </div>
         </div>
     </div>
+    <div class="detail-modal-overlay" id="publish-modal-overlay" onclick="closePublishModal(event)">
+        <div class="publish-modal" onclick="event.stopPropagation()">
+            <div class="detail-modal-header">
+                <span class="detail-modal-title">发布生产</span>
+                <button class="detail-modal-close" onclick="closePublishModal()">&times;</button>
+            </div>
+            <div class="publish-modal-body">
+                <label for="publish-desc-input">发布描述（必填，最多 512 字）</label>
+                <textarea id="publish-desc-input" maxlength="512" placeholder="请输入本次生产发布的描述"></textarea>
+                <div class="publish-modal-counter"><span id="publish-desc-count">0</span> / 512</div>
+            </div>
+            <div class="publish-modal-footer">
+                <button type="button" onclick="closePublishModal()">取消</button>
+                <button type="button" class="primary" id="publish-desc-submit" onclick="submitPublishProd()">发布</button>
+            </div>
+        </div>
+    </div>
     <div class="deploy-page">
         <div class="deploy-page-header">
             <h1 class="deploy-page-title">发布详情</h1>
             <div class="deploy-filter-bar">
                 <span id="msg-id-badge" style="display:none;padding:4px 10px;border-radius:10px;background:var(--bg-tertiary);border:1px solid var(--border-color);font-size:12px;color:var(--text-secondary);"></span>
+                <button type="button" id="btn-publish-prod-top" class="btn-publish-prod" style="display:none" onclick="openPublishModal()">发布生产</button>
                 <div class="deploy-filter-item">
                     <label for="client-filter">应用</label>
                     <select id="client-filter">
@@ -457,7 +621,7 @@
     </div>
 
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=18"></script>
+    <script src="js/api.js?v=19"></script>
     <script>
     (function() {
         const DEPLOY_STATUS_CLASS = {
@@ -518,8 +682,16 @@
 
         const statusFilter = document.getElementById('status-filter');
 
+        const publishProdBtn = document.getElementById('btn-publish-prod-top');
+
+        function refreshPublishProdBtn() {
+            if (!publishProdBtn) return;
+            publishProdBtn.style.display = clientFilter.value ? 'inline-block' : 'none';
+        }
+
         clientFilter.addEventListener('change', function() {
             currentPage = 1;
+            refreshPublishProdBtn();
             loadRecords();
         });
         statusFilter.addEventListener('change', function() {
@@ -538,6 +710,8 @@
                 }
             } catch (e) {
                 // 下拉加载失败不阻塞列表加载
+            } finally {
+                refreshPublishProdBtn();
             }
         }
 
@@ -605,14 +779,29 @@
             const statusClass = DEPLOY_STATUS_CLASS[record.status] || '';
             const canCancel = record.status === 'pending' || record.status === 'publishing';
             const canRetry = record.status === 'failed' || record.status === 'cancel';
-            let actionHtml = '<span style="color:var(--text-muted)">-</span>';
-            if (canCancel) actionHtml = `<button class="btn-action btn-cancel" onclick="cancelRecord(${record.id})">取消</button>`;
-            if (canRetry) actionHtml = `<button class="btn-action btn-retry" onclick="retryRecord(${record.id})">重试</button>`;
-            const detailBtnHtml = `<button class="btn-detail" onclick="showDetail(${index})">发布详情</button>`;
-            const clientName = record.client_name ? escapeHtml(record.client_name) : '-';
             const tid = record.task_id != null ? record.task_id : 0;
             const cid = record.chat_id != null ? record.chat_id : 0;
             const mid = record.msg_id != null ? record.msg_id : 0;
+            // 专属场景：test + success + task_id=0 + chat_id=0，展示「预览」「发布生产」操作
+            const isStandaloneTestSuccess =
+                record.env === 'test' && record.status === 'success' && tid === 0 && cid === 0;
+
+            const actions = [];
+            if (canCancel) {
+                actions.push(`<button class="btn-row-action btn-cancel" onclick="cancelRecord(${record.id})">取消</button>`);
+            }
+            if (canRetry) {
+                actions.push(`<button class="btn-row-action btn-retry" onclick="retryRecord(${record.id})">重试</button>`);
+            }
+            if (isStandaloneTestSuccess) {
+                actions.push(`<button class="btn-row-action btn-row-preview" onclick="previewRecord(${record.id})">预览</button>`);
+                actions.push(`<button class="btn-row-action btn-row-publish-prod" onclick="publishProdFromRecord(${record.id})">发布生产</button>`);
+            }
+            const actionHtml = actions.length
+                ? `<div class="deploy-row-actions">${actions.join('')}</div>`
+                : '<span style="color:var(--text-muted)">-</span>';
+            const detailBtnHtml = `<button class="btn-detail" onclick="showDetail(${index})">发布详情</button>`;
+            const clientName = record.client_name ? escapeHtml(record.client_name) : '-';
             return `<tr>
                 <td class="deploy-id-cell">#${record.id}</td>
                 <td class="deploy-num-cell">${tid}</td>
@@ -692,6 +881,89 @@
         window.closeDetailModal = function(event) {
             if (event && event.target !== event.currentTarget) return;
             document.getElementById('detail-modal-overlay').classList.remove('active');
+        };
+
+        // ===== 发布生产 弹窗 =====
+        const publishDescInput = document.getElementById('publish-desc-input');
+        const publishDescCount = document.getElementById('publish-desc-count');
+        const publishDescSubmit = document.getElementById('publish-desc-submit');
+        publishDescInput.addEventListener('input', function() {
+            publishDescCount.textContent = publishDescInput.value.length;
+        });
+
+        window.openPublishModal = function() {
+            const clientIdVal = clientFilter.value;
+            if (!clientIdVal) {
+                showToast('请先在顶部选择应用', 'error');
+                return;
+            }
+            publishDescInput.value = '';
+            publishDescCount.textContent = '0';
+            publishDescSubmit.disabled = false;
+            document.getElementById('publish-modal-overlay').classList.add('active');
+            setTimeout(() => publishDescInput.focus(), 60);
+        };
+
+        window.closePublishModal = function(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('publish-modal-overlay').classList.remove('active');
+        };
+
+        window.submitPublishProd = async function() {
+            const clientIdVal = clientFilter.value;
+            if (!clientIdVal) {
+                showToast('请先选择应用', 'error');
+                return;
+            }
+            const description = publishDescInput.value.trim();
+            if (!description) {
+                showToast('发布描述不能为空', 'error');
+                publishDescInput.focus();
+                return;
+            }
+            if (description.length > 512) {
+                showToast('发布描述不能超过 512 个字符', 'error');
+                return;
+            }
+            publishDescSubmit.disabled = true;
+            try {
+                await deployAPI.publishProd(clientIdVal, description);
+                showToast('发布生产已提交', 'success');
+                document.getElementById('publish-modal-overlay').classList.remove('active');
+                currentPage = 1;
+                loadRecords();
+            } catch (e) {
+                showToast(e.message || '发布生产失败', 'error');
+                publishDescSubmit.disabled = false;
+            }
+        };
+
+        window.previewRecord = async function(recordId) {
+            try {
+                const res = await deployAPI.previewRecord(recordId);
+                const data = (res && res.data) || {};
+                if (data.status === 'ready' && data.url) {
+                    showToast('正在打开预览', 'success');
+                    window.open(data.url, '_blank');
+                } else {
+                    showToast(data.message || '服务正在重新发布，请稍后查看', 'info');
+                    loadRecords();
+                }
+            } catch (e) {
+                showToast(e.message || '预览失败', 'error');
+            }
+        };
+
+        window.publishProdFromRecord = async function(recordId) {
+            if (!confirm('确定要以当前发布记录的信息新建一条生产环境的发布记录吗？')) return;
+            try {
+                await deployAPI.publishProdFromRecord(recordId);
+                showToast('生产发布记录已创建', 'success');
+                currentPage = 1;
+                loadRecords();
+            } catch (e) {
+                showToast(e.message || '发布生产失败', 'error');
+            }
         };
 
         // Check login

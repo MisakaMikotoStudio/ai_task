@@ -87,14 +87,19 @@ def soft_delete_chat(user_id: int, chat_id: int, task_id: int) -> bool:
         return affected > 0
 
 
-def create_chat_message(user_id: int, task_id: int, chat_id: int, input_text: str,
-                        extra: Optional[dict] = None) -> ChatMessage:
-    """创建Chat消息"""
+def create_chat_message(user_id: int, task_id: int, chat_id: int, client_id: int,
+                        input_text: str, extra: Optional[dict] = None) -> ChatMessage:
+    """创建Chat消息
+
+    Args:
+        client_id: 关联的应用ID（task/chat 均需能解析到，独立 chat 场景下必填）
+    """
     with get_db_session() as session:
         msg = ChatMessage(
             user_id=user_id,
             task_id=task_id,
             chat_id=chat_id,
+            client_id=client_id or 0,
             status=ChatMessage.STATUS_PENDING,
             input=input_text,
             output=None,
@@ -104,6 +109,38 @@ def create_chat_message(user_id: int, task_id: int, chat_id: int, input_text: st
         session.add(msg)
         session.flush()
         return msg
+
+
+def create_standalone_chat_message(
+    user_id: int,
+    client_id: int,
+    input_text: str,
+    output_text: Optional[str] = None,
+    extra: Optional[dict] = None,
+    status: str = ChatMessage.STATUS_COMPLETED,
+) -> int:
+    """
+    创建一条独立 ChatMessage（task_id=0 && chat_id=0），用于「发布生产」等
+    不依附具体 chat 的发布跟踪场景。发布描述等直接写入 input。
+
+    Returns:
+        新建消息的 ID
+    """
+    with get_db_session() as session:
+        msg = ChatMessage(
+            user_id=user_id,
+            task_id=0,
+            chat_id=0,
+            client_id=client_id or 0,
+            status=status,
+            input=input_text or '',
+            output=output_text if output_text is not None else '',
+            extra=extra or {},
+            deleted_at=None,
+        )
+        session.add(msg)
+        session.flush()
+        return msg.id
 
 
 def get_messages_by_chat(user_id: int, chat_id: int, task_id: int) -> List[Dict]:

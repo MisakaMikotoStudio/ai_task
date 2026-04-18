@@ -597,7 +597,17 @@ const deployAPI = {
     },
     async retryRecord(recordId) {
         return request(`/app/deploy/records/${recordId}/retry`, { method: 'PATCH' });
-    }
+    },
+    async publishProd(clientId, description) {
+        const body = JSON.stringify({ description: description || '' });
+        return request(`/app/deploy/client/${clientId}/publish-prod`, { method: 'POST', body });
+    },
+    async previewRecord(recordId) {
+        return request(`/app/deploy/records/${recordId}/preview`, { method: 'POST', body: '{}' });
+    },
+    async publishProdFromRecord(recordId) {
+        return request(`/app/deploy/records/${recordId}/publish-prod`, { method: 'POST', body: '{}' });
+    },
 };
 
 // 商业化 API（商品列表、购买）
