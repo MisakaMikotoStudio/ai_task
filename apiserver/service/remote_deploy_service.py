@@ -895,6 +895,12 @@ _INNER_PROXY_COMMON = (
     '        proxy_set_header X-Forwarded-Proto $scheme;\n'
     '        proxy_read_timeout 3600s;\n'
     '        proxy_send_timeout 3600s;\n'
+    # 应用容器常监听非 80/443 端口（模板约定 :8080），若其返回绝对 Location
+    # （例如 `return 302 /xxx;` 被 nginx 按 $scheme://$host:$server_port 拼绝对 URL），
+    # 会把容器端口泄漏到 Location 头；再叠加宿主 HSTS，浏览器会升级到
+    # https://host:8080/... 而访问不通。这里把上游返回的任意 http(s) 绝对 Location
+    # 统一改写为相对路径，由浏览器按当前 URL 的 scheme/host/port 自行补齐，彻底兜底。
+    '        proxy_redirect ~^https?://[^/]+(/.*)$ $1;\n'
 )
 
 
