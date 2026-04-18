@@ -20,7 +20,7 @@ from dao.deploy_dao import (
     get_deploy_record_by_id,
 )
 from dao.client_dao import (
-    get_client_by_id, get_client_domains,
+    get_client_by_id, get_client_domains, get_client_servers,
     get_client_repos, get_client_deploys,
 )
 from dao.chat_dao import create_standalone_chat_message, batch_get_msg_by_msgids
@@ -29,6 +29,37 @@ from dao.models import DeployRecord, ChatMessage
 logger = logging.getLogger(__name__)
 
 deploy_bp = Blueprint('app_deploy', __name__)
+
+
+_ENV_LABELS = {'test': '测试', 'prod': '生产'}
+
+
+def _check_client_infra_configured(client_id: int, user_id: int, envs):
+    """
+    校验指定环境下的云服务器与域名是否已配置。
+
+    Args:
+        envs: 需要检查的环境列表，元素 ∈ {'test', 'prod'}
+
+    Returns:
+        (ok, message): ok=True 表示配置完整；否则 message 为用户可读的提示。
+    """
+    missing = []
+    for env in envs:
+        label = _ENV_LABELS.get(env, env)
+        servers = get_client_servers(client_id=client_id, user_id=user_id, env=env)
+        has_server = any((s.ip or '').strip() for s in servers)
+        if not has_server:
+            missing.append(f'{label}环境云服务器')
+
+        domains = get_client_domains(client_id=client_id, user_id=user_id, env=env)
+        has_domain = any((d.domain or '').strip() for d in domains)
+        if not has_domain:
+            missing.append(f'{label}环境域名')
+
+    if missing:
+        return False, '未配置' + '、'.join(missing) + '，请在应用基础设施中完成配置后再试'
+    return True, ''
 
 
 @deploy_bp.route('/client/<int:client_id>/records', methods=['GET'])
@@ -245,10 +276,14 @@ def preview_chat_message_api(client_id):
     if len(description) > 255:
         description = description[:255]
 
+    ok, err_msg = _check_client_infra_configured(
+        client_id=client_id, user_id=user_id, envs=['test'],
+    )
+    if not ok:
+        return jsonify({'code': 400, 'message': err_msg}), 400
+
     domains = [d.domain for d in get_client_domains(client_id=client_id, user_id=user_id, env='test')]
     domain_values = [d.strip() for d in domains if d and d.strip()]
-    if not domain_values:
-        return jsonify({'code': 400, 'message': '未配置应用测试环境域名'}), 400
 
     host_key = f'task{task_id}chat{chat_id}msg{msg_id}'
     preview_url = f'https://{host_key}.{domain_values[0]}'
@@ -394,6 +429,12 @@ def publish_prod_api(client_id):
     if len(description) > 512:
         return jsonify({'code': 400, 'message': '发布描述长度不能超过 512 个字符'}), 400
 
+    ok, err_msg = _check_client_infra_configured(
+        client_id=client_id, user_id=user_id, envs=['test', 'prod'],
+    )
+    if not ok:
+        return jsonify({'code': 400, 'message': err_msg}), 400
+
     try:
         merge_request = _build_merge_request_for_client(client_id=client_id, user_id=user_id)
     except ValueError as e:
@@ -532,6 +573,12 @@ def publish_prod_from_record_api(record_id):
         return jsonify({'code': 400, 'message': '仅发布成功的记录可发布生产'}), 400
     if (record.task_id or 0) != 0 or (record.chat_id or 0) != 0:
         return jsonify({'code': 400, 'message': '仅 task_id=0 且 chat_id=0 的记录可发布生产'}), 400
+
+    ok, err_msg = _check_client_infra_configured(
+        client_id=record.client_id, user_id=user_id, envs=['prod'],
+    )
+    if not ok:
+        return jsonify({'code': 400, 'message': err_msg}), 400
 
     src_msg_id = record.msg_id or 0
     if src_msg_id <= 0:
