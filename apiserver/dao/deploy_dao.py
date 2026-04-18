@@ -112,6 +112,18 @@ def get_latest_deploy_records_by_msg_ids(user_id: int, client_id: int, msg_ids: 
     return result
 
 
+def get_deploy_record_by_id(user_id: int, record_id: int) -> "DeployRecord | None":
+    """按 ID 获取发布记录（带 user_id 校验、未软删除）。"""
+    if not record_id:
+        return None
+    with get_db_session() as session:
+        return session.query(DeployRecord).filter(
+            DeployRecord.id == record_id,
+            DeployRecord.user_id == user_id,
+            DeployRecord.deleted_at.is_(None),
+        ).first()
+
+
 def get_latest_deploy_record_by_msg_env(user_id: int, client_id: int, msg_id: int, env: str) -> "DeployRecord | None":
     """获取指定 (user, client, msg_id, env) 下最新一条未删除的发布记录。"""
     if not msg_id:
