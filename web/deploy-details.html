@@ -715,7 +715,7 @@
             }
         }
 
-        async function loadRecords() {
+        async function loadRecords(overrideClientId) {
             const loadingEl = document.getElementById('deploy-loading');
             const contentEl = document.getElementById('deploy-content');
             const tbody = document.getElementById('deploy-tbody');
@@ -726,9 +726,12 @@
             contentEl.style.display = 'none';
 
             try {
-                await initAPIConfig();
                 const status = statusFilter.value;
-                const clientIdVal = clientFilter.value;
+                // 首屏可直接用 URL 上的 client_id 触发记录查询，
+                // 无需等到应用下拉加载完成把值回填到 clientFilter 上。
+                const clientIdVal = overrideClientId != null
+                    ? String(overrideClientId)
+                    : clientFilter.value;
                 const env = envFilter.value;
                 let res;
                 if (clientIdVal) {
@@ -980,10 +983,14 @@
             try {
                 await initAPIConfig();
             } catch (e) {
-                // initAPIConfig 失败时 loadRecords 内部会再捕获
+                // initAPIConfig 失败时两条后续请求会按默认 API_BASE 兜底
             }
-            await loadClientOptions();
-            loadRecords();
+            // 应用下拉与首屏记录并行发起：
+            // - 有 URL client_id 时，记录查询无需等下拉回来就能开始；
+            // - 无 client_id 时仍走"全部应用"的 listAllRecords。
+            const clientsPromise = loadClientOptions();
+            const recordsPromise = loadRecords(urlClientId || null);
+            await Promise.allSettled([clientsPromise, recordsPromise]);
         })();
     })();
     </script>

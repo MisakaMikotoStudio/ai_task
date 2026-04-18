@@ -780,6 +780,12 @@ class DeployRecord(Base):
         Index('idx_deploy_records_user_client', 'user_id', 'client_id'),
         Index('idx_deploy_records_client_env', 'client_id', 'env'),
         Index('idx_deploy_records_client_msg', 'client_id', 'msg_id'),
+        # 列表页默认按 (user_id, client_id) 过滤 + ORDER BY created_at DESC 分页，
+        # 加上 created_at 作为最后一列，让 MySQL 直接走索引顺序扫，避免 filesort。
+        Index(
+            'idx_deploy_records_user_client_created',
+            'user_id', 'client_id', 'created_at',
+        ),
         # 同一 (task_id, chat_id, msg_id, env) 仅允许一条记录：
         # - after_execute 自动测试发布按该键做 upsert，避免重复 pending
         # - 保留 env 维度以便同一 msg 的 test/prod 记录并存（不同环境一条一条）
