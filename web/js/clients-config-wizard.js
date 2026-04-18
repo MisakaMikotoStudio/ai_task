@@ -324,6 +324,7 @@ function wizardRenderEnvVarsStep(isView) {
     if (addBtn) {
         addBtn.style.display = isView ? 'none' : '';
         addBtn.onclick = () => {
+            wizardSyncEnvVarsFromDOM();
             cfgEnvVars.push({ key: '', value: '' });
             wizardRenderEnvVarsList();
         };
@@ -372,6 +373,7 @@ function wizardRenderEnvVarsList() {
 }
 
 function cfgDeleteEnvVar(idx) {
+    wizardSyncEnvVarsFromDOM();
     cfgEnvVars.splice(idx, 1);
     wizardRenderEnvVarsList();
 }
