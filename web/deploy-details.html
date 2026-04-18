@@ -799,7 +799,7 @@
                 actions.push(`<button class="btn-row-action btn-row-view" onclick="viewRecord(${record.id})">查看</button>`);
             }
             if (canPublishProd) {
-                actions.push(`<button class="btn-row-action btn-row-publish-prod" onclick="publishProdFromRecord(${record.id})">发布生产</button>`);
+                actions.push(`<button class="btn-row-action btn-row-publish-prod" onclick="publishProdFromRecord(${record.id})">上线</button>`);
             }
             const actionHtml = actions.length
                 ? `<div class="deploy-row-actions">${actions.join('')}</div>`
@@ -959,14 +959,14 @@
         };
 
         window.publishProdFromRecord = async function(recordId) {
-            if (!confirm('确定要以当前发布记录的信息新建一条生产环境的发布记录吗？')) return;
+            if (!confirm('确定要以当前发布记录的信息上线到生产环境吗？')) return;
             try {
                 await deployAPI.publishProdFromRecord(recordId);
-                showToast('生产发布记录已创建', 'success');
+                showToast('上线记录已创建', 'success');
                 currentPage = 1;
                 loadRecords();
             } catch (e) {
-                showToast(e.message || '发布生产失败', 'error');
+                showToast(e.message || '上线失败', 'error');
             }
         };
 
