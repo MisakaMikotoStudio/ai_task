@@ -115,7 +115,6 @@ function renderClientRow(client) {
     if (client.editable) {
         actionsHtml = `<div class="client-actions">
             <button class="btn-action btn-edit" onclick="openClientConfig(${client.id}, 'edit')">编辑</button>
-            <button class="btn-action btn-copy" onclick="copyClient(${client.id})">复制</button>
             <button class="btn-action btn-deploy" onclick="openDeployDetails(${client.id})">发布详情</button>
             <button class="btn-action btn-delete" onclick="deleteClient(${client.id})">删除</button>
         </div>`;
@@ -166,16 +165,6 @@ async function deleteClient(id) {
     try {
         await activeClientAPI.delete(id);
         showToast('应用删除成功', 'success');
-        loadClients();
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
-}
-
-async function copyClient(id) {
-    try {
-        const result = await activeClientAPI.copy(id);
-        showToast(`应用复制成功，新名称: ${result.name}`, 'success');
         loadClients();
     } catch (error) {
         showToast(error.message, 'error');

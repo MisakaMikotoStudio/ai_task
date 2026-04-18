@@ -137,11 +137,6 @@ const clientAPI = {
         return request(`/app/client/${id}/config`);
     },
 
-    // 复制客户端
-    async copy(id) {
-        return request(`/app/client/${id}/copy`, { method: 'POST' });
-    },
-
     // 从模板生成默认应用
     async createFromTemplate(appTypes, appName) {
         const payload = { app_types: appTypes };
