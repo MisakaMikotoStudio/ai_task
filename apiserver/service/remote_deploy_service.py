@@ -206,24 +206,26 @@ def process_pending_deploys_test(client_id: int):
         )
 
 
-def check_test_docker_network_exists(client_id: int, user_id: int, host_key: str) -> bool:
-    """检查任一测试环境服务器上是否存在指定 host_key 对应的 docker 网络。
+def check_docker_network_exists(client_id: int, user_id: int, env: str, host_key: str) -> bool:
+    """检查任一目标环境服务器上是否存在对应的 docker 网络。
 
-    网络命名与 `_execute_single_deploy` 保持一致：`network_{client_id}_{host_key}`。
-    只要有一台 test 服务器存在该网络，即认为预览容器可用。
+    网络命名与 `_execute_single_deploy` / `_setup_nginx_container` 保持一致：
+    - host_key 非空（test 预览）：`network_{client_id}_{host_key}`
+    - host_key 为空（prod 默认）：`network_{client_id}`
+
+    只要有一台 env 对应的服务器存在该网络，即认为容器在线。
 
     任意服务器 SSH 失败时仅记录日志并视为不存在，由上层决定是否触发重新部署。
     """
     trace_id = str(uuid.uuid4())
+    env = (env or '').strip() or 'test'
     host_key = (host_key or '').strip()
-    if not host_key:
-        return False
 
-    servers = get_client_servers(client_id=client_id, user_id=user_id, env='test')
+    servers = get_client_servers(client_id=client_id, user_id=user_id, env=env)
     if not servers:
         return False
 
-    network_name = f'network_{client_id}_{host_key}'
+    network_name = f'network_{client_id}_{host_key}' if host_key else f'network_{client_id}'
     check_cmd = (
         f'sudo docker network inspect {network_name} > /dev/null 2>&1 '
         f'&& echo "exists" || echo "missing"'
@@ -243,20 +245,20 @@ def check_test_docker_network_exists(client_id: int, user_id: int, host_key: str
                 out = ssh.execute_ignore_error(command=check_cmd)
                 if 'exists' in (out or ''):
                     logger.info(
-                        "[trace_id=%s] preview network exists: ip=%s network=%s",
-                        trace_id, ip, network_name,
+                        "[trace_id=%s] view network exists: env=%s ip=%s network=%s",
+                        trace_id, env, ip, network_name,
                     )
                     return True
         except Exception:
             logger.warning(
-                "[trace_id=%s] preview ssh check failed: ip=%s network=%s",
-                trace_id, ip, network_name, exc_info=True,
+                "[trace_id=%s] view ssh check failed: env=%s ip=%s network=%s",
+                trace_id, env, ip, network_name, exc_info=True,
             )
             continue
 
     logger.info(
-        "[trace_id=%s] preview network missing on all test servers: client_id=%s network=%s",
-        trace_id, client_id, network_name,
+        "[trace_id=%s] view network missing on all %s servers: client_id=%s network=%s",
+        trace_id, env, client_id, network_name,
     )
     return False
 
@@ -482,7 +484,8 @@ def _fill_commit_info(repos, trace_id: str, merge_request: list[dict]) -> tuple:
 
     Returns:
         (commits, repo_auth):
-        - commits: {repo_id_str: {url, branch, commit_id}} — 写入数据库 detail
+        - commits: {repo_id_str: {repo_id, url, branch, commit_id}} — 写入数据库 detail；
+          值里冗余 repo_id 便于重试 / 跨环境复用时直接按 repo_id 匹配
         - repo_auth: {repo_id_str: {token, org, repo_name}} — 仅运行时使用，不落库
     """
     from service.git_service import refresh_repo_token_by_url
@@ -528,7 +531,12 @@ def _fill_commit_info(repos, trace_id: str, merge_request: list[dict]) -> tuple:
             raise RemoteDeployError(f"仓库 {repo_name} 分支 {branch_name} 未返回有效 commit")
 
         repo_id_str = str(repo.id)
-        commits[repo_id_str] = {'url': url, 'branch': branch_name, 'commit_id': latest_commitId}
+        commits[repo_id_str] = {
+            'repo_id': repo.id,
+            'url': url,
+            'branch': branch_name,
+            'commit_id': latest_commitId,
+        }
         repo_auth[repo_id_str] = {'token': token, 'org': org, 'repo_name': repo_name}
         logger.info(
             "[trace_id=%s] Got commit: repo=%s, branch=%s, commit=%s",

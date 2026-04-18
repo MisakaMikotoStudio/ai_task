@@ -399,7 +399,7 @@
             border-color: var(--accent-primary);
         }
 
-        .btn-row-action.btn-row-preview {
+        .btn-row-action.btn-row-view {
             color: var(--accent-primary);
             border-color: var(--accent-primary);
         }
@@ -621,7 +621,7 @@
     </div>
 
     <script src="js/utils.js?v=3"></script>
-    <script src="js/api.js?v=19"></script>
+    <script src="js/api.js?v=20"></script>
     <script>
     (function() {
         const DEPLOY_STATUS_CLASS = {
@@ -782,9 +782,11 @@
             const tid = record.task_id != null ? record.task_id : 0;
             const cid = record.chat_id != null ? record.chat_id : 0;
             const mid = record.msg_id != null ? record.msg_id : 0;
-            // 专属场景：test + success + task_id=0 + chat_id=0，展示「预览」「发布生产」操作
-            const isStandaloneTestSuccess =
-                record.env === 'test' && record.status === 'success' && tid === 0 && cid === 0;
+            // 所有成功的发布记录都展示「查看」按钮（检查 docker 网络，不存在则触发重新发布）
+            const isSuccess = record.status === 'success';
+            // 仅 test + success + task_id=0 + chat_id=0 的发布记录展示「发布生产」按钮
+            const canPublishProd =
+                record.env === 'test' && isSuccess && tid === 0 && cid === 0;
 
             const actions = [];
             if (canCancel) {
@@ -793,8 +795,10 @@
             if (canRetry) {
                 actions.push(`<button class="btn-row-action btn-retry" onclick="retryRecord(${record.id})">重试</button>`);
             }
-            if (isStandaloneTestSuccess) {
-                actions.push(`<button class="btn-row-action btn-row-preview" onclick="previewRecord(${record.id})">预览</button>`);
+            if (isSuccess) {
+                actions.push(`<button class="btn-row-action btn-row-view" onclick="viewRecord(${record.id})">查看</button>`);
+            }
+            if (canPublishProd) {
                 actions.push(`<button class="btn-row-action btn-row-publish-prod" onclick="publishProdFromRecord(${record.id})">发布生产</button>`);
             }
             const actionHtml = actions.length
@@ -938,19 +942,19 @@
             }
         };
 
-        window.previewRecord = async function(recordId) {
+        window.viewRecord = async function(recordId) {
             try {
-                const res = await deployAPI.previewRecord(recordId);
+                const res = await deployAPI.viewRecord(recordId);
                 const data = (res && res.data) || {};
                 if (data.status === 'ready' && data.url) {
-                    showToast('正在打开预览', 'success');
+                    showToast('正在打开服务', 'success');
                     window.open(data.url, '_blank');
                 } else {
                     showToast(data.message || '服务正在重新发布，请稍后查看', 'info');
                     loadRecords();
                 }
             } catch (e) {
-                showToast(e.message || '预览失败', 'error');
+                showToast(e.message || '查看失败', 'error');
             }
         };
 
