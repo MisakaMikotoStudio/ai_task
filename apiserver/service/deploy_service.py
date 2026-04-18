@@ -319,8 +319,9 @@ def save_deploy_configs(client_id: int, user_id: int, deploys_data: list) -> Non
 
 
 def execute_deploy(client_id: int, user_id: int, deploy_id: int) -> str:
-    f"""
-    执行部署：SSH 连接到已配置的云服务器，将生成的 TOML 配置写入 /home/{username}/app{client_id}/config{uuid}/config.toml。
+    """
+    执行部署：SSH 连接到已配置的云服务器，将生成的 TOML 配置写入
+    /home/{username}/app{client_id}/config{uuid}/config.toml。
 
     对所有已配置的服务器（test/prod）逐一部署，使用对应环境的配置生成 TOML。
 
@@ -329,6 +330,11 @@ def execute_deploy(client_id: int, user_id: int, deploy_id: int) -> str:
 
     Raises:
         DeployConfigError: 部署失败
+
+    注意：docstring 必须是普通字符串，不能用 f""" —— 之前写成 f-string 时，
+    里面的 {username}/{client_id}/{uuid} 会在函数被调用、docstring 求值的那一刻
+    就去取局部变量，而那时 username 还没赋值，直接抛
+    "cannot access local variable 'username' where it is not associated with a value"。
     """
     from dao.client_dao import get_client_deploy_by_id, get_client_servers
 
