@@ -50,7 +50,6 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
     Raises:
         ClientSaveError: 校验失败或创建失败
     """
-    import random
     import time
     from datetime import datetime, timezone
     from dao.resource_dao import get_online_resources_by_type_source
@@ -81,19 +80,22 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
             client_name = base_name[:16 - len(suffix)] + suffix
 
     # 创建 Client
+    # 默认 Agent 使用 claude sdk（AVAILABLE_AGENTS[0]），官方云部署默认开启
     client_id = create_client(
         user_id=user_id,
         name=client_name,
         agent=AVAILABLE_AGENTS[0],
-        official_cloud_deploy=0,
+        official_cloud_deploy=1,
     )
     logger.info(
         "create_client_from_template: user_id=%s, client_id=%s, app_types=%s",
         user_id, client_id, app_types,
     )
 
-    # 创建默认仓库
-    _create_default_repos(user_id=user_id, client_id=client_id, timestamp=timestamp)
+    # 创建默认仓库，返回代码仓库 ID（用于绑定到默认 deploy 配置）
+    code_repo_id = _create_default_repos(
+        user_id=user_id, client_id=client_id, timestamp=timestamp,
+    )
 
     # 为 test、prod 两个环境分别创建数据库
     for env in VALID_ENVS:
@@ -141,88 +143,77 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
             )
             # 不阻断其他环境的创建，继续处理
 
-    # 为 test、prod 两个环境分别分配云服务器资源
-    from dao.client_dao import upsert_client_server
-    for env in VALID_ENVS:
-        cloud_server_resources = get_online_resources_by_type_source(
-            type='cloud_server', source='tencent_cloud', env=env,
-        )
-        if not cloud_server_resources:
-            logger.warning(
-                "create_client_from_template: no cloud_server resource for env=%s, user_id=%s, skipping",
-                env, user_id,
-            )
-            continue
-
-        selected = random.choice(cloud_server_resources)
-        upsert_client_server(
-            client_id=client_id, user_id=user_id, env=env, name='', password='', ip=selected.name,
-        )
-        logger.info(
-            "create_client_from_template: cloud server assigned, env=%s, resource_name=%s, resource_id=%s",
-            env, selected.name, selected.id,
-        )
-
-    # 为 web 类型应用创建默认部署配置
+    # 为 web 类型应用创建默认部署配置（apiserver + web），均绑定到业务代码仓库
     if 'web' in app_types:
-        _create_default_deploys(user_id=user_id, client_id=client_id)
+        _create_default_deploys(
+            user_id=user_id, client_id=client_id, code_repo_id=code_repo_id,
+        )
 
     return client_id
 
 
-def _create_default_deploys(user_id: int, client_id: int) -> None:
+def _create_default_deploys(user_id: int, client_id: int, code_repo_id: int = None) -> None:
     """
-    为默认应用创建两条 deploy 配置：
-    1. apiserver：gunicorn 启动命令，官方配置全选
-    2. web：nginx 启动命令，官方配置仅选"应用名"
+    为默认应用创建两条 deploy 配置（均绑定到业务代码仓库）：
+    1. apiserver：工作目录 apiserver、路由前缀 /api、启动命令为空；官方配置勾选 应用名、数据库
+    2. web：工作目录 web、路由前缀 /、启动命令为空；官方配置勾选 应用名
     """
     from dao.client_dao import add_client_deploy
     from service.deploy_service import _generate_unique_uuid
 
-    # apiserver deploy
     apiserver_uuid = _generate_unique_uuid()
-    apiserver_command = 'gunicorn --worker-class gevent --workers 4 --worker-connections 1000 --bind 0.0.0.0:8080 --timeout 60 --keep-alive 5 --access-logfile - --error-logfile - main:app'
     add_client_deploy(
         client_id=client_id, user_id=user_id, uuid=apiserver_uuid,
-        startup_command=apiserver_command,
-        official_configs=['app_name', 'domain', 'database', 'payment', 'oss'],
-        custom_config='',
+        repo_id=code_repo_id,
+        work_dir='apiserver',
         route_prefix='/api',
+        startup_command='',
+        official_configs=['app_name', 'database'],
+        custom_config='',
     )
     logger.info(
-        "_create_default_deploys: apiserver deploy created, client_id=%s, uuid=%s",
-        client_id, apiserver_uuid,
+        "_create_default_deploys: apiserver deploy created, client_id=%s, uuid=%s, repo_id=%s",
+        client_id, apiserver_uuid, code_repo_id,
     )
 
-    # web deploy
     web_uuid = _generate_unique_uuid()
-    web_command = "nginx -g 'daemon off;'"
     add_client_deploy(
         client_id=client_id, user_id=user_id, uuid=web_uuid,
-        startup_command=web_command,
+        repo_id=code_repo_id,
+        work_dir='web',
+        route_prefix='/',
+        startup_command='',
         official_configs=['app_name'],
         custom_config='',
-        route_prefix='',
     )
     logger.info(
-        "_create_default_deploys: web deploy created, client_id=%s, uuid=%s",
-        client_id, web_uuid,
+        "_create_default_deploys: web deploy created, client_id=%s, uuid=%s, repo_id=%s",
+        client_id, web_uuid, code_repo_id,
     )
 
 
-def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
+DOCS_REPO_DESCRIPTION = '保存AI开发过程中的文档，不涉及任何业务代码'
+CODE_REPO_DESCRIPTION = (
+    '业务代码仓库。如果用户prompt中没有明确说明是与哪个代码仓库有关，'
+    '那么默认指的是当前代码仓库。'
+)
+
+
+def _create_default_repos(user_id: int, client_id: int, timestamp: int):
     """
-    为默认应用创建文档仓库和代码仓库。
+    为默认应用创建文档仓库和代码仓库，并返回代码仓库的 client_repo 记录 ID。
 
     流程：
     1. 随机选择一个 code_repo 类型的资源
     2. 文档仓库（{user_id}_docs）：检查数据库是否已存在，不存在则创建
     3. 代码仓库（{user_id}_app_{timestamp}）：直接创建
     4. 绑定仓库记录到应用
+
+    Returns:
+        代码仓库的 client_repo 记录 ID；若未创建成功则返回 None
     """
     import random
     from dao.resource_dao import get_online_resources_by_type_source
-    from service.git_service import GitHubServiceError, build_repo_url
 
     # 1. 随机选择一个 code_repo 资源
     code_repo_resources = get_online_resources_by_type_source(type='code_repo', source='github')
@@ -231,7 +222,7 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
             "_create_default_repos: no code_repo resource available, user_id=%s, skipping repo creation",
             user_id,
         )
-        return
+        return None
 
     resource = random.choice(code_repo_resources)
     extra = resource.get_raw_extra()
@@ -241,22 +232,23 @@ def _create_default_repos(user_id: int, client_id: int, timestamp: int) -> None:
             "_create_default_repos: code_repo resource id=%s missing organization, user_id=%s",
             resource.id, user_id,
         )
-        return
+        return None
 
     # 2. 文档仓库: {user_id}_docs
     docs_repo_name = f"{user_id}_docs"
     _ensure_and_bind_repo(
         resource=resource, organization=organization, user_id=user_id, client_id=client_id,
-        repo_name=docs_repo_name, is_docs_repo=True, description=f"用户 {user_id} 的文档仓库",
+        repo_name=docs_repo_name, is_docs_repo=True, description=DOCS_REPO_DESCRIPTION,
     )
 
     # 3. 代码仓库: {user_id}_app_{timestamp}（从模板创建）
     code_repo_name = f"{user_id}_app_{timestamp}"
-    _ensure_and_bind_repo(
+    code_repo_id = _ensure_and_bind_repo(
         resource=resource, organization=organization, user_id=user_id, client_id=client_id,
-        repo_name=code_repo_name, is_docs_repo=False, description=f"用户 {user_id} 的代码仓库",
+        repo_name=code_repo_name, is_docs_repo=False, description=CODE_REPO_DESCRIPTION,
         template_owner='MisakaMikotoStudio', template_repo='template',
     )
+    return code_repo_id
 
 
 def _ensure_and_bind_repo(
@@ -269,9 +261,9 @@ def _ensure_and_bind_repo(
     description: str,
     template_owner: str = '',
     template_repo: str = '',
-) -> None:
+):
     """
-    确保仓库存在并绑定到应用。
+    确保仓库存在并绑定到应用，返回新建的 client_repo 记录 ID。
 
     1. 拼接仓库 URL，查询数据库是否已有记录
     2. 如果已存在：直接绑定到当前应用
@@ -293,13 +285,13 @@ def _ensure_and_bind_repo(
             "user_id=%s, client_id=%s, repo_url=%s, existing_repo_id=%s",
             user_id, client_id, repo_url, existing_repo.id,
         )
-        add_client_repo(
+        repo_record_id = add_client_repo(
             client_id=client_id, user_id=user_id, url=existing_repo.url,
-            desc=existing_repo.desc or description, token=existing_repo.token,
+            desc=description, token=existing_repo.token,
             default_branch=existing_repo.default_branch or 'main',
             branch_prefix=existing_repo.branch_prefix or 'ai_', docs_repo=is_docs_repo,
         )
-        return
+        return repo_record_id
 
     # 仓库不存在，先创建数据库记录
     repo_record_id = add_client_repo(
@@ -338,5 +330,7 @@ def _ensure_and_bind_repo(
             user_id, repo_name, repo_type_label, e.message,
         )
         # 不阻断应用创建流程，继续处理
+
+    return repo_record_id
 
 

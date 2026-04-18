@@ -9,9 +9,7 @@ const WIZARD_STEPS = [
     { id: 3, label: '云服务器', required: false },
     { id: 4, label: '域名',     required: false },
     { id: 5, label: '数据库',   required: false },
-    { id: 6, label: '支付',     required: false },
-    { id: 7, label: '对象存储', required: false },
-    { id: 8, label: '部署',     required: false },
+    { id: 6, label: '部署',     required: false },
 ];
 
 // 当前向导状态
@@ -35,14 +33,6 @@ let cfgDomainCurrentEnv = 'test';
 let cfgDatabasesByEnv = { test: [], prod: [] };
 let cfgDatabaseCurrentEnv = 'test';
 
-// 支付：按 env 存储 { test: {...}, prod: {...} }
-let cfgPaymentsByEnv = { test: {}, prod: {} };
-let cfgPaymentCurrentEnv = 'test';
-
-// 对象存储：按 env 存储 { test: {...}, prod: {...} }
-let cfgOssByEnv = { test: {}, prod: {} };
-let cfgOssCurrentEnv = 'test';
-
 // 部署配置：列表，不区分环境
 let cfgDeploysList = [];
 // 当前预览的 deploy 索引
@@ -60,10 +50,6 @@ function cfgResetClientConfigState() {
     cfgDomainCurrentEnv = 'test';
     cfgDatabasesByEnv = { test: [], prod: [] };
     cfgDatabaseCurrentEnv = 'test';
-    cfgPaymentsByEnv = { test: {}, prod: {} };
-    cfgPaymentCurrentEnv = 'test';
-    cfgOssByEnv = { test: {}, prod: {} };
-    cfgOssCurrentEnv = 'test';
     cfgDeploysList = [];
     cfgDeployPreviewIdx = null;
 }
@@ -133,10 +119,6 @@ async function openClientConfig(id, mode) {
             cfgDomainsByEnv.prod = (infra.domains && infra.domains.prod) || [];
             cfgDatabasesByEnv.test = (infra.databases && infra.databases.test) || [];
             cfgDatabasesByEnv.prod = (infra.databases && infra.databases.prod) || [];
-            cfgPaymentsByEnv.test = (infra.payments && infra.payments.test) ? { ...infra.payments.test } : {};
-            cfgPaymentsByEnv.prod = (infra.payments && infra.payments.prod) ? { ...infra.payments.prod } : {};
-            cfgOssByEnv.test = (infra.oss && infra.oss.test) ? { ...infra.oss.test } : {};
-            cfgOssByEnv.prod = (infra.oss && infra.oss.prod) ? { ...infra.oss.prod } : {};
             cfgDeploysList = (infra.deploys || []).map(d => ({ ...d }));
         } catch (error) {
             showToast(error.message, 'error');
@@ -187,9 +169,7 @@ function wizardRenderStepContent(stepIndex) {
         case 3: wizardRenderServerStep(isView); break;
         case 4: wizardRenderDomainStep(isView); break;
         case 5: wizardRenderDatabaseStep(isView); break;
-        case 6: wizardRenderPaymentStep(isView); break;
-        case 7: wizardRenderOssStep(isView); break;
-        case 8: wizardRenderDeployStep(isView); break;
+        case 6: wizardRenderDeployStep(isView); break;
     }
 }
 
@@ -205,9 +185,7 @@ function wizardSyncCurrentStepFromDOM(stepIndex) {
         case 1: wizardSyncEnvVarsFromDOM(); break;
         case 3: wizardSyncServerFromDOM(); break;
         case 4: wizardSyncDomainsFromDOM(); break;
-        case 6: wizardSyncPaymentFromDOM(); break;
-        case 7: wizardSyncOssFromDOM(); break;
-        case 8: wizardSyncDeploysFromDOM(); break;
+        case 6: wizardSyncDeploysFromDOM(); break;
     }
 }
 
@@ -266,8 +244,6 @@ async function wizardSaveAll() {
         servers: cfgServersByEnv,
         domains: cfgDomainsByEnv,
         databases: cfgDatabasesByEnv,
-        payments: cfgPaymentsByEnv,
-        oss: cfgOssByEnv,
         deploys: deploys,
     };
 
@@ -512,6 +488,18 @@ function wizardRenderServerStep(isView) {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgServerCurrentEnv));
     // 禁用/启用表单
     document.querySelectorAll('#server-form-container input').forEach(el => { el.disabled = isView; });
+    // 密码显隐切换按钮
+    const pwdInput = document.getElementById('cfg-server-password');
+    const pwdToggle = document.getElementById('cfg-server-password-toggle');
+    if (pwdInput && pwdToggle) {
+        pwdInput.type = 'password';
+        pwdToggle.textContent = '\u{1F441}\u{FE0F}';
+        pwdToggle.onclick = () => {
+            const showing = pwdInput.type === 'text';
+            pwdInput.type = showing ? 'password' : 'text';
+            pwdToggle.textContent = showing ? '\u{1F441}\u{FE0F}' : '\u{1F648}';
+        };
+    }
     wizardFillServerForm();
 }
 
@@ -648,7 +636,10 @@ function wizardRenderDatabaseList() {
                 </div>
                 <div class="form-group">
                     <label>密码</label>
-                    <input type="password" class="db-password" value="${escapeHtml(db.password || '')}" placeholder="数据库密码" ${disAttr}>
+                    <div class="password-input-wrap">
+                        <input type="password" class="db-password" value="${escapeHtml(db.password || '')}" placeholder="数据库密码" ${disAttr}>
+                        <button type="button" class="password-toggle-btn db-password-toggle" title="显示/隐藏密码" tabindex="-1">&#128065;&#65039;</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>数据库名称</label>
@@ -669,6 +660,16 @@ function wizardRenderDatabaseList() {
             if (e.target.classList.contains('db-password')) db.password = e.target.value;
             if (e.target.classList.contains('db-name')) db.db_name = e.target.value;
         });
+        // 密码显隐切换
+        const toggleBtn = card.querySelector('.db-password-toggle');
+        const pwdInput = card.querySelector('.db-password');
+        if (toggleBtn && pwdInput) {
+            toggleBtn.addEventListener('click', () => {
+                const showing = pwdInput.type === 'text';
+                pwdInput.type = showing ? 'password' : 'text';
+                toggleBtn.innerHTML = showing ? '&#128065;&#65039;' : '&#128584;';
+            });
+        }
     });
 }
 
@@ -678,102 +679,12 @@ function cfgDeleteDatabase(idx) {
 }
 
 
-// ---- Step 6: 支付 ----
-
-function wizardRenderPaymentStep(isView) {
-    const tabs = document.querySelectorAll('#payment-env-tabs .wizard-env-tab');
-    tabs.forEach(tab => {
-        tab.onclick = () => {
-            wizardSyncPaymentFromDOM();
-            cfgPaymentCurrentEnv = tab.dataset.env;
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            wizardFillPaymentForm();
-        };
-    });
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgPaymentCurrentEnv));
-    document.querySelectorAll('#payment-form-container input, #payment-form-container textarea, #payment-form-container select').forEach(el => {
-        el.disabled = isView;
-    });
-    wizardFillPaymentForm();
-}
-
-function wizardFillPaymentForm() {
-    const cfg = cfgPaymentsByEnv[cfgPaymentCurrentEnv] || {};
-    document.getElementById('cfg-payment-type').value = cfg.payment_type || 'alipay';
-    document.getElementById('cfg-payment-appid').value = cfg.appid || '';
-    document.getElementById('cfg-payment-notify-url').value = cfg.notify_url || '';
-    document.getElementById('cfg-payment-return-url').value = cfg.return_url || '';
-    document.getElementById('cfg-payment-gateway').value = cfg.gateway || '';
-    document.getElementById('cfg-payment-app-encrypt-key').value = cfg.app_encrypt_key || '';
-    document.getElementById('cfg-payment-app-private-key').value = cfg.app_private_key || '';
-    document.getElementById('cfg-payment-alipay-public-key').value = cfg.alipay_public_key || '';
-}
-
-function wizardSyncPaymentFromDOM() {
-    cfgPaymentsByEnv[cfgPaymentCurrentEnv] = {
-        payment_type: document.getElementById('cfg-payment-type').value,
-        appid: document.getElementById('cfg-payment-appid').value.trim(),
-        notify_url: document.getElementById('cfg-payment-notify-url').value.trim(),
-        return_url: document.getElementById('cfg-payment-return-url').value.trim(),
-        gateway: document.getElementById('cfg-payment-gateway').value.trim(),
-        app_encrypt_key: document.getElementById('cfg-payment-app-encrypt-key').value.trim(),
-        app_private_key: document.getElementById('cfg-payment-app-private-key').value.trim(),
-        alipay_public_key: document.getElementById('cfg-payment-alipay-public-key').value.trim(),
-    };
-}
-
-
-// ---- Step 7: 对象存储 ----
-
-function wizardRenderOssStep(isView) {
-    const tabs = document.querySelectorAll('#oss-env-tabs .wizard-env-tab');
-    tabs.forEach(tab => {
-        tab.onclick = () => {
-            wizardSyncOssFromDOM();
-            cfgOssCurrentEnv = tab.dataset.env;
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            wizardFillOssForm();
-        };
-    });
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.env === cfgOssCurrentEnv));
-    document.querySelectorAll('#oss-form-container input, #oss-form-container select').forEach(el => {
-        el.disabled = isView;
-    });
-    wizardFillOssForm();
-}
-
-function wizardFillOssForm() {
-    const cfg = cfgOssByEnv[cfgOssCurrentEnv] || {};
-    document.getElementById('cfg-oss-type').value = cfg.oss_type || 'cos';
-    document.getElementById('cfg-oss-secret-id').value = cfg.secret_id || '';
-    document.getElementById('cfg-oss-secret-key').value = cfg.secret_key || '';
-    document.getElementById('cfg-oss-region').value = cfg.region || '';
-    document.getElementById('cfg-oss-bucket').value = cfg.bucket || '';
-    document.getElementById('cfg-oss-base-url').value = cfg.base_url || '';
-}
-
-function wizardSyncOssFromDOM() {
-    cfgOssByEnv[cfgOssCurrentEnv] = {
-        oss_type: document.getElementById('cfg-oss-type').value,
-        secret_id: document.getElementById('cfg-oss-secret-id').value.trim(),
-        secret_key: document.getElementById('cfg-oss-secret-key').value.trim(),
-        region: document.getElementById('cfg-oss-region').value.trim(),
-        bucket: document.getElementById('cfg-oss-bucket').value.trim(),
-        base_url: document.getElementById('cfg-oss-base-url').value.trim(),
-    };
-}
-
-
-// ---- Step 8: 部署 ----
+// ---- Step 6: 部署 ----
 
 const DEPLOY_OFFICIAL_OPTIONS = [
     { key: 'app_name', label: '应用名' },
     { key: 'domain', label: '域名' },
     { key: 'database', label: '数据库' },
-    { key: 'payment', label: '支付' },
-    { key: 'oss', label: '对象存储' },
 ];
 
 function wizardRenderDeployStep(isView) {

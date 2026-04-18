@@ -618,88 +618,6 @@ class ClientDatabase(Base):
         }
 
 
-class ClientPayment(Base):
-    """客户端支付配置表"""
-    __tablename__ = 'ai_task_client_payments'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False, comment='用户ID')
-    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
-    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
-    payment_type = Column(String(32), nullable=False, default='alipay', comment='支付类型：alipay')
-    appid = Column(String(64), nullable=True, comment='支付宝应用ID')
-    app_private_key = Column(Text, nullable=True, comment='应用RSA2私钥')
-    alipay_public_key = Column(Text, nullable=True, comment='支付宝公钥')
-    notify_url = Column(String(512), nullable=True, comment='异步通知回调URL')
-    return_url = Column(String(512), nullable=True, comment='支付完成后同步跳转URL')
-    gateway = Column(String(256), nullable=True, comment='支付宝网关')
-    app_encrypt_key = Column(String(256), nullable=True, comment='接口内容AES加密密钥')
-    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
-    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
-    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
-
-    __table_args__ = (
-        Index('idx_client_payments_client_env', 'client_id', 'env'),
-        Index('idx_client_payments_user_id', 'user_id'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'client_id': self.client_id,
-            'env': self.env,
-            'payment_type': self.payment_type or 'alipay',
-            'appid': self.appid or '',
-            'app_private_key': self.app_private_key or '',
-            'alipay_public_key': self.alipay_public_key or '',
-            'notify_url': self.notify_url or '',
-            'return_url': self.return_url or '',
-            'gateway': self.gateway or '',
-            'app_encrypt_key': self.app_encrypt_key or '',
-            'created_at': to_iso_utc(self.created_at),
-            'updated_at': to_iso_utc(self.updated_at)
-        }
-
-
-class ClientOss(Base):
-    """客户端对象存储配置表"""
-    __tablename__ = 'ai_task_client_oss'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False, comment='用户ID')
-    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
-    env = Column(String(16), nullable=False, comment='环境标识：test/prod')
-    oss_type = Column(String(32), nullable=False, default='cos', comment='存储类型：cos（腾讯云）')
-    secret_id = Column(String(256), nullable=True, comment='SecretId')
-    secret_key = Column(String(256), nullable=True, comment='SecretKey')
-    region = Column(String(64), nullable=True, comment='地域')
-    bucket = Column(String(128), nullable=True, comment='Bucket名称')
-    base_url = Column(String(512), nullable=True, comment='公开访问域名前缀')
-    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
-    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
-    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
-
-    __table_args__ = (
-        Index('idx_client_oss_client_env', 'client_id', 'env'),
-        Index('idx_client_oss_user_id', 'user_id'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'client_id': self.client_id,
-            'env': self.env,
-            'oss_type': self.oss_type or 'cos',
-            'secret_id': self.secret_id or '',
-            'secret_key': self.secret_key or '',
-            'region': self.region or '',
-            'bucket': self.bucket or '',
-            'base_url': self.base_url or '',
-            'created_at': to_iso_utc(self.created_at),
-            'updated_at': to_iso_utc(self.updated_at)
-        }
-
-
 class ClientDeploy(Base):
     """客户端部署配置表（不区分环境）"""
     __tablename__ = 'ai_task_client_deploys'
@@ -712,13 +630,13 @@ class ClientDeploy(Base):
     work_dir = Column(String(512), nullable=True, default='', comment='工作目录路径，启动命令在此目录下运行')
     route_prefix = Column(String(128), nullable=False, default='', comment='生产 nginx 路径前缀；空或/表示根；如/api 将 /api/… 反代并去掉前缀后转发到容器:8080')
     startup_command = Column(Text, nullable=False, default='', comment='启动命令')
-    official_configs = Column(JSON, nullable=False, comment='官方配置选项列表，如 ["app_name","domain","database","payment","oss"]')
+    official_configs = Column(JSON, nullable=False, comment='官方配置选项列表，如 ["app_name","domain","database"]')
     custom_config = Column(Text, nullable=True, comment='用户自定义 TOML 配置')
     deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
     created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
     updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
 
-    VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database', 'payment', 'oss']
+    VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database']
 
     __table_args__ = (
         Index('idx_client_deploys_client', 'client_id'),

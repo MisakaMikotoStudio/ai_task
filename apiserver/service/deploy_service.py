@@ -11,15 +11,13 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # 官方配置可选项
-VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database', 'payment', 'oss']
+VALID_OFFICIAL_CONFIGS = ['app_name', 'domain', 'database']
 
 # 官方配置选项的中文标签（前端展示用）
 OFFICIAL_CONFIG_LABELS = {
     'app_name': '应用名',
     'domain': '域名',
     'database': '数据库',
-    'payment': '支付',
-    'oss': '对象存储',
 }
 
 
@@ -156,7 +154,7 @@ def generate_official_toml(client_id: int, user_id: int, official_configs: list,
     Returns:
         包含官方配置的字典
     """
-    from dao.client_dao import get_client_by_id, get_client_domains, get_client_databases, get_client_oss, get_client_payment
+    from dao.client_dao import get_client_by_id, get_client_domains, get_client_databases
 
     result = {}
 
@@ -183,34 +181,6 @@ def generate_official_toml(client_id: int, user_id: int, official_configs: list,
                 'username': db.username or '',
                 'password': db.password or '',
                 'database': db.db_name or '',
-            }
-
-    if 'payment' in official_configs:
-        payments = get_client_payment(client_id=client_id, user_id=user_id)
-        env_payments = [p for p in payments if p.env == env]
-        if env_payments:
-            pay = env_payments[0]
-            result['alipay'] = {
-                'app_id': pay.appid or '',
-                'app_private_key': pay.app_private_key or '',
-                'alipay_public_key': pay.alipay_public_key or '',
-                'notify_url': pay.notify_url or '',
-                'return_url': pay.return_url or '',
-                'gateway': pay.gateway or '',
-                'app_encrypt_key': pay.app_encrypt_key or '',
-            }
-
-    if 'oss' in official_configs:
-        oss_list = get_client_oss(client_id=client_id, user_id=user_id)
-        env_oss = [o for o in oss_list if o.env == env]
-        if env_oss:
-            oss = env_oss[0]
-            result['oss'] = {
-                'secret_id': oss.secret_id or '',
-                'secret_key': oss.secret_key or '',
-                'region': oss.region or '',
-                'bucket': oss.bucket or '',
-                'base_url': oss.base_url or '',
             }
 
     return result

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-客户端基础设施配置服务 —— 云服务器、域名、数据库、支付、对象存储的 CRUD
+客户端基础设施配置服务 —— 云服务器、域名、数据库的 CRUD
 """
 
 import logging
@@ -99,7 +99,7 @@ def check_servers_ssh(servers_data: dict) -> Tuple[bool, str]:
 
 def save_client_infrastructure(client_id: int, user_id: int, infra_type: str, data: dict) -> None:
     """
-    保存指定类型的基础设施配置（支持 servers/domains/databases/payments/oss）。
+    保存指定类型的基础设施配置（支持 servers/domains/databases）。
 
     Raises:
         InfraConfigError: 参数校验失败
@@ -107,8 +107,6 @@ def save_client_infrastructure(client_id: int, user_id: int, infra_type: str, da
     from dao.client_dao import (
         upsert_client_server, delete_client_server_by_env,
         sync_client_domains, sync_client_databases,
-        upsert_client_payment, delete_client_payment_by_env,
-        upsert_client_oss, delete_client_oss_by_env,
     )
 
     for env_key in VALID_ENVS:
@@ -155,45 +153,6 @@ def save_client_infrastructure(client_id: int, user_id: int, infra_type: str, da
                     raise InfraConfigError(f'{env_key} 数据库 #{idx + 1} 地址不能为空')
             sync_client_databases(client_id=client_id, user_id=user_id, env=env_key, databases=env_data)
 
-        elif infra_type == 'payments':
-            if env_data is None:
-                continue
-            if not isinstance(env_data, dict):
-                raise InfraConfigError(f'{env_key} 支付配置格式无效')
-            payment_type = (env_data.get('payment_type') or 'alipay').strip()
-            if payment_type not in ('alipay',):
-                raise InfraConfigError(f'不支持的支付类型：{payment_type}')
-            has_content = any(
-                (env_data.get(f) or '').strip()
-                for f in ('appid', 'app_private_key', 'alipay_public_key', 'notify_url', 'return_url', 'gateway')
-            )
-            if has_content:
-                upsert_client_payment(
-                    client_id=client_id, user_id=user_id, env=env_key,
-                    payment_type=payment_type, fields=env_data,
-                )
-            else:
-                delete_client_payment_by_env(client_id=client_id, user_id=user_id, env=env_key)
-
-        elif infra_type == 'oss':
-            if env_data is None:
-                continue
-            if not isinstance(env_data, dict):
-                raise InfraConfigError(f'{env_key} 对象存储配置格式无效')
-            oss_type = (env_data.get('oss_type') or 'cos').strip()
-            if oss_type not in ('cos',):
-                raise InfraConfigError(f'不支持的对象存储类型：{oss_type}')
-            has_content = any(
-                (env_data.get(f) or '').strip() for f in ('secret_id', 'secret_key', 'region', 'bucket')
-            )
-            if has_content:
-                upsert_client_oss(
-                    client_id=client_id, user_id=user_id, env=env_key,
-                    oss_type=oss_type, fields=env_data,
-                )
-            else:
-                delete_client_oss_by_env(client_id=client_id, user_id=user_id, env=env_key)
-
         else:
             raise InfraConfigError(f'未知配置类型：{infra_type}')
 
@@ -203,11 +162,11 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
     获取客户端全量基础设施配置。
 
     Returns:
-        {"servers": {...}, "domains": {...}, "databases": {...}, "payments": {...}, "oss": {...}}
+        {"servers": {...}, "domains": {...}, "databases": {...}, "deploys": [...]}
     """
     from dao.client_dao import (
         get_client_servers, get_client_domains,
-        get_client_databases, get_client_payment, get_client_oss,
+        get_client_databases,
     )
 
     servers_result: dict = {}
@@ -222,14 +181,6 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
     for db in get_client_databases(client_id=client_id, user_id=user_id):
         databases_result.setdefault(db.env, []).append(db.to_dict())
 
-    payments_result: dict = {}
-    for pay in get_client_payment(client_id=client_id, user_id=user_id):
-        payments_result[pay.env] = pay.to_dict()
-
-    oss_result: dict = {}
-    for oss in get_client_oss(client_id=client_id, user_id=user_id):
-        oss_result[oss.env] = oss.to_dict()
-
     from dao.client_dao import get_client_deploys
     deploys_result = [d.to_dict() for d in get_client_deploys(client_id=client_id, user_id=user_id)]
 
@@ -237,15 +188,13 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
         'servers': servers_result,
         'domains': domains_result,
         'databases': databases_result,
-        'payments': payments_result,
-        'oss': oss_result,
         'deploys': deploys_result,
     }
 
 
 def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
     """
-    一次性保存全量基础设施配置（云服务器、域名、数据库、支付、对象存储）。
+    一次性保存全量基础设施配置（云服务器、域名、数据库）。
 
     Raises:
         InfraConfigError: 参数校验或 SSH 校验失败
@@ -253,8 +202,6 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
     servers_data = data.get('servers') or {}
     domains_data = data.get('domains') or {}
     databases_data = data.get('databases') or {}
-    payments_data = data.get('payments') or {}
-    oss_data = data.get('oss') or {}
     deploys_data = data.get('deploys')
 
     # SSH 连通性校验（仅在有服务器 ip 时）
@@ -270,10 +217,6 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='domains', data=domains_data)
     if databases_data:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='databases', data=databases_data)
-    if payments_data:
-        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='payments', data=payments_data)
-    if oss_data:
-        save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='oss', data=oss_data)
 
     # 保存部署配置（deploys 是列表，不区分环境）
     if deploys_data is not None and isinstance(deploys_data, list):

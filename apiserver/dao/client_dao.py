@@ -13,7 +13,7 @@ from sqlalchemy import or_
 from .connection import get_db_session
 from .models import (
     Client, ClientRepo, ClientEnvVar, User,
-    ClientServer, ClientDomain, ClientDatabase, ClientPayment, ClientOss, ClientDeploy,
+    ClientServer, ClientDomain, ClientDatabase, ClientDeploy,
 )
 
 logger = logging.getLogger(__name__)
@@ -792,130 +792,6 @@ def sync_client_databases(
                 password=db.get('password', ''),
                 db_name=db.get('db_name', ''),
             ))
-
-
-def get_client_payment(client_id: int, user_id: int) -> List[ClientPayment]:
-    """获取客户端支付配置（所有环境）"""
-    with get_db_session() as session:
-        return session.query(ClientPayment).filter(
-            ClientPayment.client_id == client_id,
-            ClientPayment.user_id == user_id,
-            ClientPayment.deleted_at.is_(None),
-        ).order_by(ClientPayment.env.asc()).all()
-
-
-def upsert_client_payment(
-    client_id: int,
-    user_id: int,
-    env: str,
-    payment_type: str,
-    fields: Dict[str, Any],
-) -> None:
-    """新增或更新指定环境的支付配置"""
-    now = datetime.now(timezone.utc)
-    with get_db_session() as session:
-        existing = session.query(ClientPayment).filter(
-            ClientPayment.client_id == client_id,
-            ClientPayment.user_id == user_id,
-            ClientPayment.env == env,
-            ClientPayment.deleted_at.is_(None),
-        ).first()
-        if existing:
-            existing.payment_type = payment_type
-            existing.appid = fields.get('appid', '')
-            existing.app_private_key = fields.get('app_private_key', '')
-            existing.alipay_public_key = fields.get('alipay_public_key', '')
-            existing.notify_url = fields.get('notify_url', '')
-            existing.return_url = fields.get('return_url', '')
-            existing.gateway = fields.get('gateway', '')
-            existing.app_encrypt_key = fields.get('app_encrypt_key', '')
-            existing.updated_at = now
-        else:
-            session.add(ClientPayment(
-                client_id=client_id,
-                user_id=user_id,
-                env=env,
-                payment_type=payment_type,
-                appid=fields.get('appid', ''),
-                app_private_key=fields.get('app_private_key', ''),
-                alipay_public_key=fields.get('alipay_public_key', ''),
-                notify_url=fields.get('notify_url', ''),
-                return_url=fields.get('return_url', ''),
-                gateway=fields.get('gateway', ''),
-                app_encrypt_key=fields.get('app_encrypt_key', ''),
-            ))
-
-
-def delete_client_payment_by_env(client_id: int, user_id: int, env: str) -> None:
-    """软删除指定环境的支付配置"""
-    now = datetime.now(timezone.utc)
-    with get_db_session() as session:
-        session.query(ClientPayment).filter(
-            ClientPayment.client_id == client_id,
-            ClientPayment.user_id == user_id,
-            ClientPayment.env == env,
-            ClientPayment.deleted_at.is_(None),
-        ).update({ClientPayment.deleted_at: now}, synchronize_session=False)
-
-
-def get_client_oss(client_id: int, user_id: int) -> List[ClientOss]:
-    """获取客户端对象存储配置（所有环境）"""
-    with get_db_session() as session:
-        return session.query(ClientOss).filter(
-            ClientOss.client_id == client_id,
-            ClientOss.user_id == user_id,
-            ClientOss.deleted_at.is_(None),
-        ).order_by(ClientOss.env.asc()).all()
-
-
-def upsert_client_oss(
-    client_id: int,
-    user_id: int,
-    env: str,
-    oss_type: str,
-    fields: Dict[str, Any],
-) -> None:
-    """新增或更新指定环境的对象存储配置"""
-    now = datetime.now(timezone.utc)
-    with get_db_session() as session:
-        existing = session.query(ClientOss).filter(
-            ClientOss.client_id == client_id,
-            ClientOss.user_id == user_id,
-            ClientOss.env == env,
-            ClientOss.deleted_at.is_(None),
-        ).first()
-        if existing:
-            existing.oss_type = oss_type
-            existing.secret_id = fields.get('secret_id', '')
-            existing.secret_key = fields.get('secret_key', '')
-            existing.region = fields.get('region', '')
-            existing.bucket = fields.get('bucket', '')
-            existing.base_url = fields.get('base_url', '')
-            existing.updated_at = now
-        else:
-            session.add(ClientOss(
-                client_id=client_id,
-                user_id=user_id,
-                env=env,
-                oss_type=oss_type,
-                secret_id=fields.get('secret_id', ''),
-                secret_key=fields.get('secret_key', ''),
-                region=fields.get('region', ''),
-                bucket=fields.get('bucket', ''),
-                base_url=fields.get('base_url', ''),
-            ))
-
-
-def delete_client_oss_by_env(client_id: int, user_id: int, env: str) -> None:
-    """软删除指定环境的对象存储配置"""
-    now = datetime.now(timezone.utc)
-    with get_db_session() as session:
-        session.query(ClientOss).filter(
-            ClientOss.client_id == client_id,
-            ClientOss.user_id == user_id,
-            ClientOss.env == env,
-            ClientOss.deleted_at.is_(None),
-        ).update({ClientOss.deleted_at: now}, synchronize_session=False)
 
 
 def add_client_database(
