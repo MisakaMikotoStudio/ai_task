@@ -59,6 +59,38 @@ def _try_create_deploy_records_client_msg_index(engine) -> None:
         logger.debug('Index %s skipped: %s', index_name, str(e)[:120])
 
 
+def _try_create_deploy_records_user_client_created_index(engine) -> None:
+    """补建 (user_id, client_id, created_at) 索引；已存在或不可创建时忽略。
+
+    列表页默认按 (user_id, client_id) 过滤 + ORDER BY created_at DESC 分页，
+    该索引让 MySQL 直接走索引顺序扫，消除 filesort 的放大效应。
+    """
+    table = 'ai_task_deploy_records'
+    index_name = 'idx_deploy_records_user_client_created'
+    insp = inspect(engine)
+    if table not in insp.get_table_names():
+        return
+    existing_idx = {ix.get('name') for ix in insp.get_indexes(table)}
+    if index_name in existing_idx:
+        return
+    cols = {c['name'] for c in insp.get_columns(table)}
+    required = {'user_id', 'client_id', 'created_at'}
+    if not required.issubset(cols):
+        return
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    f'CREATE INDEX `{index_name}` ON `{table}` '
+                    f'(`user_id`, `client_id`, `created_at`)'
+                )
+            )
+            conn.commit()
+        logger.info('Migration applied: index %s on %s', index_name, table)
+    except Exception as e:
+        logger.debug('Index %s skipped: %s', index_name, str(e)[:120])
+
+
 def _try_create_deploy_records_task_chat_msg_env_unique(engine) -> None:
     """
     补建 (task_id, chat_id, msg_id, env) 唯一索引。
@@ -172,6 +204,8 @@ def _run_migrations(engine):
 
     # 索引：仅在 msg_id 列存在且索引尚未创建时尝试（失败仅打 debug）
     _try_create_deploy_records_client_msg_index(engine)
+    # 列表页分页排序索引：(user_id, client_id, created_at)
+    _try_create_deploy_records_user_client_created_index(engine)
     # 唯一索引：保证 (task_id, chat_id, msg_id, env) 唯一，支撑 after_execute 自动发布的 upsert
     _try_create_deploy_records_task_chat_msg_env_unique(engine)
 

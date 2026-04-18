@@ -7,6 +7,8 @@
 import logging
 from typing import List, Optional, Tuple
 
+from sqlalchemy import func
+
 from .connection import get_db_session
 from .models import Client, DeployRecord
 
@@ -58,23 +60,32 @@ def get_deploy_records_by_user(user_id: int, client_id: int = None, status: str 
 def _query_deploy_records(user_id: int, client_id: int = None, status: str = None, env: str = None, msg_id: int = None, page: int = 1, page_size: int = 20) -> dict:
     """发布记录通用查询：强制按 user_id 过滤，LEFT JOIN ai_task_clients 带出应用名称。"""
     with get_db_session() as session:
-        query = session.query(DeployRecord, Client.name).outerjoin(
-            Client, Client.id == DeployRecord.client_id,
-        ).filter(
+        # 公共过滤条件（count 与列表共用，避免 count 时也走 LEFT JOIN 子查询）
+        filters = [
             DeployRecord.user_id == user_id,
             DeployRecord.deleted_at.is_(None),
-        )
+        ]
         if client_id is not None:
-            query = query.filter(DeployRecord.client_id == client_id)
+            filters.append(DeployRecord.client_id == client_id)
         if status:
-            query = query.filter(DeployRecord.status == status)
+            filters.append(DeployRecord.status == status)
         if env:
-            query = query.filter(DeployRecord.env == env)
+            filters.append(DeployRecord.env == env)
         if msg_id is not None:
-            query = query.filter(DeployRecord.msg_id == msg_id)
-        total = query.count()
+            filters.append(DeployRecord.msg_id == msg_id)
+
+        # 独立的 COUNT：只命中 ai_task_deploy_records 本表，避免 SQLAlchemy 在
+        # 带 outerjoin 的 ORM 查询上生成 `SELECT count(*) FROM (... LEFT JOIN ...)` 这种
+        # 多余的子查询 + JOIN，count 性能更接近最优。
+        total = session.query(func.count(DeployRecord.id)).filter(*filters).scalar() or 0
+
         offset = (page - 1) * page_size
-        rows = query.order_by(DeployRecord.created_at.desc()).offset(offset).limit(page_size).all()
+        rows = session.query(DeployRecord, Client.name).outerjoin(
+            Client, Client.id == DeployRecord.client_id,
+        ).filter(*filters).order_by(
+            DeployRecord.created_at.desc(),
+        ).offset(offset).limit(page_size).all()
+
         records = []
         for record, client_name in rows:
             record_dict = record.to_dict()
