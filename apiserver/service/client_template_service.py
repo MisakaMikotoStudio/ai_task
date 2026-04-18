@@ -110,6 +110,11 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
         user_id=user_id, client_id=client_id, timestamp=timestamp, repo_ctx=repo_ctx,
     )
 
+    # 默认特殊账号：admin + 随机 16 位密码。
+    # 必须在 _create_default_deploys 之前执行，让 apiserver 的 special_accounts
+    # 勾选项在首次部署时就有数据可下发（不然生成的 TOML 里没有 [auth.special_accounts]）
+    _create_default_special_accounts(user_id=user_id, client_id=client_id)
+
     # 为 web 类型应用创建默认部署配置（apiserver + web），均绑定到业务代码仓库
     if 'web' in app_types:
         _create_default_deploys(
@@ -117,6 +122,42 @@ def create_client_from_template(user_id: int, app_types: list, app_name: str = '
         )
 
     return client_id
+
+
+def _create_default_special_accounts(user_id: int, client_id: int) -> None:
+    """为新建应用初始化默认特殊账号 admin（随机 16 位密码）。
+
+    幂等：若库里已有同名未删除账号则跳过，避免重复创建打乱用户已改过的密码。
+    """
+    from dao.client_dao import (
+        get_client_special_accounts,
+        sync_client_special_accounts,
+    )
+
+    existing = get_client_special_accounts(client_id=client_id, user_id=user_id)
+    if any((acc.name or '').lower() == 'admin' for acc in existing):
+        return
+
+    password = generate_special_account_password()
+    # 保留已存在的其它账号；sync 会全量替换，所以要带上
+    keep = [{'name': acc.name, 'password': acc.password or ''} for acc in existing]
+    keep.append({'name': 'admin', 'password': password})
+    sync_client_special_accounts(client_id=client_id, user_id=user_id, accounts=keep)
+    logger.info(
+        "_create_default_special_accounts: admin created, client_id=%s, user_id=%s",
+        client_id, user_id,
+    )
+
+
+def generate_special_account_password(length: int = 16) -> str:
+    """生成固定长度的随机密码（字母+数字）。
+
+    默认 16 位。只用字母数字，避免拼到 TOML 字符串里还要担心转义。
+    """
+    import secrets
+    import string
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
 def _run_create_tasks_parallel(user_id: int, client_id: int, timestamp: int, repo_ctx):
@@ -240,7 +281,8 @@ def _create_default_deploys(user_id: int, client_id: int, code_repo_id: int = No
         work_dir='apiserver',
         route_prefix='/api',
         startup_command='',
-        official_configs=['app_name', 'database'],
+        # apiserver 默认把特殊账号也下发，对应 template 的 [[auth.special_accounts]]
+        official_configs=['app_name', 'database', 'special_accounts'],
         custom_config='',
     )
     logger.info(

@@ -162,11 +162,12 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
     获取客户端全量基础设施配置。
 
     Returns:
-        {"servers": {...}, "domains": {...}, "databases": {...}, "deploys": [...]}
+        {"servers": {...}, "domains": {...}, "databases": {...},
+         "special_accounts": [...], "deploys": [...]}
     """
     from dao.client_dao import (
         get_client_servers, get_client_domains,
-        get_client_databases,
+        get_client_databases, get_client_special_accounts,
     )
 
     servers_result: dict = {}
@@ -181,6 +182,10 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
     for db in get_client_databases(client_id=client_id, user_id=user_id):
         databases_result.setdefault(db.env, []).append(db.to_dict())
 
+    special_accounts_result = [
+        acc.to_dict() for acc in get_client_special_accounts(client_id=client_id, user_id=user_id)
+    ]
+
     from dao.client_dao import get_client_deploys
     deploys_result = [d.to_dict() for d in get_client_deploys(client_id=client_id, user_id=user_id)]
 
@@ -188,13 +193,47 @@ def get_client_infrastructure(client_id: int, user_id: int) -> dict:
         'servers': servers_result,
         'domains': domains_result,
         'databases': databases_result,
+        'special_accounts': special_accounts_result,
         'deploys': deploys_result,
     }
 
 
+def save_client_special_accounts(client_id: int, user_id: int, data: list) -> None:
+    """保存特殊账号列表（全量同步）。
+
+    入参为 [{'name': str, 'password': str}, ...]，name 必填且 client 内唯一，
+    password 允许为空字符串但一般应非空（前端新建默认会给 16 位随机密码）。
+    """
+    from dao.client_dao import sync_client_special_accounts
+
+    if not isinstance(data, list):
+        raise InfraConfigError('特殊账号配置必须是数组')
+    seen = set()
+    normalized = []
+    for idx, acc in enumerate(data):
+        if not isinstance(acc, dict):
+            raise InfraConfigError(f'特殊账号 #{idx + 1} 格式无效')
+        name = (acc.get('name') or '').strip()
+        password = acc.get('password')
+        if password is None:
+            password = ''
+        password = str(password)
+        if not name:
+            raise InfraConfigError(f'特殊账号 #{idx + 1} 账号名不能为空')
+        if len(name) > 64:
+            raise InfraConfigError(f'特殊账号 #{idx + 1} 账号名长度不能超过 64 个字符')
+        if name in seen:
+            raise InfraConfigError(f'特殊账号名称重复：{name}')
+        seen.add(name)
+        normalized.append({'name': name, 'password': password})
+    sync_client_special_accounts(
+        client_id=client_id, user_id=user_id, accounts=normalized,
+    )
+
+
 def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
     """
-    一次性保存全量基础设施配置（云服务器、域名、数据库）。
+    一次性保存全量基础设施配置（云服务器、域名、数据库、特殊账号）。
 
     Raises:
         InfraConfigError: 参数校验或 SSH 校验失败
@@ -202,6 +241,7 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
     servers_data = data.get('servers') or {}
     domains_data = data.get('domains') or {}
     databases_data = data.get('databases') or {}
+    special_accounts_data = data.get('special_accounts')
     deploys_data = data.get('deploys')
 
     # SSH 连通性校验（仅在有服务器 ip 时）
@@ -217,6 +257,10 @@ def save_all_infrastructure(client_id: int, user_id: int, data: dict) -> None:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='domains', data=domains_data)
     if databases_data:
         save_client_infrastructure(client_id=client_id, user_id=user_id, infra_type='databases', data=databases_data)
+    if special_accounts_data is not None:
+        save_client_special_accounts(
+            client_id=client_id, user_id=user_id, data=special_accounts_data,
+        )
 
     # 保存部署配置（deploys 是列表，不区分环境）
     if deploys_data is not None and isinstance(deploys_data, list):

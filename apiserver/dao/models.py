@@ -660,6 +660,40 @@ class ClientDeploy(Base):
         }
 
 
+class ClientSpecialAccount(Base):
+    """客户端特殊账号（内置/保留账号）表
+
+    与云服务器/域名/数据库同级的一种基础设施配置，用于生成 apiserver
+    的 special_accounts 段。password 以明文保存；下发到目标应用后，
+    由目标应用启动时 SHA-256 哈希再落库，避免这里再做一次 hash。
+    """
+    __tablename__ = 'ai_task_client_special_accounts'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    client_id = Column(Integer, nullable=False, comment='关联客户端ID')
+    name = Column(String(64), nullable=False, default='', comment='账号名（admin 等）')
+    password = Column(String(256), nullable=False, default='', comment='账号密码（明文，前端可切换显隐）')
+    deleted_at = Column(DateTime, nullable=True, comment='删除时间，不为空表示已删除')
+    created_at = Column(DateTime, server_default=func.utc_timestamp(), comment='创建时间')
+    updated_at = Column(DateTime, server_default=func.utc_timestamp(), onupdate=func.utc_timestamp(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_client_special_accounts_client', 'client_id'),
+        Index('idx_client_special_accounts_user', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'client_id': self.client_id,
+            'name': self.name or '',
+            'password': self.password or '',
+            'created_at': to_iso_utc(self.created_at),
+            'updated_at': to_iso_utc(self.updated_at),
+        }
+
+
 class PermissionConfig(Base):
     """权限配置表"""
     __tablename__ = 'ai_task_permission_configs'

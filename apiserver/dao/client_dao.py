@@ -14,6 +14,7 @@ from .connection import get_db_session
 from .models import (
     Client, ClientRepo, ClientEnvVar, User,
     ClientServer, ClientDomain, ClientDatabase, ClientDeploy,
+    ClientSpecialAccount,
 )
 
 logger = logging.getLogger(__name__)
@@ -962,6 +963,51 @@ def soft_delete_client_deploys(client_id: int, user_id: int, exclude_ids: List[i
         if exclude_ids:
             query = query.filter(ClientDeploy.id.notin_(exclude_ids))
         query.update({ClientDeploy.deleted_at: now}, synchronize_session=False)
+
+
+# ============================================================
+# 特殊账号 DAO
+# ============================================================
+
+def get_client_special_accounts(client_id: int, user_id: int) -> List[ClientSpecialAccount]:
+    """获取客户端未软删除的特殊账号列表（按 id 升序）。"""
+    with get_db_session() as session:
+        return session.query(ClientSpecialAccount).filter(
+            ClientSpecialAccount.client_id == client_id,
+            ClientSpecialAccount.user_id == user_id,
+            ClientSpecialAccount.deleted_at.is_(None),
+        ).order_by(ClientSpecialAccount.id.asc()).all()
+
+
+def sync_client_special_accounts(
+    client_id: int, user_id: int, accounts: List[Dict[str, Any]],
+) -> None:
+    """全量同步特殊账号：全部软删除后重新插入。
+
+    - 输入 accounts 为 [{'name': str, 'password': str}, ...]
+    - name 为空的条目会被跳过（由上层校验，但这里兜底一次）
+    - 密码保持明文写库
+    """
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        session.query(ClientSpecialAccount).filter(
+            ClientSpecialAccount.client_id == client_id,
+            ClientSpecialAccount.user_id == user_id,
+            ClientSpecialAccount.deleted_at.is_(None),
+        ).update({ClientSpecialAccount.deleted_at: now}, synchronize_session=False)
+        for acc in accounts or []:
+            name = (acc.get('name') or '').strip()
+            password = acc.get('password')
+            if password is None:
+                password = ''
+            if not name:
+                continue
+            session.add(ClientSpecialAccount(
+                client_id=client_id,
+                user_id=user_id,
+                name=name,
+                password=str(password),
+            ))
 
 
 def check_client_usable_for_user(client_id: int, user_id: int) -> bool:
