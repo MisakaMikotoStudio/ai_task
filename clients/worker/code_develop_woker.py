@@ -243,6 +243,7 @@ class CodeDevelopWorker(BaseWorker):
                 trace_id=self.trace_id,
             )
             merge_requests.append({
+                "repo_id": git_repo.repo_id,
                 "repo_name": git_repo.name,
                 "branch_name": actual_branch,
                 "latest_commitId": diff_result.commit_id,

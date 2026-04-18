@@ -80,6 +80,34 @@ _server_git_config_done: "set[str]" = set()            # ip
 _server_certbot_ready: "set[str]" = set()              # ip
 _server_host_include_done: "set[tuple[str, int]]" = set()  # (ip, client_id)
 
+# ──────────────────────────────────────────────────────
+# certbot 首签时的 DNS/重试时间预算
+# 目标：失败路径上新增的等待时间合计 <= 5 分钟
+#   - 首次 certbot 前 DNS 探测:  _DNS_POLL_INITIAL_TIMEOUT_S        = 90s
+#   - 每次 certbot 重试前再探测:  _DNS_POLL_RETRY_TIMEOUT_S × (N-1) = 45 × 2 = 90s
+#   - certbot 自身 N 次尝试，失败态约 20~30s 一次              ≈ 60s
+#   合计 ≲ 240s
+# ──────────────────────────────────────────────────────
+_CERTBOT_MAX_ATTEMPTS = 3
+_DNS_POLL_INITIAL_TIMEOUT_S = 90
+_DNS_POLL_RETRY_TIMEOUT_S = 45
+_DNS_POLL_STEP_S = 3
+_CERTBOT_SINGLE_RUN_TIMEOUT_S = 120
+
+# 视为"DNS 尚未就绪"的 certbot 瞬态错误关键字（出现其一才会重试）
+_CERTBOT_TRANSIENT_DNS_PATTERNS = (
+    'NXDOMAIN',
+    'DNS problem',
+    'secondary validation',
+    'no valid A records',
+    'no valid AAAA records',
+    'could not resolve host',
+)
+
+# DNSPod 公共权威 NS。polling 时同时查权威 + 公共递归，规避负缓存与同步延迟。
+_DNSPOD_AUTH_NS = 'ns1.dnsv5.com'
+_PUBLIC_DNS_RESOLVER = '8.8.8.8'
+
 
 class RemoteDeployError(Exception):
     """远程部署执行失败"""
@@ -121,27 +149,50 @@ def process_pending_deploys_prod(client_id: int):
 
 
 def process_pending_deploys_test(client_id: int):
-    """处理指定应用 test 环境的待发布记录（按 chat_id 分组）。"""
+    """
+    处理指定应用 test 环境的待发布记录（按 msg_id 分组，不取消旧记录）。
+
+    与 prod 流程不同：
+    - 同一 msg_id 下存在 publishing 记录 → 跳过（避免并发）
+    - 每个 msg_id 独立部署；旧的 pending 记录保持原状（不做 cancel）
+    - merge_request 通过 msg.extra 中的 merge_request 字段获取
+    """
     records = get_pending_deploy_records(client_id=client_id, env='test')
     if not records:
         return
 
-    chat_records: dict[int, list] = {}
+    msg_records: dict[int, list] = {}
     for record in records:
-        chat_records.setdefault(record.chat_id, []).append(record)
+        msg_records.setdefault(record.msg_id or 0, []).append(record)
 
-    for chat_id, chat_deploy_records in chat_records.items():
+    for msg_id, grp in msg_records.items():
         trace_id = str(uuid.uuid4())
-        scope_desc = f'client_id={client_id}, chat_id={chat_id}'
+        scope_desc = f'client_id={client_id}, msg_id={msg_id}'
 
-        if any(r.status == DeployRecord.STATUS_PUBLISHING for r in chat_deploy_records):
+        if any(r.status == DeployRecord.STATUS_PUBLISHING for r in grp):
             logger.info("[trace_id=%s] %s has publishing record, skip", trace_id, scope_desc)
             continue
 
-        publish_record, merge_request = _pick_latest_and_cancel_older(
-            records=chat_deploy_records, trace_id=trace_id, scope_desc=scope_desc,
-        )
-        if not publish_record:
+        pending = [r for r in grp if r.status == DeployRecord.STATUS_PENDING]
+        if not pending:
+            continue
+        # 同一 msg_id 下理论上只会有一条 pending（因为唯一约束 (task, chat, msg, env)），
+        # 仍保留 sort 作为防御：取 created_at 最新的一条。
+        pending.sort(key=lambda r: r.created_at, reverse=True)
+        publish_record = pending[0]
+
+        if msg_id and msg_id > 0:
+            msgs = batch_get_msg_by_msgids(user_id=publish_record.user_id, msg_ids=[msg_id])
+            merge_request = (msgs[0].extra or {}).get('merge_request') if msgs else None
+        else:
+            merge_request = None
+        if not merge_request:
+            merge_request = (publish_record.detail or {}).get('merge_request') or None
+        if not merge_request:
+            logger.warning(
+                "[trace_id=%s] %s no merge_request resolvable, skip",
+                trace_id, scope_desc,
+            )
             continue
 
         host_key = (
@@ -438,13 +489,16 @@ def _fill_commit_info(repos, trace_id: str, merge_request: list[dict]) -> tuple:
 
     commits = {}
     repo_auth = {}
-    repo_info = {}
-    if merge_request:
-        for mr in merge_request:
-            repo_info[mr['repo_name']] = {
-                'branch_name': mr['branch_name'],
-                'latest_commitId': mr['latest_commitId'],
-            }
+    # client 侧 after_execute 与服务端 _build_merge_request_for_client 都会在 merge_request
+    # 中写入 repo_id，这里优先按 repo_id 精确匹配（repo_name 兜底用于历史数据）。
+    mr_by_repo_id: dict[int, dict] = {}
+    mr_by_repo_name: dict[str, dict] = {}
+    for mr in (merge_request or []):
+        rid = mr.get('repo_id')
+        if rid:
+            mr_by_repo_id[int(rid)] = mr
+        if mr.get('repo_name'):
+            mr_by_repo_name[mr['repo_name']] = mr
 
     for repo in repos:
         url = repo.url
@@ -459,10 +513,10 @@ def _fill_commit_info(repos, trace_id: str, merge_request: list[dict]) -> tuple:
         except Exception as e:
             raise RemoteDeployError(f"刷新仓库 {repo_name} token 失败：{e}")
 
-        # 获取默认分支最新 commit
-        if repo_name in repo_info:
-            branch_name = repo_info[repo_name]['branch_name']
-            latest_commitId = repo_info[repo_name]['latest_commitId']
+        mr_hit = mr_by_repo_id.get(repo.id) or mr_by_repo_name.get(repo_name)
+        if mr_hit:
+            branch_name = mr_hit['branch_name']
+            latest_commitId = mr_hit['latest_commitId']
         else:
             branch_name = repo.default_branch or 'main'
             latest_commitId = get_branch_latest_commit(
@@ -867,21 +921,99 @@ def _render_inner_nginx_conf(route_specs: list) -> str:
     return ''.join(parts)
 
 
-def _ensure_dns_for_server_names(ssh, server_names: str, trace_id: str) -> None:
+def _wait_remote_dns_ready(
+    ssh, fqdns: list, expected_ip: str, trace_id: str, timeout_s: int,
+) -> bool:
+    """在远端服务器上通过 `dig` 轮询 FQDN，直到权威 NS + 公共递归都返回 expected_ip。
+
+    - 同时查询 DNSPod 权威 NS（绕过递归缓存）与公共递归（近似 Let's Encrypt 视角）；
+      两者都命中才算就绪，规避"权威已更新但 LE 的递归还缓存 NXDOMAIN"的场景。
+    - 任一 FQDN 超时仅返回 False，不抛异常——让上层决定是否仍尝试 certbot。
+    - `dig` 由 server_env_init.sh 预装（dnsutils/bind-utils），进入本函数时应可直接使用；
+      兜底检测到缺失时记 warning 后降级为「不轮询」，让 certbot 按原流程尝试。
+
+    Returns:
+        True 当且仅当所有 fqdn 在超时前均被双路解析为 expected_ip。
+    """
+    fqdns = [f for f in (fqdns or []) if f]
+    expected_ip = (expected_ip or '').strip()
+    if not fqdns or not expected_ip or timeout_s <= 0:
+        return False
+
+    has_dig = (ssh.execute_ignore_error(
+        command='command -v dig >/dev/null 2>&1 && echo yes || echo no',
+    ) or '').strip()
+    if 'yes' not in has_dig:
+        logger.warning(
+            "[trace_id=%s] dig unavailable on %s (server_env_init.sh should have installed it), "
+            "skip DNS readiness polling",
+            trace_id, ssh.ip,
+        )
+        return False
+
+    all_ok = True
+    for fqdn in fqdns:
+        # 每个 FQDN 单独给完整预算，避免前一个慢的吃光后一个；超时后返回 'timeout'。
+        # `exec_timeout` 给 ssh.execute 留 15s 缓冲防止 recv_exit_status 悬挂。
+        script = (
+            f'end=$(( $(date +%s) + {int(timeout_s)} )); '
+            f'while [ $(date +%s) -lt $end ]; do '
+            f'  auth=$(dig @{_DNSPOD_AUTH_NS} +time=2 +tries=1 +short A {fqdn} 2>/dev/null | head -n 1); '
+            f'  pub=$(dig @{_PUBLIC_DNS_RESOLVER} +time=2 +tries=1 +short A {fqdn} 2>/dev/null | head -n 1); '
+            f'  if [ "$auth" = "{expected_ip}" ] && [ "$pub" = "{expected_ip}" ]; then '
+            f'    echo "ok auth=$auth pub=$pub"; exit 0; '
+            f'  fi; '
+            f'  sleep {_DNS_POLL_STEP_S}; '
+            f'done; '
+            f'last_auth=$(dig @{_DNSPOD_AUTH_NS} +time=2 +tries=1 +short A {fqdn} 2>/dev/null | head -n 1); '
+            f'last_pub=$(dig @{_PUBLIC_DNS_RESOLVER} +time=2 +tries=1 +short A {fqdn} 2>/dev/null | head -n 1); '
+            f'echo "timeout auth=$last_auth pub=$last_pub"'
+        )
+        try:
+            out = ssh.execute(command=script, timeout=timeout_s + 15)
+        except Exception as e:
+            logger.warning(
+                "[trace_id=%s] dns poll exec error fqdn=%s err=%s",
+                trace_id, fqdn, str(e)[:200],
+            )
+            all_ok = False
+            continue
+
+        first_token = (out or '').strip().split('\n')[-1]
+        if first_token.startswith('ok'):
+            logger.info(
+                "[trace_id=%s] dns poll ready: fqdn=%s expected=%s detail=%s",
+                trace_id, fqdn, expected_ip, first_token,
+            )
+        else:
+            logger.warning(
+                "[trace_id=%s] dns poll timeout: fqdn=%s expected=%s detail=%s",
+                trace_id, fqdn, expected_ip, first_token,
+            )
+            all_ok = False
+
+    return all_ok
+
+
+def _ensure_dns_for_server_names(ssh, server_names: str, trace_id: str) -> bool:
     """在 certbot 签证书前，自动把 server_names 中每个 FQDN 的 A 记录写入 DNSPod。
 
     - 未配置凭据/managed_zones 或未命中 managed_zones 时：静默跳过（保留原有 prod 流程：域名由客户自管）
     - 任意一个 FQDN 命中 managed_zones 但 API 调用失败：抛 RemoteDeployError，让整条部署标为失败
       （否则 certbot 紧接着就会因 DNS 未就绪而失败，错误原因反而被埋得更深）
     - 变更后的传播等待在 ensure_a_records_for_fqdns 内部统一 sleep 一次
+
+    Returns:
+        True 当且仅当本次调用实际 created/modified 了记录——调用方应据此决定
+        是否需要在 certbot 前等 DNS 传播、并在瞬态失败时重试。
     """
     dns_config = _get_tencent_dns_config()
     if not is_tencent_dns_configured(config=dns_config):
-        return
+        return False
 
     fqdns = [d for d in (server_names or '').split() if d]
     if not fqdns:
-        return
+        return False
 
     target_ip = (ssh.ip or '').strip()
     if not target_ip:
@@ -900,6 +1032,9 @@ def _ensure_dns_for_server_names(ssh, server_names: str, trace_id: str) -> None:
             '[trace_id=%s] tencent_dns: all fqdns unmanaged, rely on user-managed DNS: %s',
             trace_id, fqdns,
         )
+        return False
+
+    return any(v in ('created', 'modified') for v in (results or {}).values())
 
 
 def _ensure_certbot_ready(ssh, trace_id: str) -> None:
@@ -991,8 +1126,30 @@ def _resolve_cert_lineage_name(ssh, primary_domain: str) -> str:
     return wildcard
 
 
-def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
-    """确保 server_names 对应证书可用，返回证书 lineage 名称。"""
+def _is_transient_dns_error(err_msg: str) -> bool:
+    """certbot 输出里是否包含典型"DNS 尚未就绪"瞬态信号（区分大小写宽松）。"""
+    if not err_msg:
+        return False
+    low = err_msg.lower()
+    return any(p.lower() in low for p in _CERTBOT_TRANSIENT_DNS_PATTERNS)
+
+
+def _ensure_domain_certificate(
+    ssh, server_names: str, trace_id: str, dns_just_changed: bool = False,
+) -> str:
+    """确保 server_names 对应证书可用，返回证书 lineage 名称。
+
+    Args:
+        dns_just_changed: 本次部署期间刚刚 created/modified 过 DNS 记录时设为 True；
+            此时首次 certbot 前会主动探测 DNS 传播（最多 _DNS_POLL_INITIAL_TIMEOUT_S 秒），
+            且瞬态 DNS 错误时会重试并再次探测。
+
+    重试策略（为避免 Let's Encrypt 达到账号速率上限，整个重试窗口控制在 ~5 分钟内）：
+        - 最多 _CERTBOT_MAX_ATTEMPTS 次尝试（= 1 次 + _CERTBOT_MAX_ATTEMPTS-1 次重试）
+        - 每次重试前重新探测 DNS，超时上限 _DNS_POLL_RETRY_TIMEOUT_S
+        - 仅当错误消息匹配 _CERTBOT_TRANSIENT_DNS_PATTERNS 时重试，
+          其他错误（80 端口不通、webroot 权限、账号被 ban 等）立即抛出
+    """
     primary = server_names.split()[0]
     cert_lineage = _resolve_cert_lineage_name(ssh=ssh, primary_domain=primary)
     if cert_lineage:
@@ -1001,19 +1158,52 @@ def _ensure_domain_certificate(ssh, server_names: str, trace_id: str) -> str:
     cert_base = f'/etc/letsencrypt/live/{primary}'
     crt = f'{cert_base}/fullchain.pem'
 
-    domain_flags = ' '.join(f'-d {d}' for d in server_names.split() if d)
+    fqdns = [d for d in server_names.split() if d]
+    domain_flags = ' '.join(f'-d {d}' for d in fqdns)
     if not domain_flags:
         raise RemoteDeployError('证书签发失败：server_name 为空')
 
-    # 使用 webroot 模式，依赖 80 端口可达与 DNS 正确。
-    ssh.execute(
-        command=(
-            f'sudo certbot certonly --webroot -w /var/www/certbot '
-            f'--register-unsafely-without-email --agree-tos -n '
-            f'--cert-name {primary} {domain_flags}'
-        ),
-        timeout=180,
+    target_ip = (ssh.ip or '').strip()
+
+    # 首次 certbot 前：DNS 刚被改动过 → 主动等它传播到权威 NS + 公共递归
+    if dns_just_changed and target_ip:
+        _wait_remote_dns_ready(
+            ssh=ssh, fqdns=fqdns, expected_ip=target_ip,
+            trace_id=trace_id, timeout_s=_DNS_POLL_INITIAL_TIMEOUT_S,
+        )
+
+    certbot_cmd = (
+        f'sudo certbot certonly --webroot -w /var/www/certbot '
+        f'--register-unsafely-without-email --agree-tos -n '
+        f'--cert-name {primary} {domain_flags}'
     )
+
+    last_err: "Exception | None" = None
+    for attempt in range(1, _CERTBOT_MAX_ATTEMPTS + 1):
+        try:
+            ssh.execute(command=certbot_cmd, timeout=_CERTBOT_SINGLE_RUN_TIMEOUT_S)
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            err_msg = str(e)
+            if attempt >= _CERTBOT_MAX_ATTEMPTS or not _is_transient_dns_error(err_msg=err_msg):
+                # 终局失败或非瞬态错误 → 直接抛，保留原始上下文
+                raise
+            logger.warning(
+                "[trace_id=%s] certbot transient DNS failure (attempt %s/%s), "
+                "will re-poll DNS and retry: %s",
+                trace_id, attempt, _CERTBOT_MAX_ATTEMPTS, err_msg[:400],
+            )
+            if target_ip:
+                _wait_remote_dns_ready(
+                    ssh=ssh, fqdns=fqdns, expected_ip=target_ip,
+                    trace_id=trace_id, timeout_s=_DNS_POLL_RETRY_TIMEOUT_S,
+                )
+
+    # 兜底：理论上成功或已 raise；保留该分支以防未来改动破坏循环不变式
+    if last_err is not None:
+        raise last_err
 
     cert_lineage_after = _resolve_cert_lineage_name(ssh=ssh, primary_domain=primary)
     if not cert_lineage_after:
@@ -1149,7 +1339,8 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
     # certbot HTTP-01 依赖公网 DNS 能解析到本台服务器。test 预览子域名是动态生成的，
     # 必须在签证书前把 A 记录写入 DNSPod，否则会触发 NXDOMAIN 导致 challenge 失败。
     # 未配置或未命中 managed_zones 时自动跳过，保持向后兼容。
-    _ensure_dns_for_server_names(
+    # 返回值 True 表示本次确实 created/modified 了记录，后续签证书需要等传播。
+    dns_just_changed = _ensure_dns_for_server_names(
         ssh=ssh, server_names=server_names, trace_id=trace_id,
     )
 
@@ -1176,7 +1367,10 @@ def _setup_nginx_container(ssh, username: str, client_id: int, route_specs: list
             ssh=ssh, username=username, client_id=client_id, trace_id=trace_id,
         )
         _reload_host_nginx(ssh=ssh, trace_id=trace_id)
-        primary_for_cert = _ensure_domain_certificate(ssh=ssh, server_names=server_names, trace_id=trace_id)
+        primary_for_cert = _ensure_domain_certificate(
+            ssh=ssh, server_names=server_names, trace_id=trace_id,
+            dns_just_changed=dns_just_changed,
+        )
 
     inner_conf_dir = f'{base_dir}/nginx/container/{inner_segment}'
     inner_conf_path = f'{inner_conf_dir}/default.conf'

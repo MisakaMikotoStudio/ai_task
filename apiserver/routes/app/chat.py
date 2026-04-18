@@ -112,6 +112,7 @@ def create_standalone_chat_and_message_api():
         user_id=request.user_info.user_id,
         task_id=0,
         chat_id=chat.id,
+        client_id=int(client_id),
         input_text=input_text,
         extra=extra,
     )
@@ -186,7 +187,8 @@ def delete_chat_api(task_id, chat_id):
 @chat_bp.route('/task/<int:task_id>/messages', methods=['POST'])
 def create_chat_and_message_api(task_id):
     """自动创建Chat并发送消息（Chat标题取输入内容前32字符）"""
-    if not get_task_by_id(task_id=task_id, user_id=request.user_info.user_id):
+    task = get_task_by_id(task_id=task_id, user_id=request.user_info.user_id)
+    if not task:
         return jsonify({'code': 400, 'message': '任务不存在'}), 400
 
     data = request.get_json()
@@ -213,6 +215,7 @@ def create_chat_and_message_api(task_id):
         user_id=request.user_info.user_id,
         task_id=task_id,
         chat_id=chat.id,
+        client_id=task.client_id,
         input_text=input_text,
         extra=extra,
     )
@@ -255,10 +258,17 @@ def create_message_api(task_id, chat_id):
     if dup_names:
         return jsonify({'code': 400, 'message': f'图片文件名重复: {", ".join(dup_names)}'}), 400
 
+    if task_id > 0:
+        task = get_task_by_id(task_id=task_id, user_id=request.user_info.user_id)
+        client_id = task.client_id if task else 0
+    else:
+        client_id = chat.client_id or 0
+
     msg = create_chat_message(
         user_id=request.user_info.user_id,
         task_id=task_id,
         chat_id=chat.id,
+        client_id=client_id,
         input_text=input_text,
         extra=extra,
     )

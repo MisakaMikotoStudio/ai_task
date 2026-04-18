@@ -915,6 +915,8 @@ class ChatMessage(Base):
     user_id = Column(Integer, nullable=False, comment='所属用户ID')
     task_id = Column(Integer, nullable=False, comment='关联任务ID')
     chat_id = Column(Integer, nullable=False, comment='关联Chat ID')
+    # task_id/chat_id>0 时冗余；task_id=0 && chat_id=0（如「发布生产」独立消息）时必填，用于归属应用
+    client_id = Column(Integer, nullable=False, default=0, server_default='0', comment='关联客户端ID')
     status = Column(String(64), nullable=False, default='pending', comment='执行状态')
     input = Column(Text, nullable=True, comment='用户输入')
     output = Column(Text, nullable=True, comment='Agent输出')
@@ -925,6 +927,7 @@ class ChatMessage(Base):
 
     __table_args__ = (
         Index('idx_chat_message_user_id', 'user_id', 'task_id', 'chat_id'),
+        Index('idx_chat_message_user_client', 'user_id', 'client_id'),
     )
 
     STATUS_PENDING = 'pending'
@@ -944,6 +947,7 @@ class ChatMessage(Base):
             'id': self.id,
             'task_id': self.task_id,
             'chat_id': self.chat_id,
+            'client_id': self.client_id or 0,
             'status': self.status,
             'status_text': self.STATUS_TEXT.get(self.status, self.status),
             'input': self.input or '',

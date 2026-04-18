@@ -106,13 +106,16 @@ update_pkg_index() {
 }
 
 # ---- 安装依赖工具 ----
-# 说明：jq 用于安全地合并 /etc/docker/daemon.json，避免覆盖用户已有配置
+# 说明：
+#   - jq             合并 /etc/docker/daemon.json，避免覆盖用户既有配置
+#   - dnsutils/bind-utils（提供 dig）：部署侧在签 Let's Encrypt 证书前会主动
+#     轮询权威 NS + 公共递归验证 DNS 传播，避免 certbot 因 NXDOMAIN 失败
 install_prerequisites() {
     log_info "安装基础依赖..."
     case "$PKG_MANAGER" in
-        apt) apt_get install -y ca-certificates curl gnupg lsb-release jq ;;
-        yum) $SUDO yum install -y ca-certificates curl yum-utils jq ;;
-        dnf) $SUDO dnf install -y ca-certificates curl dnf-plugins-core jq ;;
+        apt) apt_get install -y ca-certificates curl gnupg lsb-release jq dnsutils ;;
+        yum) $SUDO yum install -y ca-certificates curl yum-utils jq bind-utils ;;
+        dnf) $SUDO dnf install -y ca-certificates curl dnf-plugins-core jq bind-utils ;;
     esac
     log_ok "基础依赖安装完成"
 }
