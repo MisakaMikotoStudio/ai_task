@@ -432,7 +432,8 @@ def _execute_deploy(record: DeployRecord, trace_id: str, host_key: str, merge_re
             # 3.3 目录文件检查（只同步被 deploys 引用的仓库）
             _setup_directories(
                 ssh=ssh, username=username, client_id=record.client_id,
-                repos=required_repos, repo_auth=repo_auth, trace_id=trace_id,
+                repos=required_repos, repo_auth=repo_auth, commits=commits,
+                trace_id=trace_id,
             )
 
             # 3.4 遍历部署命令
@@ -566,9 +567,12 @@ def _token_provider(url: str, repo_name: str, trace_id: str) -> str:
     return _refresh_repo_token(repo_url=url, repo_name=repo_name, trace_id=trace_id)
 
 
-def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dict, trace_id: str):
+def _setup_directories(
+    ssh, username: str, client_id: int, repos, repo_auth: dict,
+    commits: dict, trace_id: str,
+):
     """
-    检查远程服务器目录结构并下载缺失的仓库。
+    检查远程服务器目录结构并保证每个仓库的目标 commit 在本地可用。
 
     目录结构：
     /home/{username}/app{client_id}/
@@ -577,6 +581,10 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
     │   └── {repo2}/
     └── repo_tmp/      # 部署临时文件
     └── nginx/         # nginx 配置文件
+
+    优化要点：`commits` 中给出的目标 commit 若在本地 `repo/{repo_name}` 已经存在，
+    则 fetch_or_reclone 内部直接走缓存命中分支，零远端请求；这是跨境链路下最关键的
+    "不必要网络调用消除"。
     """
     base_dir = f'/home/{username}/app{client_id}'
     repo_dir = f'{base_dir}/repo'
@@ -615,6 +623,7 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
         url = repo.url
         branch = repo.default_branch or 'main'
         auth_url = build_auth_url(url=url, token=token)
+        target_commit = (commits.get(repo_id_str) or {}).get('commit_id') or ''
 
         target_path = f'{repo_dir}/{repo_name}'
 
@@ -632,7 +641,8 @@ def _setup_directories(ssh, username: str, client_id: int, repos, repo_auth: dic
             else:
                 fetch_or_reclone(
                     ssh=ssh, target_path=target_path, repo_dir=repo_dir,
-                    repo_name=repo_name, branch=branch, auth_url=auth_url, trace_id=trace_id,
+                    repo_name=repo_name, branch=branch, auth_url=auth_url,
+                    trace_id=trace_id, commit_id=target_commit,
                 )
         except GitRemoteError as e:
             if not is_git_auth_error(e.message):

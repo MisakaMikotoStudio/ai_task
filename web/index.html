@@ -1479,9 +1479,7 @@
                             <div class="wizard-sidebar-tab" data-step="3">云服务器</div>
                             <div class="wizard-sidebar-tab" data-step="4">域名</div>
                             <div class="wizard-sidebar-tab" data-step="5">数据库</div>
-                            <div class="wizard-sidebar-tab" data-step="6">支付</div>
-                            <div class="wizard-sidebar-tab" data-step="7">对象存储</div>
-                            <div class="wizard-sidebar-tab" data-step="8">部署</div>
+                            <div class="wizard-sidebar-tab" data-step="6">部署</div>
                         </div>
 
                     <!-- 右侧步骤内容 -->
@@ -1570,7 +1568,10 @@
                                         </div>
                                         <div class="form-group">
                                             <label>登录密码</label>
-                                            <input type="password" id="cfg-server-password" placeholder="SSH 登录密码">
+                                            <div class="password-input-wrap">
+                                                <input type="password" id="cfg-server-password" placeholder="SSH 登录密码">
+                                                <button type="button" class="password-toggle-btn" id="cfg-server-password-toggle" title="显示/隐藏密码" tabindex="-1">&#128065;&#65039;</button>
+                                            </div>
                                         </div>
                                         <div class="form-group">
                                             <label>服务器 IP</label>
@@ -1621,108 +1622,8 @@
                             </div>
                         </div>
 
-                        <!-- Step 6: 支付 -->
+                        <!-- Step 6: 部署 -->
                         <div id="wizard-step-6" class="wizard-step-panel">
-                            <div class="config-section">
-                                <div class="config-section-toolbar">
-                                    <div class="config-section-intro">
-                                        <div class="config-section-title">支付</div>
-                                        <div class="config-section-subtitle">可跳过；选择环境后配置。目前支持支付宝。</div>
-                                    </div>
-                                </div>
-                                <div class="wizard-env-tabs" id="payment-env-tabs">
-                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
-                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
-                                </div>
-                                <div id="payment-form-container">
-                                    <div class="form-group" style="margin-bottom:12px;">
-                                        <label>支付类型</label>
-                                        <select id="cfg-payment-type" class="status-select">
-                                            <option value="alipay">支付宝</option>
-                                        </select>
-                                    </div>
-                                    <div class="infra-form-grid">
-                                        <div class="form-group">
-                                            <label>AppID</label>
-                                            <input type="text" id="cfg-payment-appid" placeholder="支付宝应用 AppID">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>notify_url</label>
-                                            <input type="text" id="cfg-payment-notify-url" placeholder="异步通知回调 URL">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>return_url</label>
-                                            <input type="text" id="cfg-payment-return-url" placeholder="支付完成同步跳转 URL">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>gateway</label>
-                                            <input type="text" id="cfg-payment-gateway" placeholder="支付宝网关">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>app_encrypt_key</label>
-                                            <input type="text" id="cfg-payment-app-encrypt-key" placeholder="AES 加密密钥（可选）">
-                                        </div>
-                                    </div>
-                                    <div class="form-group" style="margin-top:8px;">
-                                        <label>app_private_key（应用 RSA2 私钥）</label>
-                                        <textarea id="cfg-payment-app-private-key" rows="4" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
-                                    </div>
-                                    <div class="form-group" style="margin-top:8px;">
-                                        <label>alipay_public_key（支付宝公钥）</label>
-                                        <textarea id="cfg-payment-alipay-public-key" rows="4" placeholder="支付宝公钥内容"></textarea>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Step 7: 对象存储 -->
-                        <div id="wizard-step-7" class="wizard-step-panel">
-                            <div class="config-section">
-                                <div class="config-section-toolbar">
-                                    <div class="config-section-intro">
-                                        <div class="config-section-title">对象存储</div>
-                                        <div class="config-section-subtitle">可跳过；选择环境后配置。目前支持腾讯云 COS。</div>
-                                    </div>
-                                </div>
-                                <div class="wizard-env-tabs" id="oss-env-tabs">
-                                    <button class="wizard-env-tab active" data-env="test">测试环境 test</button>
-                                    <button class="wizard-env-tab" data-env="prod">生产环境 prod</button>
-                                </div>
-                                <div id="oss-form-container">
-                                    <div class="form-group" style="margin-bottom:12px;">
-                                        <label>存储类型</label>
-                                        <select id="cfg-oss-type" class="status-select">
-                                            <option value="cos">腾讯云 COS</option>
-                                        </select>
-                                    </div>
-                                    <div class="infra-form-grid">
-                                        <div class="form-group">
-                                            <label>SecretId</label>
-                                            <input type="text" id="cfg-oss-secret-id" placeholder="腾讯云 SecretId">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>SecretKey</label>
-                                            <input type="password" id="cfg-oss-secret-key" placeholder="腾讯云 SecretKey">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Region</label>
-                                            <input type="text" id="cfg-oss-region" placeholder="如 ap-guangzhou">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Bucket</label>
-                                            <input type="text" id="cfg-oss-bucket" placeholder="如 myapp-1234567890">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>base_url（公开访问域名前缀）</label>
-                                            <input type="text" id="cfg-oss-base-url" placeholder="如 https://xxx.cos.ap-guangzhou.myqcloud.com">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Step 8: 部署 -->
-                        <div id="wizard-step-8" class="wizard-step-panel">
                             <div class="config-section">
                                 <div class="config-section-toolbar">
                                     <div class="config-section-intro">
