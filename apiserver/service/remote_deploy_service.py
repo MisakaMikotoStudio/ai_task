@@ -716,10 +716,12 @@ def _execute_single_deploy(
 
     # 前置 docker image inspect：镜像已存在时直接跳过 cp / checkout / Dockerfile 检查 / build，
     # 对「images already exist」场景可省掉 GB 级 IO 与一次远端认证交互
+    # 注意：echo 标记需保证互不为子串，曾用 "exists"/"not_exists" 导致
+    # `'exists' in 'not_exists'` 误判为 True，镜像不存在时仍跳过 build。
     img_check = ssh.execute_ignore_error(
-        command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "not_exists"',
+        command=f'sudo docker image inspect {image_full} > /dev/null 2>&1 && echo "exists" || echo "missing"',
     )
-    image_exists = 'exists' in img_check
+    image_exists = 'exists' in img_check and 'missing' not in img_check
 
     if not image_exists:
         repo_share_key = (repo_name, commit_id)
